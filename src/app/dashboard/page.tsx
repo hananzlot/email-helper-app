@@ -1206,8 +1206,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount 
   // Queue action: perform Gmail action and remove from queue view
   async function queueAction(action: string, messageId: string, queueId: string, accountEmail: string) {
     onAction(action, [messageId], undefined, accountEmail);
-    // Remove from queue display after trash/delete/archive
-    if (['trash', 'delete', 'archive'].includes(action)) {
+    // Remove from queue display and mark as done
+    if (['trash', 'delete', 'archive', 'markRead'].includes(action)) {
       setQueue(prev => prev.filter(q => q.id !== queueId));
       updateStatus(queueId, 'done');
     }
