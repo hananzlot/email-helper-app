@@ -63,17 +63,16 @@ export async function exchangeCodeForTokens(code: string, redirectUri?: string) 
 export async function signInOrCreateUser(email: string, name: string) {
   const admin = createSupabaseAdmin();
 
-  // Check if user exists
-  const { data: existingUsers } = await admin.auth.admin.listUsers();
-  const existingUser = existingUsers?.users?.find((u: { email?: string }) => u.email === email);
+  // Look up user by email directly — listUsers() paginates and can miss users
+  const { data: lookupData, error: lookupError } = await admin.auth.admin.getUserByEmail(email);
 
-  if (existingUser) {
-    // Generate a magic link token for this user (to set their session)
+  if (lookupData?.user) {
+    // User exists — generate a magic link token for session
     const { data, error } = await admin.auth.admin.generateLink({
       type: 'magiclink',
       email,
     });
-    return { user: existingUser, isNew: false, token: data };
+    return { user: lookupData.user, isNew: false, token: data };
   } else {
     // Create a new user
     const { data, error } = await admin.auth.admin.createUser({
