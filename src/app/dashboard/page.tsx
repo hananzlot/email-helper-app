@@ -1168,8 +1168,9 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount 
     if (res.success) {
       setQueue(res.data);
       const items = res.data || [];
-      const activeCount = items.filter((q: any) => q.status === 'active').length;
-      reportCount?.(activeCount);
+      // Only count active signal items (exclude low priority — those go to Cleanup)
+      const activeSignalCount = items.filter((q: any) => q.status === 'active' && q.priority !== 'low').length;
+      reportCount?.(activeSignalCount);
     }
     setLoading(false);
   }
