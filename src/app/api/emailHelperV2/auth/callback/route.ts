@@ -79,15 +79,21 @@ export async function GET(request: NextRequest) {
           .eq('email', gmailProfile.email);
       }
 
-      // Generate session token — redirect with it so the frontend can set the session
-      const { data: linkData } = await admin.auth.admin.generateLink({
-        type: 'magiclink',
-        email: userInfo.email,
-      });
+      // Generate session token (non-fatal if it fails — cookie-based auth is primary)
+      let sessionToken = '';
+      try {
+        const { data: linkData } = await admin.auth.admin.generateLink({
+          type: 'magiclink',
+          email: userInfo.email,
+        });
+        sessionToken = linkData.properties?.hashed_token || '';
+      } catch (e) {
+        console.error('generateLink failed (non-fatal):', e);
+      }
 
       // Redirect to dashboard with session info
       const redirectUrl = new URL('/dashboard', origin);
-      redirectUrl.searchParams.set('session_token', linkData.properties?.hashed_token || '');
+      redirectUrl.searchParams.set('session_token', sessionToken);
       redirectUrl.searchParams.set('account', gmailProfile.email);
 
       // Set a cookie with the user ID for immediate use
@@ -132,9 +138,10 @@ export async function GET(request: NextRequest) {
       return response;
     }
   } catch (err) {
-    console.error('Auth callback error:', err);
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error('Auth callback error:', errorMsg, err);
     return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent('Authentication failed')}`, origin)
+      new URL(`/login?error=${encodeURIComponent(errorMsg || 'Authentication failed')}`, origin)
     );
   }
 }
