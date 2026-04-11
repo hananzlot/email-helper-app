@@ -435,7 +435,7 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
 
 // ============ MAIN DASHBOARD ============
 
-type Tab = 'inbox' | 'reply-queue' | 'snoozed' | 'cleanup' | 'sent' | 'follow-up' | 'priorities' | 'accounts';
+type Tab = 'home' | 'inbox' | 'reply-queue' | 'snoozed' | 'cleanup' | 'sent' | 'follow-up' | 'priorities' | 'accounts';
 
 interface ConnectedAccount {
   email: string;
@@ -446,7 +446,7 @@ interface ConnectedAccount {
 }
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>('reply-queue');
+  const [activeTab, setActiveTab] = useState<Tab>('home');
   const [account, setAccount] = useState<string>('');
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
   const [profile, setProfile] = useState<{ emailAddress: string } | null>(null);
@@ -970,6 +970,7 @@ export default function Dashboard() {
   }, [account, messages.length, loadAllTabCounts]);
 
   const tabs: { id: Tab; label: string }[] = [
+    { id: 'home', label: 'Home' },
     { id: 'reply-queue', label: 'Triage' },
     { id: 'follow-up', label: 'Follow Up' },
     { id: 'snoozed', label: 'Snoozed' },
@@ -1085,11 +1086,20 @@ export default function Dashboard() {
 
       {/* Tab content — fixed width container prevents layout shift between tabs */}
       <div className="w-full" style={{ minHeight: '60vh' }}>
+        {activeTab === 'home' && (
+          <HomeTab
+            tabCounts={tabCounts}
+            accounts={accounts}
+            onNavigate={setActiveTab}
+            onRunTriage={runTriage}
+            triageLoading={triageLoading}
+          />
+        )}
         {activeTab === 'inbox' && (
           <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
             onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} />
         )}
-        {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} />}
+        {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} />}
         {activeTab === 'follow-up' && <FollowUpTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
         {activeTab === 'snoozed' && <SnoozedTab onAction={handleAction} showToast={showToast} onPreview={openPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
         {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
@@ -1151,6 +1161,243 @@ function UndoToast({ toast, onDismiss }: {
               style={{ background: '#6366f1', color: 'white' }}>
               Undo
             </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============ HOME TAB ============
+
+function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }: {
+  tabCounts: Record<string, number>;
+  accounts: { email: string; is_primary: boolean }[];
+  onNavigate: (tab: Tab) => void;
+  onRunTriage: () => void;
+  triageLoading: boolean;
+}) {
+  const triageCount = tabCounts['reply-queue'] || 0;
+  const followUpCount = tabCounts['follow-up'] || 0;
+  const snoozedCount = tabCounts['snoozed'] || 0;
+  const cleanupCount = tabCounts['cleanup'] || 0;
+  const hasAccounts = accounts.length > 0;
+  const [showGuide, setShowGuide] = useState(!hasAccounts);
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
+  return (
+    <div>
+      {/* Daily briefing */}
+      <div className="mb-6">
+        <h2 className="text-xl font-bold mb-1">{greeting}</h2>
+        <p className="text-sm" style={{ color: 'var(--muted)' }}>Here&apos;s your inbox at a glance.</p>
+      </div>
+
+      {/* Stats cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <button onClick={() => onNavigate('reply-queue')}
+          className="p-4 rounded-xl border text-left transition-all hover:shadow-md"
+          style={{ background: triageCount > 0 ? '#eef2ff' : 'var(--card)', borderColor: triageCount > 0 ? '#6366f1' : 'var(--border)' }}>
+          <div className="text-2xl font-bold" style={{ color: triageCount > 0 ? '#4338ca' : 'var(--muted)' }}>{triageCount}</div>
+          <div className="text-xs font-medium mt-1" style={{ color: triageCount > 0 ? '#6366f1' : 'var(--muted)' }}>
+            {triageCount === 0 ? 'All clear!' : 'Needs your reply'}
+          </div>
+          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Triage</div>
+        </button>
+
+        <button onClick={() => onNavigate('follow-up')}
+          className="p-4 rounded-xl border text-left transition-all hover:shadow-md"
+          style={{ background: followUpCount > 0 ? '#fffbeb' : 'var(--card)', borderColor: followUpCount > 0 ? '#f59e0b' : 'var(--border)' }}>
+          <div className="text-2xl font-bold" style={{ color: followUpCount > 0 ? '#b45309' : 'var(--muted)' }}>{followUpCount}</div>
+          <div className="text-xs font-medium mt-1" style={{ color: followUpCount > 0 ? '#d97706' : 'var(--muted)' }}>
+            {followUpCount === 0 ? 'No pending' : 'Awaiting reply'}
+          </div>
+          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Follow Up</div>
+        </button>
+
+        <button onClick={() => onNavigate('snoozed')}
+          className="p-4 rounded-xl border text-left transition-all hover:shadow-md"
+          style={{ background: snoozedCount > 0 ? '#f5f3ff' : 'var(--card)', borderColor: snoozedCount > 0 ? '#8b5cf6' : 'var(--border)' }}>
+          <div className="text-2xl font-bold" style={{ color: snoozedCount > 0 ? '#6d28d9' : 'var(--muted)' }}>{snoozedCount}</div>
+          <div className="text-xs font-medium mt-1" style={{ color: snoozedCount > 0 ? '#7c3aed' : 'var(--muted)' }}>
+            {snoozedCount === 0 ? 'Nothing snoozed' : 'Coming back later'}
+          </div>
+          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Snoozed</div>
+        </button>
+
+        <button onClick={() => onNavigate('cleanup')}
+          className="p-4 rounded-xl border text-left transition-all hover:shadow-md"
+          style={{ background: cleanupCount > 5 ? '#fef2f2' : 'var(--card)', borderColor: cleanupCount > 5 ? '#f87171' : 'var(--border)' }}>
+          <div className="text-2xl font-bold" style={{ color: cleanupCount > 5 ? '#dc2626' : 'var(--muted)' }}>{cleanupCount}</div>
+          <div className="text-xs font-medium mt-1" style={{ color: cleanupCount > 5 ? '#ef4444' : 'var(--muted)' }}>
+            {cleanupCount === 0 ? 'Inbox clean!' : 'Low-priority emails'}
+          </div>
+          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Cleanup</div>
+        </button>
+      </div>
+
+      {/* Quick actions */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        <button onClick={() => onNavigate('reply-queue')}
+          className="px-4 py-2.5 text-xs font-semibold rounded-lg text-white transition-all hover:shadow-md active:scale-95"
+          style={{ background: 'var(--accent)' }}>
+          Go to Triage
+        </button>
+        <button onClick={onRunTriage}
+          disabled={triageLoading}
+          className="px-4 py-2.5 text-xs font-semibold rounded-lg border transition-all hover:shadow-md active:scale-95"
+          style={{ borderColor: 'var(--accent)', color: 'var(--accent)', opacity: triageLoading ? 0.5 : 1 }}>
+          {triageLoading ? 'Running...' : 'Run Triage Now'}
+        </button>
+        <button onClick={() => onNavigate('cleanup')}
+          className="px-4 py-2.5 text-xs font-semibold rounded-lg border transition-all hover:shadow-md active:scale-95"
+          style={{ borderColor: 'var(--border)', color: '#64748b' }}>
+          Clean Up Noise
+        </button>
+      </div>
+
+      {/* Getting started guide */}
+      <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
+        <button onClick={() => setShowGuide(!showGuide)}
+          className="w-full flex items-center justify-between p-4 text-left"
+          style={{ background: '#f8fafc' }}>
+          <div>
+            <span className="font-semibold text-sm">How Email Helper works</span>
+            <span className="text-xs ml-2" style={{ color: 'var(--muted)' }}>
+              {showGuide ? 'Click to collapse' : 'Click to expand'}
+            </span>
+          </div>
+          <span style={{ color: 'var(--muted)' }}>{showGuide ? '▲' : '▼'}</span>
+        </button>
+
+        {showGuide && (
+          <div className="p-5 flex flex-col gap-5" style={{ background: 'white' }}>
+            {/* Step 1: Accounts */}
+            <div className="flex gap-4">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                style={{ background: accounts.length > 0 ? '#16a34a' : '#6366f1' }}>
+                {accounts.length > 0 ? '✓' : '1'}
+              </div>
+              <div>
+                <div className="font-semibold text-sm mb-1">Connect your Gmail account{accounts.length > 1 ? 's' : ''}</div>
+                <p className="text-xs leading-relaxed" style={{ color: '#475569' }}>
+                  Head to the <button onClick={() => onNavigate('accounts')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Accounts</button> tab
+                  and sign in with Google. You can connect multiple accounts — work email, personal, side projects — and manage them all from one place.
+                </p>
+                {accounts.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {accounts.map(a => (
+                      <span key={a.email} className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: '#dcfce7', color: '#166534' }}>
+                        {a.email} {a.is_primary ? '(primary)' : ''}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Step 2: Scan sent mail */}
+            <div className="flex gap-4">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                style={{ background: '#6366f1' }}>
+                2
+              </div>
+              <div>
+                <div className="font-semibold text-sm mb-1">Scan your sent mail</div>
+                <p className="text-xs leading-relaxed" style={{ color: '#475569' }}>
+                  Go to <button onClick={() => onNavigate('priorities')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Priorities</button> and
+                  click <strong>Scan Sent Mail</strong>. This looks at who you've emailed most often in the past 90 days and auto-assigns sender tiers:
+                </p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <span className="text-[10px] px-2 py-1 rounded-full font-bold" style={{ background: '#dcfce7', color: '#166534', border: '1px solid #86efac' }}>Tier A — VIPs</span>
+                  <span className="text-[10px] px-2 py-1 rounded-full font-bold" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fbbf24' }}>Tier B — Important</span>
+                  <span className="text-[10px] px-2 py-1 rounded-full font-bold" style={{ background: '#e0f2fe', color: '#075985', border: '1px solid #7dd3fc' }}>Tier C — Regular</span>
+                  <span className="text-[10px] px-2 py-1 rounded-full font-bold" style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>Tier D — Low priority</span>
+                </div>
+                <p className="text-xs mt-2 leading-relaxed" style={{ color: '#475569' }}>
+                  Tiers A, B, and C go to <strong>Triage</strong> (emails that need your attention). Tier D and unknown senders go to <strong>Cleanup</strong> (newsletters, notifications, noise).
+                  You can change any sender&apos;s tier at any time.
+                </p>
+              </div>
+            </div>
+
+            {/* Step 3: Triage */}
+            <div className="flex gap-4">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                style={{ background: '#6366f1' }}>
+                3
+              </div>
+              <div>
+                <div className="font-semibold text-sm mb-1">Work through your Triage</div>
+                <p className="text-xs leading-relaxed" style={{ color: '#475569' }}>
+                  The <button onClick={() => onNavigate('reply-queue')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Triage</button> tab
+                  shows emails that need your attention, scored and sorted by priority. For each email you can: <strong>Reply</strong> directly,
+                  <strong> Snooze</strong> to deal with it later, <strong>Archive</strong> when done, or <strong>Trash</strong> it.
+                  Archive and Trash have a 5-second undo window — so go fast.
+                </p>
+              </div>
+            </div>
+
+            {/* Step 4: Follow Up */}
+            <div className="flex gap-4">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                style={{ background: '#6366f1' }}>
+                4
+              </div>
+              <div>
+                <div className="font-semibold text-sm mb-1">Track what you&apos;re waiting on</div>
+                <p className="text-xs leading-relaxed" style={{ color: '#475569' }}>
+                  The <button onClick={() => onNavigate('follow-up')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Follow Up</button> tab
+                  automatically detects sent emails where you haven&apos;t received a reply in 24+ hours. It checks actual Gmail threads, so it&apos;s accurate.
+                  You can also star any sent message to manually flag it for follow-up.
+                </p>
+              </div>
+            </div>
+
+            {/* Step 5: Cleanup */}
+            <div className="flex gap-4">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                style={{ background: '#6366f1' }}>
+                5
+              </div>
+              <div>
+                <div className="font-semibold text-sm mb-1">Batch-clean the noise</div>
+                <p className="text-xs leading-relaxed" style={{ color: '#475569' }}>
+                  The <button onClick={() => onNavigate('cleanup')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Cleanup</button> tab
+                  groups all low-priority email by sender. Select entire senders and archive or trash dozens of messages in one click.
+                  If a sender is showing up here that shouldn&apos;t be, change their tier to promote them to Triage.
+                </p>
+              </div>
+            </div>
+
+            {/* Step 6: Unified view */}
+            <div className="flex gap-4">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                style={{ background: '#6366f1' }}>
+                6
+              </div>
+              <div>
+                <div className="font-semibold text-sm mb-1">Unified view for multiple accounts</div>
+                <p className="text-xs leading-relaxed" style={{ color: '#475569' }}>
+                  If you have more than one Gmail account connected, use the dropdown in the top-right to switch between them or select
+                  <strong> All Accounts (Unified)</strong> to see everything merged together. Each email shows which account it came from,
+                  and replies go through the correct account automatically.
+                </p>
+              </div>
+            </div>
+
+            {/* Pro tips */}
+            <div className="mt-2 p-4 rounded-xl" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+              <div className="font-semibold text-xs mb-2" style={{ color: '#166534' }}>Pro tips</div>
+              <div className="flex flex-col gap-1.5 text-xs" style={{ color: '#15803d' }}>
+                <div>• <strong>Snooze</strong> emails you need to deal with but not right now — they&apos;ll pop back into your queue at the time you choose.</div>
+                <div>• Use <strong>Priorities</strong> to merge duplicate senders (same person, different email addresses) for cleaner stats.</div>
+                <div>• Triage runs automatically every 2 minutes. You can also run it manually from Accounts or the button above.</div>
+                <div>• The <strong>Sent</strong> tab groups your outgoing mail into conversations — no more scrolling through duplicates.</div>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -1377,20 +1624,75 @@ function SnoozeDropdown({ onSnooze }: { onSnooze: (hours: number, label: string)
   );
 }
 
+// ============ QUICK REPLY DROPDOWN ============
+
+function QuickReplyDropdown({ templates, onSend }: {
+  templates: { id: string; label: string; body: string }[];
+  onSend: (body: string, label: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [sending, setSending] = useState<string | null>(null);
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(!open)}
+        className="px-3 py-1.5 text-xs font-medium rounded-lg"
+        style={{ background: '#e0f2fe', color: '#0369a1' }}>
+        Quick Reply ▾
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1 min-w-[220px]"
+            style={{ background: 'white', borderColor: 'var(--border)' }}>
+            <div className="px-3 py-1.5 text-[10px] font-semibold uppercase" style={{ color: 'var(--muted)' }}>Send &amp; Archive</div>
+            {templates.map((t) => (
+              <button key={t.id} onClick={async () => {
+                setSending(t.id);
+                await onSend(t.body, t.label);
+                setSending(null);
+                setOpen(false);
+              }}
+                disabled={sending === t.id}
+                className="w-full text-left px-3 py-2.5 text-xs hover:bg-blue-50 transition-colors flex flex-col gap-0.5"
+                style={{ opacity: sending === t.id ? 0.5 : 1 }}>
+                <span className="font-semibold">{sending === t.id ? 'Sending...' : t.label}</span>
+                <span className="text-[10px] truncate" style={{ color: 'var(--muted)' }}>{t.body}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ============ REPLY QUEUE TAB ============
 
-function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount }: {
+function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount, quickReplyTemplates }: {
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
   reloadKey: number;
   onPreview: (messageId: string, accountEmail?: string) => void;
   reportCount?: (count: number) => void;
+  quickReplyTemplates: { id: string; label: string; body: string }[];
 }) {
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<string | null>(null);
+  // Drag-and-drop reorder state
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('email_helper_pinned') || '[]')); }
+    catch { return new Set(); }
+  });
+  const [manualOrder, setManualOrder] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('email_helper_order') || '[]'); }
+    catch { return []; }
+  });
 
   useEffect(() => { loadQueue(); }, [reloadKey]);
 
@@ -1459,10 +1761,55 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount 
     });
   }, [queue]);
 
+  // Pin toggle
+  function togglePin(id: string) {
+    setPinnedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      localStorage.setItem('email_helper_pinned', JSON.stringify([...next]));
+      return next;
+    });
+  }
+
+  // Drag-and-drop handlers
+  function handleDragStart(id: string) { setDragId(id); }
+  function handleDragOver(e: React.DragEvent, id: string) { e.preventDefault(); setDragOverId(id); }
+  function handleDragEnd() { setDragId(null); setDragOverId(null); }
+  function handleDrop(targetId: string) {
+    if (!dragId || dragId === targetId) return;
+    // Build current order from active items, then swap
+    const currentIds = sortedActive.map(q => q.id);
+    const fromIdx = currentIds.indexOf(dragId);
+    const toIdx = currentIds.indexOf(targetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const newOrder = [...currentIds];
+    newOrder.splice(fromIdx, 1);
+    newOrder.splice(toIdx, 0, dragId);
+    setManualOrder(newOrder);
+    localStorage.setItem('email_helper_order', JSON.stringify(newOrder));
+    setDragId(null);
+    setDragOverId(null);
+  }
+
   // Filter out low-priority items — those belong in Cleanup, not here
   const signalQueue = queue.filter(q => q.priority !== 'low');
   const active = signalQueue.filter(q => q.status === 'active');
   const snoozed = signalQueue.filter(q => q.status === 'snoozed');
+
+  // Sort active: pinned first, then manual order if set, then default priority
+  const sortedActive = [...active].sort((a, b) => {
+    const aPinned = pinnedIds.has(a.id) ? 0 : 1;
+    const bPinned = pinnedIds.has(b.id) ? 0 : 1;
+    if (aPinned !== bPinned) return aPinned - bPinned;
+    // If manual order exists, use it
+    const aIdx = manualOrder.indexOf(a.id);
+    const bIdx = manualOrder.indexOf(b.id);
+    if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+    if (aIdx !== -1) return -1;
+    if (bIdx !== -1) return 1;
+    // Default: by priority score
+    return (b.priority_score || 0) - (a.priority_score || 0);
+  });
 
   const priorityColors: Record<string, { border: string; bg: string; label: string }> = {
     urgent: { border: 'var(--urgent)', bg: 'var(--urgent-bg)', label: 'Reply Now' },
@@ -1491,7 +1838,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount 
     if (t in tierCounts) tierCounts[t]++;
   });
 
-  const filteredActive = tierFilter ? active.filter(q => q.tier === tierFilter) : active;
+  const filteredActive = tierFilter ? sortedActive.filter(q => q.tier === tierFilter) : sortedActive;
 
   return (
     <div>
@@ -1529,11 +1876,35 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount 
               style={{ color: pc.border, borderLeftWidth: 3, borderLeftColor: pc.border, borderBottomColor: 'var(--border)' }}>
               {pc.label} ({items.length})
             </p>
-            {items.map(q => (
-              <div key={q.id} className="p-4 rounded-xl border mb-2" style={{ background: pc.bg, borderColor: 'var(--border)', borderLeftWidth: 4, borderLeftColor: pc.border }}>
+            {items.map(q => {
+              const isPinned = pinnedIds.has(q.id);
+              const isDragging = dragId === q.id;
+              const isDragOver = dragOverId === q.id;
+              return (
+              <div key={q.id}
+                draggable
+                onDragStart={() => handleDragStart(q.id)}
+                onDragOver={(e) => handleDragOver(e, q.id)}
+                onDragEnd={handleDragEnd}
+                onDrop={() => handleDrop(q.id)}
+                className="p-4 rounded-xl border mb-2 transition-all"
+                style={{
+                  background: pc.bg,
+                  borderColor: isDragOver ? 'var(--accent)' : 'var(--border)',
+                  borderLeftWidth: 4,
+                  borderLeftColor: isPinned ? '#f59e0b' : pc.border,
+                  opacity: isDragging ? 0.4 : 1,
+                  boxShadow: isDragOver ? '0 0 0 2px var(--accent)' : undefined,
+                  cursor: 'grab',
+                }}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
+                      <button onClick={() => togglePin(q.id)} title={isPinned ? 'Unpin' : 'Pin to top'}
+                        className="text-sm flex-shrink-0 transition-transform hover:scale-110"
+                        style={{ opacity: isPinned ? 1 : 0.3 }}>
+                        📌
+                      </button>
                       <span className="font-semibold text-sm">{q.sender}</span>
                       <TierDropdown currentTier={q.tier || ''} senderEmail={q.sender_email} senderName={q.sender}
                         onTierChanged={(newTier) => {
@@ -1568,6 +1939,28 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount 
                     Preview</button>
                   <button onClick={() => setReplyingTo(replyingTo === q.id ? null : q.id)}
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
+                  {quickReplyTemplates.length > 0 && (
+                    <QuickReplyDropdown templates={quickReplyTemplates} onSend={async (body, label) => {
+                      try {
+                        const savedAccount = _currentAccount;
+                        if (q.account_email && q.account_email !== _currentAccount) setCurrentAccount(q.account_email);
+                        const res = await gmailPost('reply', {
+                          to: q.sender_email,
+                          subject: q.subject,
+                          body,
+                          threadId: q.thread_id,
+                          inReplyTo: q.message_id,
+                        });
+                        if (q.account_email) setCurrentAccount(savedAccount);
+                        if (res.success) {
+                          showToast(`Quick reply sent: ${label}`, q.sender);
+                          queueAction('archive', q.message_id, q.id, q.account_email);
+                        } else {
+                          showToast('Failed to send', res.error);
+                        }
+                      } catch (e) { showToast('Error', String(e)); }
+                    }} />
+                  )}
                   <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(q.id, hours, label)} />
                   <button onClick={() => queueAction('archive', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
                   <button onClick={() => queueAction('markRead', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Mark Read</button>
@@ -1589,7 +1982,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount 
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         );
       })}
