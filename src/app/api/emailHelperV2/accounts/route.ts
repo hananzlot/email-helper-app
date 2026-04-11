@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const admin = createSupabaseAdmin();
   const { data, error } = await admin
     .from(TABLES.GMAIL_ACCOUNTS)
-    .select('email, is_primary, is_active_inbox, display_name, created_at')
+    .select('email, is_primary, is_active_inbox, created_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
 
