@@ -108,10 +108,15 @@ export default function Dashboard() {
     try {
       const [profileRes, inboxRes] = await Promise.all([
         gmailGet('profile'),
-        gmailGet('inbox', { q: 'in:inbox is:unread', max: '50' }),
+        gmailGet('inbox', { q: 'in:inbox', max: '50' }),
       ]);
       if (profileRes.success) setProfile(profileRes.data);
-      if (inboxRes.success) setMessages(inboxRes.data.messages);
+      if (inboxRes.success && inboxRes.data?.messages) {
+        setMessages(inboxRes.data.messages);
+      } else {
+        console.error('Inbox load failed:', inboxRes);
+        setMessages([]);
+      }
     } catch (err) {
       console.error('Failed to load inbox:', err);
     } finally {
