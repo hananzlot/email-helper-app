@@ -453,7 +453,11 @@ export default function Dashboard() {
   const [messages, setMessages] = useState<GmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ title: string; subtitle?: string } | null>(null);
+  const [toast, setToast] = useState<{ title: string; subtitle?: string; undoAction?: () => void; expiresAt?: number } | null>(null);
+  // Pending undo actions — delayed destructive operations that can be cancelled
+  const [pendingUndo, setPendingUndo] = useState<{ key: string; timer: NodeJS.Timeout; action: () => Promise<void> } | null>(null);
+  // Quick reply templates
+  const [quickReplyTemplates, setQuickReplyTemplates] = useState<{ id: string; label: string; body: string }[]>([]);
   const [triageLoading, setTriageLoading] = useState(false);
   const [bgTaskLabel, setBgTaskLabel] = useState<string | null>(null);
   const [triageVersion, setTriageVersion] = useState(0);
@@ -665,17 +669,121 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [account, unified, accounts.length, loadInbox, loadUnifiedInbox]);
 
-  function showToast(title: string, subtitle?: string) {
-    setToast({ title, subtitle });
-    setTimeout(() => setToast(null), 3500);
+  function showToast(title: string, subtitle?: string, undoAction?: () => void) {
+    const expiresAt = undoAction ? Date.now() + 5000 : undefined;
+    setToast({ title, subtitle, undoAction, expiresAt });
+    setTimeout(() => setToast(prev => {
+      // Only clear if this is still the same toast
+      if (prev?.title === title && prev?.subtitle === subtitle) return null;
+      return prev;
+    }), undoAction ? 5500 : 3500);
   }
+
+  // Load quick reply templates from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('email_helper_quick_replies');
+      if (saved) {
+        setQuickReplyTemplates(JSON.parse(saved));
+      } else {
+        // Default templates
+        const defaults = [
+          { id: '1', label: 'Acknowledge', body: 'Thanks for sending this over — got it!' },
+          { id: '2', label: 'Will review', body: 'Thanks! Let me review and get back to you.' },
+          { id: '3', label: 'Schedule call', body: 'Good question — let\'s set up a quick call to discuss. What times work for you this week?' },
+          { id: '4', label: 'Loop back', body: 'Appreciate the update. Let me check on this and circle back shortly.' },
+          { id: '5', label: 'Approve', body: 'Looks good — approved. Thanks!' },
+        ];
+        setQuickReplyTemplates(defaults);
+        localStorage.setItem('email_helper_quick_replies', JSON.stringify(defaults));
+      }
+    } catch (e) { console.error('Failed to load quick reply templates:', e); }
+  }, []);
 
   async function handleAction(action: string, messageIds: string[], label?: string, overrideAccount?: string) {
     setActionLoading(messageIds[0]);
+
+    const actionLabels: Record<string, string> = {
+      archive: 'Archived', trash: 'Trashed', delete: 'Deleted',
+      markRead: 'Marked read', markUnread: 'Marked unread',
+      star: 'Starred', unstar: 'Unstarred',
+      addLabel: 'Label added', removeLabel: 'Label removed',
+    };
+
+    // For undoable actions (archive/trash), animate out immediately but delay the API call
+    const isUndoable = ['archive', 'trash'].includes(action);
+
+    if (isUndoable) {
+      // Animate out immediately for snappy feel
+      const animType = action as 'trash' | 'archive';
+      const anims: Record<string, 'trash' | 'delete' | 'archive'> = {};
+      messageIds.forEach(id => { anims[id] = animType; });
+      setAnimatingOut(prev => ({ ...prev, ...anims }));
+
+      // Store the removed messages so we can restore on undo
+      const removedMessages = messages.filter(m => messageIds.includes(m.id));
+
+      setTimeout(() => {
+        setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
+        setAnimatingOut(prev => {
+          const next = { ...prev };
+          messageIds.forEach(id => delete next[id]);
+          return next;
+        });
+      }, 400);
+
+      // Mark queue items as done immediately in UI
+      for (const msgId of messageIds) {
+        apiPut('queue', { message_id: msgId, status: 'done' }).catch(() => {});
+      }
+      setTriageVersion(v => v + 1);
+
+      // Cancel any existing pending undo
+      if (pendingUndo) {
+        clearTimeout(pendingUndo.timer);
+        pendingUndo.action(); // Execute the previous pending action immediately
+      }
+
+      const undoKey = `${action}-${Date.now()}`;
+
+      // The actual API call — delayed 5 seconds
+      const executeAction = async () => {
+        const savedAccount = _currentAccount;
+        if (overrideAccount && overrideAccount !== _currentAccount) setCurrentAccount(overrideAccount);
+        await gmailPost(action, { action, messageIds });
+        if (overrideAccount) setCurrentAccount(savedAccount);
+        setPendingUndo(prev => prev?.key === undoKey ? null : prev);
+      };
+
+      const timer = setTimeout(() => { executeAction(); }, 5000);
+
+      const undoFn = () => {
+        clearTimeout(timer);
+        // Restore messages to the list
+        setMessages(prev => [...removedMessages, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        // Re-activate queue items
+        for (const msgId of messageIds) {
+          apiPut('queue', { message_id: msgId, status: 'active' }).catch(() => {});
+        }
+        setTriageVersion(v => v + 1);
+        setPendingUndo(null);
+        showToast('Undone', `${messageIds.length} message${messageIds.length > 1 ? 's' : ''} restored`);
+      };
+
+      setPendingUndo({ key: undoKey, timer, action: executeAction });
+      showToast(
+        actionLabels[action] || action,
+        `${messageIds.length} message${messageIds.length > 1 ? 's' : ''}`,
+        undoFn
+      );
+      setActionLoading(null);
+      return;
+    }
+
+    // Non-undoable actions: execute immediately
     try {
       const params: Record<string, unknown> = { action, messageIds };
       if (label) params.labelId = label;
-      // If an override account is provided, temporarily switch the API context
       const savedAccount = _currentAccount;
       if (overrideAccount && overrideAccount !== _currentAccount) {
         setCurrentAccount(overrideAccount);
@@ -683,44 +791,31 @@ export default function Dashboard() {
       const res = await gmailPost(action, params);
       if (overrideAccount) setCurrentAccount(savedAccount);
       if (res.success) {
-        const actionLabels: Record<string, string> = {
-          archive: 'Archived', trash: 'Trashed', delete: 'Deleted',
-          markRead: 'Marked read', markUnread: 'Marked unread',
-          star: 'Starred', unstar: 'Unstarred',
-          addLabel: 'Label added', removeLabel: 'Label removed',
-        };
         showToast(actionLabels[action] || action, `${messageIds.length} message${messageIds.length > 1 ? 's' : ''}`);
-        // Animate out for destructive actions
-        if (['trash', 'delete', 'archive'].includes(action)) {
-          const animType = action as 'trash' | 'delete' | 'archive';
+        if (action === 'delete') {
           const anims: Record<string, 'trash' | 'delete' | 'archive'> = {};
-          messageIds.forEach(id => { anims[id] = animType; });
+          messageIds.forEach(id => { anims[id] = 'delete'; });
           setAnimatingOut(prev => ({ ...prev, ...anims }));
           setTimeout(() => {
-            setMessages((prev) => prev.filter((m) => !messageIds.includes(m.id)));
+            setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
             setAnimatingOut(prev => {
               const next = { ...prev };
               messageIds.forEach(id => delete next[id]);
               return next;
             });
           }, 400);
-          // Also mark reply queue items as done
           for (const msgId of messageIds) {
             apiPut('queue', { message_id: msgId, status: 'done' }).catch(() => {});
           }
           setTriageVersion(v => v + 1);
-        } else {
-          // Non-destructive: update immediately
-          if (action === 'markRead') {
-            setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
-            // Also mark reply queue items as done so they disappear from Triage
-            for (const msgId of messageIds) {
-              apiPut('queue', { message_id: msgId, status: 'done' }).catch(() => {});
-            }
-            setTriageVersion(v => v + 1); // trigger Triage tab reload
-          } else if (action === 'markUnread') {
-            setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
+        } else if (action === 'markRead') {
+          setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
+          for (const msgId of messageIds) {
+            apiPut('queue', { message_id: msgId, status: 'done' }).catch(() => {});
           }
+          setTriageVersion(v => v + 1);
+        } else if (action === 'markUnread') {
+          setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
         }
       } else {
         showToast('Error', res.error);
@@ -906,66 +1001,77 @@ export default function Dashboard() {
 
   return (
     <div className="w-full max-w-4xl mx-auto px-4 py-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold">Email Helper</h1>
-          <p className="text-sm" style={{ color: 'var(--muted)' }}>Inbox Command Center</p>
+      {/* Sticky header + tabs */}
+      <div className="sticky top-0 z-30 -mx-4 px-4 pb-0 pt-0" style={{ background: 'var(--bg, #f8fafc)' }}>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-3 pt-2">
+          <div>
+            <h1 className="text-2xl font-bold">Email Helper</h1>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>Inbox Command Center</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {/* Account Switcher with Unified toggle */}
+            {accounts.length > 1 ? (
+              <select
+                value={unified ? '__unified__' : account}
+                onChange={(e) => {
+                  if (e.target.value === '__unified__') switchToUnified();
+                  else switchAccount(e.target.value);
+                }}
+                className="text-sm px-3 py-2 rounded-lg border font-medium appearance-none cursor-pointer"
+                style={{ background: unified ? '#ede9fe' : 'var(--normal-bg)', borderColor: unified ? '#8b5cf6' : 'var(--border)', color: unified ? '#5b21b6' : '#065f46' }}
+              >
+                <option value="__unified__">All Accounts (Unified)</option>
+                {accounts.map((a) => (
+                  <option key={a.email} value={a.email}>
+                    {a.email}{a.is_primary ? ' ★' : ''}
+                  </option>
+                ))}
+              </select>
+            ) : profile ? (
+              <div className="text-sm px-4 py-2 rounded-lg" style={{ background: 'var(--normal-bg)', color: '#065f46' }}>
+                <strong>{profile.emailAddress}</strong>
+              </div>
+            ) : null}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Account Switcher with Unified toggle */}
-          {accounts.length > 1 ? (
-            <select
-              value={unified ? '__unified__' : account}
-              onChange={(e) => {
-                if (e.target.value === '__unified__') switchToUnified();
-                else switchAccount(e.target.value);
-              }}
-              className="text-sm px-3 py-2 rounded-lg border font-medium appearance-none cursor-pointer"
-              style={{ background: unified ? '#ede9fe' : 'var(--normal-bg)', borderColor: unified ? '#8b5cf6' : 'var(--border)', color: unified ? '#5b21b6' : '#065f46' }}
-            >
-              <option value="__unified__">All Accounts (Unified)</option>
-              {accounts.map((a) => (
-                <option key={a.email} value={a.email}>
-                  {a.email}{a.is_primary ? ' ★' : ''}
-                </option>
-              ))}
-            </select>
-          ) : profile ? (
-            <div className="text-sm px-4 py-2 rounded-lg" style={{ background: 'var(--normal-bg)', color: '#065f46' }}>
-              <strong>{profile.emailAddress}</strong>
-            </div>
-          ) : null}
-        </div>
-      </div>
 
-      {/* Tabs */}
-      <div className="flex gap-0 border-b-2 mb-6 overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
-        {tabs.map((tab) => {
-          const count = tabCounts[tab.id];
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className="px-5 py-3 text-sm font-medium transition-all border-b-2 -mb-[2px] whitespace-nowrap flex items-center gap-1.5"
-              style={{
-                color: activeTab === tab.id ? 'var(--accent)' : 'var(--muted)',
-                borderBottomColor: activeTab === tab.id ? 'var(--accent)' : 'transparent',
-              }}
-            >
-              {tab.label}
-              {count != null && count > 0 && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
-                  style={{
-                    background: activeTab === tab.id ? 'var(--accent)' : '#e2e8f0',
-                    color: activeTab === tab.id ? 'white' : '#64748b',
-                  }}>
-                  {count > 99 ? '99+' : count}
-                </span>
-              )}
-            </button>
-          );
-        })}
+        {/* Tabs — pill style, responsive, with shadow separator */}
+        <div className="flex flex-wrap gap-1.5 pb-3 mb-0"
+          style={{ borderBottom: '1px solid var(--border)' }}>
+          {tabs.map((tab) => {
+            const count = tabCounts[tab.id];
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className="px-3.5 py-2 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5"
+                style={{
+                  background: isActive ? 'var(--accent)' : 'white',
+                  color: isActive ? 'white' : '#475569',
+                  boxShadow: isActive
+                    ? '0 2px 8px rgba(79, 70, 229, 0.3)'
+                    : '0 1px 3px rgba(0,0,0,0.08)',
+                  border: isActive ? '1.5px solid var(--accent)' : '1.5px solid #e2e8f0',
+                }}
+              >
+                {tab.label}
+                {count != null && count > 0 && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
+                    style={{
+                      background: isActive ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
+                      color: isActive ? 'white' : '#64748b',
+                    }}>
+                    {count > 99 ? '99+' : count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {/* Bottom shadow to visually separate sticky header from scrolling content */}
+        <div style={{ height: 4, background: 'linear-gradient(to bottom, rgba(0,0,0,0.04), transparent)', marginBottom: 12 }} />
       </div>
 
       {/* Background task banner — visible across all tabs */}
@@ -995,13 +1101,59 @@ export default function Dashboard() {
       {/* Email Preview Modal */}
       {previewMessageId && <EmailPreviewModal messageId={previewMessageId} accountEmail={previewAccount} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} onSnooze={snoozeFromPreview} />}
 
-      {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl text-white text-sm font-medium shadow-lg z-50 text-center"
-          style={{ background: '#1e293b', maxWidth: '90vw' }}>
+      {toast && <UndoToast toast={toast} onDismiss={() => setToast(null)} />}
+    </div>
+  );
+}
+
+// ============ UNDO TOAST ============
+
+function UndoToast({ toast, onDismiss }: {
+  toast: { title: string; subtitle?: string; undoAction?: () => void; expiresAt?: number };
+  onDismiss: () => void;
+}) {
+  const [secondsLeft, setSecondsLeft] = useState(5);
+
+  useEffect(() => {
+    if (!toast.undoAction || !toast.expiresAt) return;
+    const interval = setInterval(() => {
+      const left = Math.max(0, Math.ceil((toast.expiresAt! - Date.now()) / 1000));
+      setSecondsLeft(left);
+      if (left <= 0) { clearInterval(interval); onDismiss(); }
+    }, 200);
+    return () => clearInterval(interval);
+  }, [toast.expiresAt, toast.undoAction, onDismiss]);
+
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in"
+      style={{ maxWidth: '90vw' }}>
+      <div className="flex items-center gap-4 px-5 py-3 rounded-xl text-white text-sm font-medium shadow-2xl"
+        style={{ background: '#1e293b', minWidth: 260 }}>
+        <div className="flex-1">
           <div className="font-semibold">{toast.title}</div>
           {toast.subtitle && <div className="text-xs opacity-70 mt-0.5">{toast.subtitle}</div>}
         </div>
-      )}
+        {toast.undoAction && (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="relative w-7 h-7">
+              <svg className="w-7 h-7 -rotate-90" viewBox="0 0 28 28">
+                <circle cx="14" cy="14" r="12" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="2" />
+                <circle cx="14" cy="14" r="12" fill="none" stroke="white" strokeWidth="2"
+                  strokeDasharray={2 * Math.PI * 12}
+                  strokeDashoffset={2 * Math.PI * 12 * (1 - secondsLeft / 5)}
+                  strokeLinecap="round"
+                  style={{ transition: 'stroke-dashoffset 0.3s ease' }} />
+              </svg>
+              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold">{secondsLeft}</span>
+            </div>
+            <button onClick={() => { toast.undoAction!(); onDismiss(); }}
+              className="px-3 py-1.5 text-xs font-bold rounded-lg transition-all hover:scale-105 active:scale-95"
+              style={{ background: '#6366f1', color: 'white' }}>
+              Undo
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2620,58 +2772,83 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
 
 // ============ PRIORITIES TAB ============
 
-// Detect potential duplicate senders by name similarity
-function findSenderDuplicates(senders: any[]): { primary: any; secondary: any; reason: string }[] {
-  const suggestions: { primary: any; secondary: any; reason: string }[] = [];
-  const seen = new Set<string>();
+// Detect potential duplicate senders by name similarity — returns clustered groups
+interface DuplicateCluster {
+  name: string;           // Display name (e.g. "Gina Priolo")
+  primary: any;           // The sender with most replies (merge target)
+  others: any[];          // All other senders to merge into primary
+  reason: string;
+}
 
-  // Group by normalized first name
+function findSenderDuplicates(senders: any[]): DuplicateCluster[] {
+  // Group by normalized full name (first + last)
   const nameGroups: Record<string, any[]> = {};
   for (const s of senders) {
     const name = (s.display_name || '').toLowerCase().replace(/[^a-z\s]/g, '').trim();
+    if (!name || name.length < 3) continue;
     const firstName = name.split(/\s+/)[0];
-    if (!firstName || firstName.length < 3) continue;
+    if (!firstName || firstName.length < 2) continue;
     if (!nameGroups[firstName]) nameGroups[firstName] = [];
     nameGroups[firstName].push(s);
   }
 
-  // Check groups with 2+ senders for likely duplicates
+  const clusters: DuplicateCluster[] = [];
+
   for (const [, group] of Object.entries(nameGroups)) {
     if (group.length < 2) continue;
+
+    // Build connected clusters within this first-name group using union-find
+    // Two senders connect if they share last name, domain, or similar name
+    const parent: number[] = group.map((_, i) => i);
+    function find(i: number): number { return parent[i] === i ? i : (parent[i] = find(parent[i])); }
+    function union(a: number, b: number) { parent[find(a)] = find(b); }
+
     for (let i = 0; i < group.length; i++) {
       for (let j = i + 1; j < group.length; j++) {
         const a = group[i];
         const b = group[j];
-        const key = [a.sender_email, b.sender_email].sort().join('|');
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        // Check if same domain or same last name
-        const aDomain = a.sender_email.split('@')[1]?.toLowerCase();
-        const bDomain = b.sender_email.split('@')[1]?.toLowerCase();
         const aName = (a.display_name || '').toLowerCase().trim();
         const bName = (b.display_name || '').toLowerCase().trim();
         const aLast = aName.split(/\s+/).slice(1).join(' ');
         const bLast = bName.split(/\s+/).slice(1).join(' ');
+        const aDomain = a.sender_email.split('@')[1]?.toLowerCase();
+        const bDomain = b.sender_email.split('@')[1]?.toLowerCase();
 
-        let reason = '';
-        if (aLast && bLast && aLast === bLast) {
-          reason = `Same name "${a.display_name}"`;
-        } else if (aDomain === bDomain && aName === bName) {
-          reason = `Same name, same domain`;
-        } else if (aLast && bLast && (aLast.includes(bLast) || bLast.includes(aLast))) {
-          reason = `Similar name "${a.display_name}" / "${b.display_name}"`;
-        }
+        const matched = (aLast && bLast && aLast === bLast) ||
+          (aDomain === bDomain && aName === bName) ||
+          (aLast && bLast && (aLast.includes(bLast) || bLast.includes(aLast)));
 
-        if (reason) {
-          // Primary = the one with more replies
-          const [primary, secondary] = (a.reply_count || 0) >= (b.reply_count || 0) ? [a, b] : [b, a];
-          suggestions.push({ primary, secondary, reason });
-        }
+        if (matched) union(i, j);
       }
     }
+
+    // Collect clusters
+    const clusterMap: Record<number, any[]> = {};
+    group.forEach((s, i) => {
+      const root = find(i);
+      if (!clusterMap[root]) clusterMap[root] = [];
+      clusterMap[root].push(s);
+    });
+
+    for (const members of Object.values(clusterMap)) {
+      if (members.length < 2) continue;
+      // Primary = highest reply count
+      members.sort((a: any, b: any) => (b.reply_count || 0) - (a.reply_count || 0));
+      const primary = members[0];
+      const others = members.slice(1);
+      const displayName = primary.display_name || others[0]?.display_name || 'Unknown';
+      clusters.push({
+        name: displayName,
+        primary,
+        others,
+        reason: others.length === 1
+          ? `Same person, ${others.length + 1} emails`
+          : `Same person, ${others.length + 1} email addresses`,
+      });
+    }
   }
-  return suggestions;
+
+  return clusters;
 }
 
 function PrioritiesTab({ onScanSent, scanning, showToast }: {
@@ -2762,16 +2939,19 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
     }
   }
 
-  async function mergeSenders(primaryEmail: string, secondaryEmail: string) {
-    setMerging(`${primaryEmail}|${secondaryEmail}`);
+  async function mergeSenders(primaryEmail: string, secondaryEmails: string[]) {
+    setMerging(primaryEmail);
     try {
-      const res = await apiPut('senders', { action: 'merge', primary_email: primaryEmail, secondary_email: secondaryEmail });
-      if (res.success) {
-        showToast('Senders merged', `${secondaryEmail} → ${primaryEmail}`);
-        loadData();
-      } else {
-        showToast('Error', res.error);
+      for (const sec of secondaryEmails) {
+        const res = await apiPut('senders', { action: 'merge', primary_email: primaryEmail, secondary_email: sec });
+        if (!res.success) {
+          showToast('Error', res.error);
+          setMerging(null);
+          return;
+        }
       }
+      showToast('Senders merged', `${secondaryEmails.length} address${secondaryEmails.length > 1 ? 'es' : ''} → ${primaryEmail}`);
+      loadData();
     } catch (e) {
       showToast('Error', String(e));
     }
@@ -2862,47 +3042,67 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
           })}
         </div>
 
-        {/* Sender linking suggestions */}
+        {/* Sender linking suggestions — clustered by person */}
         {(() => {
-          const suggestions = findSenderDuplicates(senders).filter(s => {
-            const key = [s.primary.sender_email, s.secondary.sender_email].sort().join('|');
+          const clusters = findSenderDuplicates(senders).filter(c => {
+            const key = [c.primary.sender_email, ...c.others.map((o: any) => o.sender_email)].sort().join('|');
             return !dismissedSuggestions.has(key);
           });
-          if (suggestions.length === 0) return null;
+          if (clusters.length === 0) return null;
           return (
             <div className="mb-4 rounded-xl border p-4" style={{ background: '#fefce8', borderColor: '#fbbf24' }}>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-sm font-semibold" style={{ color: '#92400e' }}>Possible duplicate senders detected</span>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm font-semibold" style={{ color: '#92400e' }}>Possible duplicate senders</span>
                 <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: '#fef3c7', color: '#92400e' }}>
-                  {suggestions.length} suggestion{suggestions.length > 1 ? 's' : ''}
+                  {clusters.length} {clusters.length === 1 ? 'person' : 'people'}
                 </span>
               </div>
-              <div className="flex flex-col gap-2">
-                {suggestions.slice(0, 5).map((s) => {
-                  const key = [s.primary.sender_email, s.secondary.sender_email].sort().join('|');
-                  const isMerging = merging === key;
+              <div className="flex flex-col gap-3">
+                {clusters.slice(0, 5).map((c) => {
+                  const clusterKey = [c.primary.sender_email, ...c.others.map((o: any) => o.sender_email)].sort().join('|');
+                  const isMerging = merging === c.primary.sender_email;
+                  const allEmails = [c.primary, ...c.others];
+                  const totalReplies = allEmails.reduce((sum: number, s: any) => sum + (s.reply_count || 0), 0);
                   return (
-                    <div key={key} className="flex items-center justify-between p-3 rounded-lg border" style={{ background: 'white', borderColor: '#fde68a' }}>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs mb-1" style={{ color: '#92400e' }}>{s.reason}</div>
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="font-medium">{s.primary.display_name}</span>
-                          <span className="text-xs" style={{ color: 'var(--muted)' }}>{s.primary.sender_email} ({s.primary.reply_count})</span>
-                          <span style={{ color: 'var(--muted)' }}>&amp;</span>
-                          <span className="font-medium">{s.secondary.display_name}</span>
-                          <span className="text-xs" style={{ color: 'var(--muted)' }}>{s.secondary.sender_email} ({s.secondary.reply_count})</span>
+                    <div key={clusterKey} className="p-3 rounded-lg border" style={{ background: 'white', borderColor: '#fde68a' }}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0" style={{ background: '#f59e0b' }}>
+                              {(c.name || '?')[0]?.toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-sm">{c.name}</div>
+                              <div className="text-[10px]" style={{ color: '#92400e' }}>{c.reason} &middot; {totalReplies} total emails sent</div>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 ml-10">
+                            {allEmails.map((s: any, idx: number) => (
+                              <span key={s.sender_email}
+                                className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md"
+                                style={{
+                                  background: idx === 0 ? '#dcfce7' : '#f1f5f9',
+                                  border: idx === 0 ? '1px solid #86efac' : '1px solid #e2e8f0',
+                                  color: idx === 0 ? '#166534' : '#475569',
+                                }}>
+                                {idx === 0 && <span className="text-[9px] font-bold">★</span>}
+                                {s.sender_email}
+                                <span className="opacity-60">({s.reply_count || 0})</span>
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex gap-2 flex-shrink-0 ml-3">
-                        <button onClick={() => mergeSenders(s.primary.sender_email, s.secondary.sender_email)}
-                          disabled={!!isMerging}
-                          className="px-3 py-1.5 text-xs font-medium rounded-lg text-white" style={{ background: isMerging ? 'var(--muted)' : '#16a34a' }}>
-                          {isMerging ? 'Merging...' : 'Merge'}
-                        </button>
-                        <button onClick={() => setDismissedSuggestions(prev => new Set([...prev, key]))}
-                          className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                          Dismiss
-                        </button>
+                        <div className="flex gap-2 flex-shrink-0 items-center">
+                          <button onClick={() => mergeSenders(c.primary.sender_email, c.others.map((o: any) => o.sender_email))}
+                            disabled={isMerging}
+                            className="px-4 py-2 text-xs font-semibold rounded-lg text-white transition-all active:scale-95" style={{ background: isMerging ? 'var(--muted)' : '#16a34a' }}>
+                            {isMerging ? 'Merging...' : `Merge ${c.others.length === 1 ? '2' : c.others.length + 1} into 1`}
+                          </button>
+                          <button onClick={() => setDismissedSuggestions(prev => new Set([...prev, clusterKey]))}
+                            className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                            Not same
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
