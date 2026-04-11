@@ -1616,22 +1616,12 @@ export default function Dashboard() {
         reportTabCount('priorities', sendersRes.data.length);
       }
 
-      // Fetch follow-up count (starred sent + awaiting reply)
-      const starredRes = await gmailGet('search', { q: 'in:sent is:starred', max: '50' });
-      const sentRes = await gmailGet('search', { q: 'in:sent newer_than:7d', max: '30' });
-      let followUpCount = 0;
-      if (starredRes.success) followUpCount += (starredRes.data?.messages || []).length;
-      if (sentRes.success) {
-        const sentMsgs = sentRes.data?.messages || [];
-        const awaitingCount = sentMsgs.filter((msg: any) => {
-          const hoursSince = (Date.now() - new Date(msg.date).getTime()) / (1000 * 60 * 60);
-          if (hoursSince < 24) return false;
-          if (hoursSince > 48) return true;
-          return !msg.subject?.startsWith('Re:');
-        }).length;
-        followUpCount += awaitingCount;
+      // Fetch follow-up count from Supabase cache (not live Gmail — avoids flicker)
+      const followUpRes = await apiGet('follow-ups');
+      if (followUpRes.success && followUpRes.data) {
+        const followUpCount = (followUpRes.data.starred_count || 0) + (followUpRes.data.awaiting_count || 0);
+        reportTabCount('follow-up', followUpCount);
       }
-      reportTabCount('follow-up', followUpCount);
     } catch (e) {
       console.error('Failed to load tab counts:', e);
     }
