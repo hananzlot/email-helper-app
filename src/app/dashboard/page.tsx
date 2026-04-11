@@ -3222,7 +3222,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
 
       {/* Bulk action bar */}
       {selectedCount > 0 && (
-        <div className="mb-4 p-3 rounded-xl flex items-center justify-between gap-3" style={{ background: '#eff6ff', border: '2px solid var(--accent)' }}>
+        <div className="mb-4 p-3 rounded-xl flex items-center justify-between gap-3 sticky top-0 z-20" style={{ background: '#eff6ff', border: '2px solid var(--accent)' }}>
           <span className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>
             {selectedCount} message{selectedCount > 1 ? 's' : ''} selected
             {selectedGroups.size > 0 && ` (${selectedGroups.size} sender${selectedGroups.size > 1 ? 's' : ''})`}
