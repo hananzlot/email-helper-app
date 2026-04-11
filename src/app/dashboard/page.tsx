@@ -431,7 +431,7 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
 
 // ============ MAIN DASHBOARD ============
 
-type Tab = 'inbox' | 'reply-queue' | 'cleanup' | 'sent' | 'follow-up' | 'priorities' | 'accounts';
+type Tab = 'inbox' | 'reply-queue' | 'snoozed' | 'cleanup' | 'sent' | 'follow-up' | 'priorities' | 'accounts';
 
 interface ConnectedAccount {
   email: string;
@@ -795,12 +795,13 @@ export default function Dashboard() {
   }, [messages, reportTabCount]);
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'reply-queue', label: 'Inbox (Triage)' },
+    { id: 'reply-queue', label: 'Triage' },
     { id: 'follow-up', label: 'Follow Up' },
+    { id: 'snoozed', label: 'Snoozed' },
     { id: 'cleanup', label: 'Cleanup' },
-    { id: 'sent', label: 'Sent Mail' },
+    { id: 'sent', label: 'Sent' },
     { id: 'inbox', label: 'All Mail' },
-    { id: 'priorities', label: 'My Priorities' },
+    { id: 'priorities', label: 'Priorities' },
     { id: 'accounts', label: 'Accounts' },
   ];
 
@@ -904,6 +905,7 @@ export default function Dashboard() {
         )}
         {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} />}
         {activeTab === 'follow-up' && <FollowUpTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
+        {activeTab === 'snoozed' && <SnoozedTab onAction={handleAction} showToast={showToast} onPreview={openPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
         {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
         {activeTab === 'sent' && <SentMailTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} />}
         {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
@@ -1165,7 +1167,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount 
     const res = await apiGet('queue');
     if (res.success) {
       setQueue(res.data);
-      const activeCount = (res.data || []).filter((q: any) => q.status === 'active').length;
+      const items = res.data || [];
+      const activeCount = items.filter((q: any) => q.status === 'active').length;
       reportCount?.(activeCount);
     }
     setLoading(false);
@@ -1358,24 +1361,6 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount 
         );
       })}
 
-      {snoozed.length > 0 && (
-        <div className="mt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide mb-2 pb-2 border-b" style={{ color: 'var(--important)', borderColor: 'var(--border)' }}>Snoozed ({snoozed.length})</p>
-          {snoozed.map(q => (
-            <div key={q.id} className="p-3 rounded-lg border mb-1 flex items-center justify-between" style={{ opacity: 0.6, borderColor: 'var(--border)' }}>
-              <div>
-                <span className="text-sm">{q.sender}: {q.subject}</span>
-                {q.snoozed_until && (
-                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--important)' }}>
-                    Reappears {new Date(q.snoozed_until).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                  </div>
-                )}
-              </div>
-              <button onClick={() => updateStatus(q.id, 'active')} className="text-xs px-2 py-1 rounded border" style={{ borderColor: 'var(--border)' }}>Reactivate</button>
-            </div>
-          ))}
-        </div>
-      )}
       {confirmDelete && (() => {
         const [qId, msgId, acctEmail] = confirmDelete.split('::');
         return (
@@ -2075,6 +2060,142 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============ SNOOZED TAB ============
+
+function SnoozedTab({ onAction, showToast, onPreview, reloadKey, reportCount }: {
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
+  showToast: (title: string, subtitle?: string) => void;
+  onPreview: (messageId: string, accountEmail?: string) => void;
+  reloadKey: number;
+  reportCount?: (count: number) => void;
+}) {
+  const [snoozedItems, setSnoozedItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadSnoozed(); }, [reloadKey]);
+
+  async function loadSnoozed() {
+    setLoading(true);
+    const res = await apiGet('queue');
+    if (res.success) {
+      const snoozed = (res.data || []).filter((q: any) => q.status === 'snoozed');
+      // Sort by snoozed_until (soonest first)
+      snoozed.sort((a: any, b: any) => {
+        const aTime = a.snoozed_until ? new Date(a.snoozed_until).getTime() : Infinity;
+        const bTime = b.snoozed_until ? new Date(b.snoozed_until).getTime() : Infinity;
+        return aTime - bTime;
+      });
+      setSnoozedItems(snoozed);
+      reportCount?.(snoozed.length);
+    }
+    setLoading(false);
+  }
+
+  async function reactivate(id: string) {
+    const res = await apiPut('queue', { id, status: 'active' });
+    if (res.success) {
+      setSnoozedItems(prev => prev.filter(q => q.id !== id));
+      showToast('Reactivated', 'Moved back to Triage');
+      reportCount?.(snoozedItems.length - 1);
+    }
+  }
+
+  async function dismiss(id: string, messageId: string, accountEmail: string) {
+    onAction('markRead', [messageId], undefined, accountEmail);
+    const res = await apiPut('queue', { id, status: 'done' });
+    if (res.success) {
+      setSnoozedItems(prev => prev.filter(q => q.id !== id));
+      showToast('Dismissed');
+      reportCount?.(snoozedItems.length - 1);
+    }
+  }
+
+  if (loading) return (
+    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+      <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+      <p className="text-sm">Loading snoozed emails...</p>
+    </div>
+  );
+
+  if (snoozedItems.length === 0) return (
+    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+      <p className="text-lg mb-2">No snoozed emails</p>
+      <p className="text-sm">Snooze emails from the Triage tab to deal with them later.</p>
+    </div>
+  );
+
+  const now = new Date();
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm font-semibold">{snoozedItems.length} snoozed email{snoozedItems.length !== 1 ? 's' : ''}</p>
+        <button onClick={loadSnoozed} className="px-3 py-1 text-xs rounded-full border font-medium" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Refresh</button>
+      </div>
+      <div className="flex flex-col gap-2">
+        {snoozedItems.map((q: any) => {
+          const snoozeTime = q.snoozed_until ? new Date(q.snoozed_until) : null;
+          const isOverdue = snoozeTime && snoozeTime <= now;
+          const timeLabel = snoozeTime
+            ? snoozeTime.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+            : 'Unknown';
+          const hoursLeft = snoozeTime ? Math.max(0, Math.round((snoozeTime.getTime() - now.getTime()) / (1000 * 60 * 60))) : 0;
+
+          return (
+            <div key={q.id} className="p-4 rounded-xl border" style={{
+              background: isOverdue ? '#fef3c7' : 'var(--card)',
+              borderColor: isOverdue ? '#fbbf24' : 'var(--border)',
+              borderLeftWidth: 4,
+              borderLeftColor: isOverdue ? '#f59e0b' : '#8b5cf6',
+            }}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-sm">{q.sender}</span>
+                    {q.tier && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{
+                        background: q.tier === 'A' ? '#dcfce7' : q.tier === 'B' ? '#fef3c7' : '#e0f2fe',
+                        color: q.tier === 'A' ? '#166534' : q.tier === 'B' ? '#92400e' : '#075985',
+                      }}>
+                        Tier {q.tier}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm font-medium mt-0.5 cursor-pointer hover:underline" onClick={() => onPreview(q.message_id, q.account_email)}>
+                    {q.subject}
+                  </div>
+                  <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(q.summary || '')}</div>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{
+                      background: isOverdue ? '#fee2e2' : '#ede9fe',
+                      color: isOverdue ? '#dc2626' : '#7c3aed',
+                    }}>
+                      {isOverdue ? 'Overdue — was due ' : 'Wakes up '}{timeLabel}
+                    </span>
+                    {!isOverdue && hoursLeft > 0 && (
+                      <span className="text-[10px]" style={{ color: 'var(--muted)' }}>
+                        ({hoursLeft < 24 ? `${hoursLeft}h` : `${Math.round(hoursLeft / 24)}d`} left)
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button onClick={() => onPreview(q.message_id, q.account_email)}
+                    className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Preview</button>
+                  <button onClick={() => reactivate(q.id)}
+                    className="px-2 py-1 text-xs rounded-lg border font-medium" style={{ borderColor: '#8b5cf6', color: '#7c3aed' }}>Wake Up</button>
+                  <button onClick={() => dismiss(q.id, q.message_id, q.account_email)}
+                    className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Dismiss</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
