@@ -323,54 +323,81 @@ function isLikelyNeedsReply(email: TriagedEmail): boolean {
 
 // ============ SENT MAIL SCANNER (for learning sender priorities) ============
 
+/**
+ * Fast sent-mail scanner. Fetches sent messages in batches and reads the "To"
+ * header directly from each message's metadata — no thread fetches needed.
+ * Processes up to 200 sent messages (~10 batches of 20), takes ~10-15 seconds.
+ */
 export async function scanSentMail(
   client: gmail_v1.Gmail,
   userId: string,
   accountEmail: string
 ): Promise<{ sendersFound: number; totalReplies: number }> {
   const admin = createSupabaseAdmin();
-  const senderCounts: Record<string, { name: string; count: number; lastDate: string }> = {};
+  const recipientCounts: Record<string, { name: string; count: number; lastDate: string }> = {};
 
   let pageToken: string | undefined;
   let totalScanned = 0;
+  const MAX_SCAN = 200; // Keep it fast
 
-  // Scan up to 500 sent messages (about 1-2 years of activity for most people)
-  while (totalScanned < 500) {
+  while (totalScanned < MAX_SCAN) {
     const batch = await gmail.listMessages(client, {
       query: 'in:sent',
-      maxResults: 50,
+      maxResults: 20,
       pageToken,
     });
 
     if (!batch.messages || batch.messages.length === 0) break;
 
+    // Fetch metadata for each message in parallel (batch of 20)
     const details = await Promise.all(
-      batch.messages.map((m) => gmail.getMessage(client, m.id!, 'metadata'))
+      batch.messages.map(async (m) => {
+        try {
+          const res = await client.users.messages.get({
+            userId: 'me',
+            id: m.id!,
+            format: 'metadata',
+            metadataHeaders: ['To', 'Date'],
+          });
+          return res.data;
+        } catch {
+          return null;
+        }
+      })
     );
 
     for (const msg of details) {
-      // Extract the "To" address from the sent message
-      const toEmail = msg.senderEmail; // For sent messages, this is actually "From" (you)
-      // We need the To header — let's get it differently
-      // Actually, getMessage returns the From header. For sent mail,
-      // we need to look at the recipients. Let's use the snippet as a signal
-      // and re-fetch with the To header.
-    }
+      if (!msg) continue;
+      const headers = msg.payload?.headers || [];
+      const toHeader = headers.find(h => h.name?.toLowerCase() === 'to')?.value || '';
+      const dateHeader = headers.find(h => h.name?.toLowerCase() === 'date')?.value || '';
 
-    // For sent mail, we need to extract recipients
-    const fullDetails = await Promise.all(
-      batch.messages.map((m) => gmail.getMessage(client, m.id!, 'full'))
-    );
+      // Parse all recipients from the To header (can have multiple)
+      const emailMatches = toHeader.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || [];
+      const nameMatches = toHeader.match(/([^<,]+?)\s*<[^>]+>/g) || [];
 
-    for (const msg of fullDetails) {
-      // The "sender" field in our GmailMessage is From: (which is you for sent mail)
-      // We need to parse the To: header from the raw message
-      // Actually, getMessage already parses headers — but our type only has "sender" (From)
-      // Let's extract To from the body/snippet or use a different approach
+      // Build a name map from "Name <email>" patterns
+      const nameMap: Record<string, string> = {};
+      for (const nm of nameMatches) {
+        const match = nm.match(/(.+?)\s*<(.+?)>/);
+        if (match) {
+          nameMap[match[2].toLowerCase()] = match[1].replace(/"/g, '').trim();
+        }
+      }
 
-      // For sent messages, look at who you're sending TO
-      // We'll use a regex on the body to find email addresses
-      // Better: get the raw message headers
+      for (const email of emailMatches) {
+        const key = email.toLowerCase();
+        // Skip self
+        if (key === accountEmail.toLowerCase()) continue;
+
+        if (!recipientCounts[key]) {
+          recipientCounts[key] = { name: nameMap[key] || key, count: 0, lastDate: '' };
+        }
+        recipientCounts[key].count++;
+        if (dateHeader > recipientCounts[key].lastDate) {
+          recipientCounts[key].lastDate = dateHeader;
+        }
+      }
     }
 
     totalScanned += batch.messages.length;
@@ -378,61 +405,8 @@ export async function scanSentMail(
     if (!batch.nextPageToken) break;
   }
 
-  // For now, use a simpler approach: search for replies
-  // "in:sent" messages where the subject starts with "Re:" indicate replies
-  const replyCounts: Record<string, { name: string; count: number; lastDate: string }> = {};
-  let replyPageToken: string | undefined;
-  let repliesScanned = 0;
-
-  while (repliesScanned < 500) {
-    const batch = await gmail.listMessages(client, {
-      query: 'in:sent subject:Re:',
-      maxResults: 50,
-      pageToken: replyPageToken,
-    });
-
-    if (!batch.messages || batch.messages.length === 0) break;
-
-    // Get thread info to find who we replied to
-    for (const msg of batch.messages) {
-      try {
-        const thread = await gmail.getThread(client, msg.threadId!);
-        const messages = thread.messages || [];
-
-        // Find the first message in the thread that's not from us
-        for (const threadMsg of messages) {
-          const headers = threadMsg.payload?.headers || [];
-          const from = headers.find(h => h.name?.toLowerCase() === 'from')?.value || '';
-          const fromEmail = from.match(/<(.+?)>/)?.[1] || from;
-          const fromName = from.match(/^(.+?)\s*</)?.[1]?.replace(/"/g, '').trim() || fromEmail;
-
-          // Skip our own messages
-          if (fromEmail.toLowerCase() === accountEmail.toLowerCase()) continue;
-
-          const key = fromEmail.toLowerCase();
-          if (!replyCounts[key]) {
-            replyCounts[key] = { name: fromName, count: 0, lastDate: '' };
-          }
-          replyCounts[key].count++;
-
-          const date = headers.find(h => h.name?.toLowerCase() === 'date')?.value || '';
-          if (date > replyCounts[key].lastDate) {
-            replyCounts[key].lastDate = date;
-          }
-          break; // Only count the first non-self message in the thread
-        }
-      } catch {
-        // Skip threads that fail
-      }
-    }
-
-    repliesScanned += batch.messages.length;
-    replyPageToken = batch.nextPageToken || undefined;
-    if (!batch.nextPageToken) break;
-  }
-
-  // Calculate tiers based on reply counts
-  const entries = Object.entries(replyCounts);
+  // Calculate tiers based on how often you email each person
+  const entries = Object.entries(recipientCounts);
   entries.sort((a, b) => b[1].count - a[1].count);
   const total = entries.length;
 
@@ -461,7 +435,6 @@ export async function scanSentMail(
   });
 
   if (upserts.length > 0) {
-    // Batch upsert in chunks of 50
     for (let i = 0; i < upserts.length; i += 50) {
       const chunk = upserts.slice(i, i + 50);
       await admin.from(TABLES.SENDER_PRIORITIES).upsert(chunk, {
@@ -469,13 +442,6 @@ export async function scanSentMail(
       });
     }
   }
-
-  // Update gmail_accounts with senders found count
-  await admin
-    .from(TABLES.GMAIL_ACCOUNTS)
-    .update({ senders_found: entries.length, status: 'scanned' })
-    .eq('user_id', userId)
-    .eq('email', accountEmail);
 
   return {
     sendersFound: entries.length,
