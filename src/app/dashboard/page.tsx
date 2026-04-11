@@ -1346,7 +1346,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
 
 function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<'count' | 'name'>('count');
+  const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name'>('tier');
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
   const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
@@ -1418,7 +1418,17 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
   }
 
   const groups = Object.values(senderGroups);
-  if (sortBy === 'count') {
+  const tierOrder: Record<string, number> = { C: 0, D: 1 };
+  if (sortBy === 'tier') {
+    groups.sort((a, b) => {
+      const tierA = senderTiers[a.email.toLowerCase()] || '';
+      const tierB = senderTiers[b.email.toLowerCase()] || '';
+      const orderA = tierOrder[tierA] ?? 2; // no tier = last
+      const orderB = tierOrder[tierB] ?? 2;
+      if (orderA !== orderB) return orderA - orderB;
+      return b.messages.length - a.messages.length; // within same tier, most emails first
+    });
+  } else if (sortBy === 'count') {
     groups.sort((a, b) => b.messages.length - a.messages.length);
   } else {
     groups.sort((a, b) => a.name.localeCompare(b.name));
@@ -1504,6 +1514,11 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
         </div>
         <div className="flex gap-2 items-center">
           <span className="text-xs" style={{ color: 'var(--muted)' }}>Sort:</span>
+          <button onClick={() => setSortBy('tier')}
+            className="px-3 py-1 text-xs rounded-full border font-medium"
+            style={{ background: sortBy === 'tier' ? 'var(--accent)' : 'transparent', color: sortBy === 'tier' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
+            By Tier
+          </button>
           <button onClick={() => setSortBy('count')}
             className="px-3 py-1 text-xs rounded-full border font-medium"
             style={{ background: sortBy === 'count' ? 'var(--accent)' : 'transparent', color: sortBy === 'count' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
