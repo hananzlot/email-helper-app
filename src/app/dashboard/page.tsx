@@ -563,7 +563,7 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
 
 // ============ MAIN DASHBOARD ============
 
-type Tab = 'home' | 'inbox' | 'reply-queue' | 'snoozed' | 'cleanup' | 'sent' | 'follow-up' | 'priorities' | 'accounts';
+type Tab = 'home' | 'inbox' | 'reply-queue' | 'snoozed' | 'cleanup' | 'sent' | 'follow-up' | 'priorities' | 'accounts' | 'search-reviews';
 // Note: 'priorities' and 'accounts' are accessible via the Settings gear menu, not the tab bar.
 
 interface ConnectedAccount {
@@ -707,7 +707,7 @@ export default function Dashboard() {
     setSearchSelectedIds(new Set());
   }
 
-  const splitSupportedTabs: Tab[] = ['inbox', 'reply-queue', 'follow-up', 'snoozed', 'cleanup', 'sent'];
+  const splitSupportedTabs: Tab[] = ['inbox', 'reply-queue', 'follow-up', 'snoozed', 'cleanup', 'sent', 'search-reviews'];
   const [splitPreviewId, setSplitPreviewId] = useState<string | null>(null);
   const [splitPreviewAccount, setSplitPreviewAccount] = useState<string | undefined>(undefined);
 
@@ -1561,6 +1561,7 @@ export default function Dashboard() {
     { id: 'cleanup', label: 'Cleanup' },
     { id: 'sent', label: 'Sent' },
     { id: 'inbox', label: 'All Mail' },
+    ...(searchSelectionActive.length > 0 ? [{ id: 'search-reviews' as Tab, label: `Search Reviews (${searchSelectionActive.length})` }] : []),
   ];
 
   // Auth error — show login prompt instead of redirect loop
@@ -1811,7 +1812,10 @@ export default function Dashboard() {
                           <button onClick={() => {
                             const selected = searchResults.filter(m => searchSelectedIds.has(m.id));
                             setSearchSelectionActive(selected);
+                            setActiveTab('search-reviews');
                             setSearchOpen(false);
+                            setSearchQuery('');
+                            setSearchSelectedIds(new Set());
                           }}
                             className="px-3 py-1 text-[10px] font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
                             Open {searchSelectedIds.size} Selected
@@ -1976,98 +1980,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Search selection results — shown when user selects multiple search results */}
-      {searchSelectionActive.length > 0 && (
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-3 p-3 rounded-xl sticky top-0 z-20" style={{ background: '#eff6ff', border: '2px solid var(--accent)' }}>
-            <span className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>
-              {searchSelectionActive.length} search result{searchSelectionActive.length !== 1 ? 's' : ''} selected
-            </span>
-            <div className="flex gap-2">
-              <button onClick={() => {
-                const byAccount = new Map<string, string[]>();
-                for (const m of searchSelectionActive) {
-                  const acct = m.accountEmail || _currentAccount;
-                  if (!byAccount.has(acct)) byAccount.set(acct, []);
-                  byAccount.get(acct)!.push(m.id);
-                }
-                for (const [acct, mIds] of byAccount) handleAction('markRead', mIds, undefined, acct);
-              }}
-                className="px-4 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', background: 'white' }}>
-                Mark Read
-              </button>
-              <button onClick={() => {
-                const byAccount = new Map<string, string[]>();
-                for (const m of searchSelectionActive) {
-                  const acct = m.accountEmail || _currentAccount;
-                  if (!byAccount.has(acct)) byAccount.set(acct, []);
-                  byAccount.get(acct)!.push(m.id);
-                }
-                for (const [acct, mIds] of byAccount) handleAction('archive', mIds, undefined, acct);
-                setSearchSelectionActive([]);
-              }}
-                className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
-                Archive All
-              </button>
-              <button onClick={() => {
-                const byAccount = new Map<string, string[]>();
-                for (const m of searchSelectionActive) {
-                  const acct = m.accountEmail || _currentAccount;
-                  if (!byAccount.has(acct)) byAccount.set(acct, []);
-                  byAccount.get(acct)!.push(m.id);
-                }
-                for (const [acct, mIds] of byAccount) handleAction('trash', mIds, undefined, acct);
-                setSearchSelectionActive([]);
-              }}
-                className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--urgent)' }}>
-                Trash All
-              </button>
-              <button onClick={() => setSearchSelectionActive([])}
-                className="px-4 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                Close
-              </button>
-            </div>
-          </div>
-          <div className="flex flex-col gap-2">
-            {searchSelectionActive.map(msg => (
-              <div key={msg.id} className="p-4 rounded-xl border cursor-pointer hover:shadow-md transition-all"
-                style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
-                data-preview-id={msg.id} data-preview-account={msg.accountEmail || ''}
-                onClick={() => openPreview(msg.id, msg.accountEmail)}
-                onDoubleClick={() => openDialogPreview?.(msg.id, msg.accountEmail)}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
-                      style={{ background: msg.isUnread ? 'var(--accent)' : '#94a3b8' }}>
-                      {(msg.sender || '?')[0]?.toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm">{msg.sender}</span>
-                        <span className="text-[10px]" style={{ color: 'var(--muted)' }}>
-                          {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                        </span>
-                        {msg.accountEmail && accounts.length > 1 && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#f1f5f9', color: '#64748b' }}>{msg.accountEmail}</span>
-                        )}
-                      </div>
-                      <div className="text-sm font-medium">{msg.subject}</div>
-                      <div className="text-xs line-clamp-2" style={{ color: 'var(--muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{cleanSnippet(msg.snippet || '')}</div>
-                    </div>
-                  </div>
-                  <div className="flex gap-1.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => handleAction('archive', [msg.id], undefined, msg.accountEmail)}
-                      className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
-                    <button onClick={() => { handleAction('trash', [msg.id], undefined, msg.accountEmail); setSearchSelectionActive(prev => prev.filter(m => m.id !== msg.id)); }}
-                      className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Tab content — fixed width container prevents layout shift between tabs */}
       <div className="w-full" style={{ minHeight: '60vh' }}>
         {(() => {
@@ -2094,6 +2006,7 @@ export default function Dashboard() {
               {activeTab === 'snoozed' && <SnoozedTab onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
               {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
               {activeTab === 'sent' && <SentMailTab accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
+              {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} />}
               {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
               {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
             </>
@@ -5095,6 +5008,190 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ============ SEARCH REVIEWS TAB ============
+
+function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPreview, quickReplyTemplates, onClose, onRemove }: {
+  messages: GmailMessage[];
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
+  showToast: (title: string, subtitle?: string) => void;
+  onPreview: (messageId: string, accountEmail?: string) => void;
+  onDialogPreview?: (messageId: string, accountEmail?: string) => void;
+  quickReplyTemplates: { id: string; label: string; body: string }[];
+  onClose: () => void;
+  onRemove: (id: string) => void;
+}) {
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyAllTo, setReplyAllTo] = useState<string | null>(null);
+  const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiGet('senders');
+        if (res.success && res.data) {
+          const tiers: Record<string, string> = {};
+          for (const s of res.data) tiers[s.sender_email.toLowerCase()] = s.tier;
+          setSenderTiers(tiers);
+        }
+      } catch {}
+    })();
+  }, []);
+
+  if (messages.length === 0) return (
+    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+      <p className="text-lg mb-2">No search results to review</p>
+      <p className="text-sm">Use the search bar to find emails, select them, and click "Open Selected".</p>
+    </div>
+  );
+
+  const allIds = messages.map(m => m.id);
+
+  return (
+    <div>
+      {/* Header with bulk actions */}
+      <div className="flex items-center justify-between mb-4 p-3 rounded-xl sticky top-0 z-20" style={{ background: '#eff6ff', border: '2px solid var(--accent)' }}>
+        <span className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>
+          {messages.length} email{messages.length !== 1 ? 's' : ''} to review
+        </span>
+        <div className="flex gap-2">
+          <button onClick={() => {
+            const byAccount = new Map<string, string[]>();
+            for (const m of messages) { const a = m.accountEmail || _currentAccount; if (!byAccount.has(a)) byAccount.set(a, []); byAccount.get(a)!.push(m.id); }
+            for (const [a, ids] of byAccount) onAction('markRead', ids, undefined, a);
+          }}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', background: 'white' }}>Mark All Read</button>
+          <button onClick={() => {
+            const byAccount = new Map<string, string[]>();
+            for (const m of messages) { const a = m.accountEmail || _currentAccount; if (!byAccount.has(a)) byAccount.set(a, []); byAccount.get(a)!.push(m.id); }
+            for (const [a, ids] of byAccount) onAction('archive', ids, undefined, a);
+            onClose();
+          }}
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Archive All</button>
+          <button onClick={() => {
+            const byAccount = new Map<string, string[]>();
+            for (const m of messages) { const a = m.accountEmail || _currentAccount; if (!byAccount.has(a)) byAccount.set(a, []); byAccount.get(a)!.push(m.id); }
+            for (const [a, ids] of byAccount) onAction('trash', ids, undefined, a);
+            onClose();
+          }}
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--urgent)' }}>Trash All</button>
+          <button onClick={onClose}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Close</button>
+        </div>
+      </div>
+
+      {/* Email cards — triage style */}
+      <div className="flex flex-col gap-2">
+        {messages.map(msg => {
+          const tier = senderTiers[msg.senderEmail?.toLowerCase()] || '';
+          const borderColor = tier === 'A' ? '#22c55e' : tier === 'B' ? '#f59e0b' : tier === 'C' ? '#3b82f6' : 'var(--border)';
+          const bgColor = tier === 'A' ? '#f0fdf4' : tier === 'B' ? '#fffbeb' : tier === 'C' ? '#eff6ff' : 'var(--card)';
+
+          return (
+            <div key={msg.id}
+              data-preview-id={msg.id}
+              data-preview-account={msg.accountEmail || ''}
+              className="p-4 rounded-xl border transition-all cursor-pointer"
+              style={{ background: bgColor, borderColor, borderLeftWidth: 4 }}
+              onClick={() => onPreview(msg.id, msg.accountEmail)}
+              onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-sm">{msg.sender}</span>
+                    <TierDropdown currentTier={tier} senderEmail={msg.senderEmail} senderName={msg.sender}
+                      onTierChanged={(newTier) => {
+                        setSenderTiers(prev => ({ ...prev, [msg.senderEmail.toLowerCase()]: newTier }));
+                        showToast(`Set to Tier ${newTier}`, msg.sender);
+                      }} />
+                    {msg.isUnread && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: 'var(--accent)' }} />}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-sm font-medium">{msg.subject}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                      {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <div className="text-xs mt-0.5 line-clamp-2" style={{ color: 'var(--muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{cleanSnippet(msg.snippet || '')}</div>
+                </div>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                  {msg.accountEmail && <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{msg.accountEmail}</span>}
+                  {tier && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: bgColor, color: borderColor, border: `1px solid ${borderColor}` }}>Tier {tier}</span>}
+                </div>
+              </div>
+              <div className="flex gap-2 mt-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                <button onClick={() => { setReplyingTo(replyingTo === msg.id && !replyAllTo ? null : msg.id); setReplyAllTo(null); }}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: replyingTo === msg.id && !replyAllTo ? '#6366f1' : 'var(--accent)' }}>Reply</button>
+                <button onClick={() => { setReplyAllTo(replyAllTo === msg.id ? null : msg.id); setReplyingTo(replyAllTo === msg.id ? null : msg.id); }}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border" style={{ borderColor: 'var(--accent)', color: replyAllTo === msg.id ? '#fff' : 'var(--accent)', background: replyAllTo === msg.id ? '#7c3aed' : undefined }}>Reply All</button>
+                {quickReplyTemplates.length > 0 && (
+                  <QuickReplyDropdown templates={quickReplyTemplates}
+                    senderEmail={msg.senderEmail} senderName={msg.sender}
+                    cc={msg.cc || msg.to || ''} subject={msg.subject}
+                    onSend={async (body, label, replyAll) => {
+                      const savedAccount = _currentAccount;
+                      if (msg.accountEmail && msg.accountEmail !== _currentAccount) setCurrentAccount(msg.accountEmail);
+                      const payload: Record<string, unknown> = { to: msg.senderEmail, subject: msg.subject, body, threadId: msg.threadId, inReplyTo: msg.id };
+                      if (replyAll) {
+                        const ccList = (msg.cc || msg.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(msg.senderEmail.toLowerCase()) && !(msg.accountEmail && e.toLowerCase().includes(msg.accountEmail.toLowerCase())));
+                        if (ccList.length > 0) payload.cc = ccList.join(', ');
+                      }
+                      const res = await gmailPost('reply', payload);
+                      if (msg.accountEmail) setCurrentAccount(savedAccount);
+                      if (res.success) { showToast(`Quick reply sent${replyAll ? ' to all' : ''}`, msg.sender); onAction('archive', [msg.id], undefined, msg.accountEmail); onRemove(msg.id); }
+                      else showToast('Failed', res.error);
+                    }} />
+                )}
+                <SnoozeDropdown onSnooze={(hours, label) => {
+                  const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+                  apiPost('queue', { message_id: msg.id, account_email: msg.accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: msg.sender, sender_email: msg.senderEmail, subject: msg.subject });
+                  showToast('Snoozed', `Will reappear ${label}`);
+                  onRemove(msg.id);
+                }} />
+                <button onClick={() => { onAction('archive', [msg.id], undefined, msg.accountEmail); onRemove(msg.id); }}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                <button onClick={() => { onAction('markRead', [msg.id], undefined, msg.accountEmail); }}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Mark Read</button>
+                <button onClick={() => { onAction('trash', [msg.id], undefined, msg.accountEmail); onRemove(msg.id); }}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                <button onClick={() => setConfirmDelete(msg.id + '::' + (msg.accountEmail || ''))}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
+              </div>
+              {replyingTo === msg.id && (
+                <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+                  <ReplyComposer
+                    to={msg.senderEmail} subject={msg.subject}
+                    threadId={msg.threadId} messageId={msg.id}
+                    showToast={showToast} accountEmail={msg.accountEmail}
+                    replyAll={replyAllTo === msg.id}
+                    cc={replyAllTo === msg.id ? (msg.cc || msg.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(msg.senderEmail.toLowerCase()) && !(msg.accountEmail && e.toLowerCase().includes(msg.accountEmail.toLowerCase()))).join(', ') : undefined}
+                    onSent={() => { setReplyingTo(null); setReplyAllTo(null); onAction('archive', [msg.id], undefined, msg.accountEmail); onRemove(msg.id); }}
+                    onCancel={() => { setReplyingTo(null); setReplyAllTo(null); }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {confirmDelete && (() => {
+        const [msgId, acctEmail] = confirmDelete.split('::');
+        return (
+          <ConfirmModal
+            title="Permanently Delete"
+            message="This will permanently delete this message from Gmail. This cannot be undone."
+            confirmLabel="Delete Forever"
+            confirmColor="#dc2626"
+            onConfirm={() => { onAction('delete', [msgId], undefined, acctEmail); onRemove(msgId); setConfirmDelete(null); }}
+            onCancel={() => setConfirmDelete(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
