@@ -348,6 +348,8 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
   onTierChanged: (newTier: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = React.useRef<HTMLButtonElement>(null);
 
   const tiers = [
     { value: 'A', label: 'Tier A', desc: 'Top priority', bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' },
@@ -357,6 +359,22 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
   ];
 
   const current = tiers.find(t => t.value === currentTier) || { value: currentTier || '?', label: currentTier ? `Tier ${currentTier}` : 'No tier', bg: '#f3f4f6', color: '#6b7280', border: '#d1d5db' };
+
+  function toggleOpen() {
+    if (open) { setOpen(false); return; }
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const menuHeight = 200; // approximate height of 4 tier options
+      const spaceBelow = window.innerHeight - rect.bottom;
+      // Open upward if not enough space below
+      if (spaceBelow < menuHeight) {
+        setMenuPos({ top: rect.top - menuHeight - 4, left: rect.left });
+      } else {
+        setMenuPos({ top: rect.bottom + 4, left: rect.left });
+      }
+    }
+    setOpen(true);
+  }
 
   async function changeTier(newTier: string) {
     setOpen(false);
@@ -373,16 +391,16 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
 
   return (
     <div className="relative inline-block">
-      <button onClick={() => setOpen(!open)}
+      <button ref={btnRef} onClick={toggleOpen}
         className="text-[10px] font-bold px-2 py-0.5 rounded-full cursor-pointer hover:opacity-80 transition-opacity"
         style={{ background: current.bg, color: current.color, border: `1px solid ${current.border}` }}>
         {current.label} ▾
       </button>
-      {open && (
+      {open && menuPos && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1 min-w-[160px]"
-            style={{ background: 'white', borderColor: 'var(--border)' }}>
+          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+          <div className="fixed z-[70] rounded-lg border shadow-lg py-1 min-w-[160px]"
+            style={{ background: 'white', borderColor: 'var(--border)', top: menuPos.top, left: menuPos.left }}>
             {tiers.map((t) => (
               <button key={t.value} onClick={() => changeTier(t.value)}
                 className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 transition-colors flex items-center gap-2"
@@ -1309,6 +1327,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
   const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
   const [tiersLoaded, setTiersLoaded] = useState(false);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
 
   // Load sender priorities to know who is noise vs signal
   useEffect(() => {
@@ -1494,6 +1513,10 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
               className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--urgent)' }}>
               Trash All
             </button>
+            <button onClick={() => setConfirmDeleteAll(true)}
+              className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: '#991b1b' }}>
+              Delete All
+            </button>
           </div>
         </div>
       )}
@@ -1576,6 +1599,18 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
           );
         })}
       </div>
+
+      {/* Delete All confirmation */}
+      {confirmDeleteAll && (
+        <ConfirmModal
+          title="Permanently Delete All Selected"
+          message={`This will permanently delete ${selectedCount} message${selectedCount > 1 ? 's' : ''} from Gmail. This cannot be undone.`}
+          confirmLabel={`Delete ${selectedCount} Forever`}
+          confirmColor="#991b1b"
+          onConfirm={() => { onAction('delete', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); setConfirmDeleteAll(false); }}
+          onCancel={() => setConfirmDeleteAll(false)}
+        />
+      )}
     </div>
   );
 }
