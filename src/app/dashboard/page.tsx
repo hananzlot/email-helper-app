@@ -2738,6 +2738,21 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ ids: string[]; count: number } | null>(null);
+  const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
+
+  // Load sender tiers for tier dropdown
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiGet('senders');
+        if (res.success && res.data) {
+          const tiers: Record<string, string> = {};
+          for (const s of res.data) tiers[s.sender_email.toLowerCase()] = s.tier;
+          setSenderTiers(tiers);
+        }
+      } catch {}
+    })();
+  }, []);
   const toggleSelect = (id: string) => setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectAll = () => setSelected(selected.size === messages.length ? new Set() : new Set(messages.map(m => m.id)));
   const selectedIds = Array.from(selected);
@@ -2795,6 +2810,15 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
               </div>
               {/* Action bar */}
               <div className="flex gap-1 px-4 pb-3 flex-wrap">
+                <TierDropdown
+                  currentTier={senderTiers[msg.senderEmail.toLowerCase()] || ''}
+                  senderEmail={msg.senderEmail}
+                  senderName={msg.sender}
+                  onTierChanged={(newTier) => {
+                    setSenderTiers(prev => ({ ...prev, [msg.senderEmail.toLowerCase()]: newTier }));
+                    showToast(`Set to Tier ${newTier}`, msg.sender);
+                  }}
+                />
                 <button onClick={() => { setReplyingTo(replyingTo === msg.id ? null : msg.id); }}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
                 <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
