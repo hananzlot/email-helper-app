@@ -564,6 +564,7 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
 // ============ MAIN DASHBOARD ============
 
 type Tab = 'home' | 'inbox' | 'reply-queue' | 'snoozed' | 'cleanup' | 'sent' | 'follow-up' | 'priorities' | 'accounts';
+// Note: 'priorities' and 'accounts' are accessible via the Settings gear menu, not the tab bar.
 
 interface ConnectedAccount {
   email: string;
@@ -619,6 +620,7 @@ export default function Dashboard() {
   // Action history — log of all actions taken, with undo support
   const [actionHistory, setActionHistory] = useState<ActionHistoryEntry[]>([]);
   const [showActionHistory, setShowActionHistory] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
 
   // Global search — searches Gmail via API across all accounts
   async function performSearch(query: string) {
@@ -1247,11 +1249,8 @@ export default function Dashboard() {
     setTabCounts(prev => prev[tabId] === count ? prev : { ...prev, [tabId]: count });
   }, []);
 
-  // Report All Mail count from loaded messages
-  useEffect(() => {
-    const unread = messages.filter(m => m.isUnread).length;
-    reportTabCount('inbox', unread);
-  }, [messages, reportTabCount]);
+  // All Mail tab: no count badge — its count doesn't align with
+  // the categorised tabs (Triage, Cleanup, etc.) and confuses users.
 
   // Load all tab counts upfront (not just when each tab is visited)
   const loadAllTabCounts = useCallback(async () => {
@@ -1285,6 +1284,7 @@ export default function Dashboard() {
           return false;
         }).length;
         reportTabCount('cleanup', cleanupCount);
+        // Priorities count stored for the settings menu badge
         reportTabCount('priorities', sendersRes.data.length);
       }
 
@@ -1351,7 +1351,6 @@ export default function Dashboard() {
     { id: 'cleanup', label: 'Cleanup' },
     { id: 'sent', label: 'Sent' },
     { id: 'inbox', label: 'All Mail' },
-    { id: 'priorities', label: 'Priorities' },
   ];
 
   // Auth error — show login prompt instead of redirect loop
@@ -1425,43 +1424,78 @@ export default function Dashboard() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
               )}
             </button>}
-            {/* Action History button */}
-            <button
-              onClick={() => setShowActionHistory(!showActionHistory)}
-              className="w-9 h-9 rounded-lg border flex items-center justify-center transition-all hover:shadow-sm relative"
-              title="Action history"
-              style={{ borderColor: showActionHistory ? 'var(--accent)' : 'var(--border)', background: showActionHistory ? '#eff6ff' : 'white', color: showActionHistory ? 'var(--accent)' : '#94a3b8' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-              </svg>
-              {actionHistory.filter(h => !h.undone && h.undoAction).length > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style={{ background: '#f59e0b' }}>
-                  {actionHistory.filter(h => !h.undone && h.undoAction).length}
-                </span>
+            {/* Settings gear menu — contains Priorities, Accounts, Action History, Logout */}
+            <div className="relative">
+              <button
+                onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+                className="w-9 h-9 rounded-lg border flex items-center justify-center transition-all hover:shadow-sm relative"
+                title="Settings"
+                style={{ borderColor: showSettingsMenu ? 'var(--accent)' : 'var(--border)', background: showSettingsMenu ? '#eff6ff' : 'white', color: showSettingsMenu ? 'var(--accent)' : '#94a3b8' }}>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                {actionHistory.filter(h => !h.undone && h.undoAction).length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style={{ background: '#f59e0b' }}>
+                    {actionHistory.filter(h => !h.undone && h.undoAction).length}
+                  </span>
+                )}
+              </button>
+              {showSettingsMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowSettingsMenu(false)} />
+                  <div className="absolute right-0 top-full mt-2 z-50 w-56 rounded-xl border shadow-xl overflow-hidden" style={{ background: 'white', borderColor: 'var(--border)' }}>
+                    <button
+                      onClick={() => { setActiveTab('priorities'); setShowSettingsMenu(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium hover:bg-gray-50 transition-colors text-left"
+                      style={{ color: activeTab === 'priorities' ? 'var(--accent)' : '#334155' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                      </svg>
+                      Sender Priorities
+                      {tabCounts['priorities'] > 0 && (
+                        <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                          {tabCounts['priorities']}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => { setActiveTab('accounts'); setShowSettingsMenu(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium hover:bg-gray-50 transition-colors text-left"
+                      style={{ color: activeTab === 'accounts' ? 'var(--accent)' : '#334155' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                      </svg>
+                      Accounts
+                    </button>
+                    <div style={{ height: 1, background: 'var(--border)' }} />
+                    <button
+                      onClick={() => { setShowActionHistory(true); setShowSettingsMenu(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium hover:bg-gray-50 transition-colors text-left"
+                      style={{ color: '#334155' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                      </svg>
+                      Action History
+                      {actionHistory.filter(h => !h.undone && h.undoAction).length > 0 && (
+                        <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{ background: '#f59e0b' }}>
+                          {actionHistory.filter(h => !h.undone && h.undoAction).length}
+                        </span>
+                      )}
+                    </button>
+                    <div style={{ height: 1, background: 'var(--border)' }} />
+                    <button
+                      onClick={() => { window.location.href = '/api/emailHelperV2/auth/logout'; }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium hover:bg-red-50 transition-colors text-left"
+                      style={{ color: '#ef4444' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                      </svg>
+                      Sign Out
+                    </button>
+                  </div>
+                </>
               )}
-            </button>
-            {/* Accounts settings button */}
-            <button
-              onClick={() => setActiveTab('accounts')}
-              className="px-3 py-2 rounded-lg border text-xs font-medium transition-all hover:shadow-sm"
-              title="Manage accounts & settings"
-              style={{
-                background: activeTab === 'accounts' ? 'var(--accent)' : 'white',
-                color: activeTab === 'accounts' ? 'white' : '#64748b',
-                borderColor: activeTab === 'accounts' ? 'var(--accent)' : 'var(--border)',
-              }}>
-              ⚙ Accounts
-            </button>
-            {/* Logout button */}
-            <button
-              onClick={() => { window.location.href = '/api/emailHelperV2/auth/logout'; }}
-              className="w-9 h-9 rounded-lg border flex items-center justify-center transition-all hover:shadow-sm hover:bg-red-50"
-              title="Sign out"
-              style={{ borderColor: 'var(--border)', color: '#94a3b8' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
-            </button>
+            </div>
           </div>
         </div>
 

@@ -14,8 +14,9 @@
 - `src/app/globals.css` — CSS variables and theme
 
 ## Tab Structure
-Home | Triage | Follow Up | Snoozed | Cleanup | Sent | All Mail | Priorities
-(Accounts is in the header, not the tab bar)
+Home | Triage | Follow Up | Snoozed | Cleanup | Sent | All Mail
+(Priorities, Accounts, and Action History are in the Settings ⚙ gear menu in the header — not the tab bar)
+(All Mail tab has no count badge to avoid confusion with categorised tab counts)
 
 ## Important Rules
 
@@ -51,6 +52,12 @@ and/or the "Pro tips" section so users can discover and learn it. This is critic
 - `--important` / `--important-bg`: amber
 - `--normal` / `--normal-bg`: green
 - `--bg`: page background (#f8f9fa)
+
+### File Sync Warning
+- The local project at `~/Documents/email-helper-app` is the source of truth that feeds GitHub and Netlify deployments.
+- Previous Cowork sessions may write code to temporary session directories. Those changes are deployed to Netlify and pushed to GitHub, but the LOCAL project folder is NOT automatically updated.
+- **ALWAYS verify the local file matches GitHub before editing.** Run `git pull origin main` or use `git show origin/main:<filepath>` to compare.
+- If the local file is outdated, fetch from origin and overwrite it before making changes.
 
 ## Build & Deploy
 ```bash
