@@ -120,6 +120,20 @@ export async function PUT(request: NextRequest) {
       return apiSuccess({ merged: true, primary: primary.sender_email, removed: secondary.sender_email, combined_count: combinedCount });
     }
 
+    // Auto-archive toggle update
+    if ('auto_archive_updates' in body && body.sender_email && !body.tier) {
+      const { sender_email, auto_archive_updates } = body;
+      const { data, error } = await admin
+        .from(TABLES.SENDER_PRIORITIES)
+        .update({ auto_archive_updates: !!auto_archive_updates, updated_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .eq('sender_email', sender_email)
+        .select()
+        .single();
+      if (error) return apiError(error.message, 500);
+      return apiSuccess(data);
+    }
+
     // Regular tier update
     const { sender_email, tier, display_name } = body;
     if (!sender_email || !tier) return apiError('Missing sender_email or tier');

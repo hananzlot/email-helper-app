@@ -11,6 +11,7 @@ interface SenderData {
   display_name: string;
   reply_count: number;
   tier: SenderTier;
+  auto_archive_updates?: boolean;
 }
 
 interface RuleData {
@@ -41,7 +42,7 @@ export async function runTriage(
   const [sendersRes, rulesRes, inboxData] = await Promise.all([
     admin
       .from(TABLES.SENDER_PRIORITIES)
-      .select('sender_email, display_name, reply_count, tier')
+      .select('sender_email, display_name, reply_count, tier, auto_archive_updates')
       .eq('user_id', userId),
     admin
       .from(TABLES.NOTIFICATION_RULES)
@@ -134,9 +135,37 @@ export async function runTriage(
     { onConflict: 'user_id,account_email' }
   );
 
+  // Auto-archive update-only messages from high-tier senders with auto_archive_updates enabled
+  const autoArchiveIds: string[] = [];
+  const remainingTriaged = triaged.filter((e) => {
+    const senderEmail = e.senderEmail.toLowerCase();
+    const senderData = senders[senderEmail];
+    if (
+      senderData?.auto_archive_updates &&
+      (senderData.tier === 'A' || senderData.tier === 'B' || senderData.tier === 'C') &&
+      !isLikelyNeedsReply(e) &&
+      e.priority !== 'urgent'
+    ) {
+      autoArchiveIds.push(e.id);
+      return false; // Remove from triage queue
+    }
+    return true;
+  });
+
+  // Auto-archive in Gmail (batch)
+  if (autoArchiveIds.length > 0) {
+    try {
+      for (const msgId of autoArchiveIds) {
+        await gmail.archiveMessage(client, msgId);
+      }
+    } catch (err) {
+      console.error('Auto-archive failed:', err);
+    }
+  }
+
   // Add signal emails to reply queue. Signal = Tier A/B/C senders + high priority.
   // Noise (Tier D, unknown, automated) stays out — that's for the Cleanup tab.
-  const signalEmails = triaged.filter((e) => {
+  const signalEmails = remainingTriaged.filter((e) => {
     // Tier A/B/C senders go to reply queue (Triage tab)
     if (e.tier === 'A' || e.tier === 'B' || e.tier === 'C') return true;
     // Urgent or important priority (high score) go to reply queue

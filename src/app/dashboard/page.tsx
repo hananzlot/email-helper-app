@@ -1003,7 +1003,6 @@ export default function Dashboard() {
     { id: 'sent', label: 'Sent' },
     { id: 'inbox', label: 'All Mail' },
     { id: 'priorities', label: 'Priorities' },
-    { id: 'accounts', label: 'Accounts' },
   ];
 
   // Auth error — show login prompt instead of redirect loop
@@ -1035,7 +1034,7 @@ export default function Dashboard() {
             <h1 className="text-2xl font-bold">Email Helper</h1>
             <p className="text-sm" style={{ color: 'var(--muted)' }}>Inbox Command Center</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {/* Account Switcher with Unified toggle */}
             {accounts.length > 1 ? (
               <select
@@ -1059,6 +1058,28 @@ export default function Dashboard() {
                 <strong>{profile.emailAddress}</strong>
               </div>
             ) : null}
+            {/* Accounts settings button */}
+            <button
+              onClick={() => setActiveTab('accounts')}
+              className="px-3 py-2 rounded-lg border text-xs font-medium transition-all hover:shadow-sm"
+              title="Manage accounts & settings"
+              style={{
+                background: activeTab === 'accounts' ? 'var(--accent)' : 'white',
+                color: activeTab === 'accounts' ? 'white' : '#64748b',
+                borderColor: activeTab === 'accounts' ? 'var(--accent)' : 'var(--border)',
+              }}>
+              ⚙ Accounts
+            </button>
+            {/* Logout button */}
+            <button
+              onClick={() => { window.location.href = '/api/emailHelperV2/auth/logout'; }}
+              className="w-9 h-9 rounded-lg border flex items-center justify-center transition-all hover:shadow-sm hover:bg-red-50"
+              title="Sign out"
+              style={{ borderColor: 'var(--border)', color: '#94a3b8' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -1418,9 +1439,13 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
               <div className="font-semibold text-xs mb-2" style={{ color: '#166534' }}>Pro tips</div>
               <div className="flex flex-col gap-1.5 text-xs" style={{ color: '#15803d' }}>
                 <div>• <strong>Snooze</strong> emails you need to deal with but not right now — they&apos;ll pop back into your queue at the time you choose.</div>
-                <div>• Use <strong>Priorities</strong> to merge duplicate senders (same person, different email addresses) for cleaner stats.</div>
-                <div>• Triage runs automatically every 2 minutes. You can also run it manually from Accounts or the button above.</div>
+                <div>• <strong>Quick Reply</strong> — in Triage, use the &quot;Quick Reply&quot; dropdown to send a template response and auto-archive in one click.</div>
+                <div>• <strong>Drag to reorder</strong> — drag Triage cards to rearrange priority. Pin important emails with the 📌 button to keep them at top.</div>
+                <div>• <strong>Undo</strong> — after archiving or trashing, you get a 5-second window to undo. Go fast, undo if needed.</div>
+                <div>• <strong>Auto-Clean</strong> — in Priorities, enable &quot;Auto-Clean&quot; for high-tier senders whose update emails should be auto-archived during triage.</div>
+                <div>• <strong>Merge Senders</strong> — in Priorities, click &quot;Merge Senders&quot; to manually combine duplicate contacts, or use the auto-detected suggestions.</div>
                 <div>• The <strong>Sent</strong> tab groups your outgoing mail into conversations — no more scrolling through duplicates.</div>
+                <div>• Triage runs automatically every 2 minutes. You can also trigger it manually from the button above.</div>
               </div>
             </div>
           </div>
@@ -3597,7 +3622,7 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
           <div style={{ maxHeight: 400, overflowY: 'auto' }}>
             <table className="w-full text-sm">
               <thead><tr className="text-xs uppercase" style={{ color: 'var(--muted)' }}>
-                <th className="text-left p-2">Sender</th><th className="p-2 text-center">Emails Sent</th><th className="p-2">Tier</th><th className="p-2"></th>
+                <th className="text-left p-2">Sender</th><th className="p-2 text-center">Emails Sent</th><th className="p-2">Tier</th><th className="p-2 text-center" title="Auto-archive update-only messages from this sender">Auto-Clean</th><th className="p-2"></th>
               </tr></thead>
               <tbody>
                 {filteredSenders.slice(0, 100).map((s: any) => {
@@ -3630,12 +3655,32 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
                             ))}
                           </div>
                         </td>
+                        <td className="p-2 text-center">
+                          <button
+                            onClick={async () => {
+                              const newVal = !s.auto_archive_updates;
+                              const res = await apiPut('senders', { sender_email: s.sender_email, auto_archive_updates: newVal });
+                              if (res.success) {
+                                setSenders((prev: any[]) => prev.map((sender: any) => sender.sender_email === s.sender_email ? { ...sender, auto_archive_updates: newVal } : sender));
+                                showToast(newVal ? 'Auto-clean ON' : 'Auto-clean OFF', s.display_name);
+                              }
+                            }}
+                            className="text-xs px-2 py-1 rounded-full font-medium transition-all"
+                            title={s.auto_archive_updates ? 'Updates from this sender will be auto-archived' : 'Click to auto-archive update-only messages'}
+                            style={{
+                              background: s.auto_archive_updates ? '#dcfce7' : '#f1f5f9',
+                              color: s.auto_archive_updates ? '#166534' : '#94a3b8',
+                              border: s.auto_archive_updates ? '1px solid #86efac' : '1px solid #e2e8f0',
+                            }}>
+                            {s.auto_archive_updates ? 'ON' : 'OFF'}
+                          </button>
+                        </td>
                         <td className="p-2">
                           <button onClick={() => removeSender(s.sender_email)} className="text-xs px-2 py-0.5 rounded border text-red-400 hover:text-red-600" style={{ borderColor: 'var(--border)' }}>✕</button>
                         </td>
                       </tr>
                       {isExpanded && (
-                        <tr><td colSpan={4} className="p-0">
+                        <tr><td colSpan={5} className="p-0">
                           <div className="px-4 py-3" style={{ background: '#f8fafc', borderBottom: '1px solid var(--border)' }}>
                             {senderEmailsLoading ? (
                               <div className="text-xs py-3 text-center" style={{ color: 'var(--muted)' }}>Loading recent emails...</div>
