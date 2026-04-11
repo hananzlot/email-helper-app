@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import type { GmailMessage } from '@/types';
 
 // ============ API HELPERS ============
@@ -1515,8 +1515,30 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   const [addTier, setAddTier] = useState('A');
   const [showAddForm, setShowAddForm] = useState(false);
   const [filterTier, setFilterTier] = useState<string>('all');
+  const [expandedSender, setExpandedSender] = useState<string | null>(null);
+  const [senderEmails, setSenderEmails] = useState<any[]>([]);
+  const [senderEmailsLoading, setSenderEmailsLoading] = useState(false);
 
   useEffect(() => { loadData(); }, []);
+
+  async function loadSenderEmails(senderEmail: string) {
+    if (expandedSender === senderEmail) {
+      setExpandedSender(null);
+      return;
+    }
+    setExpandedSender(senderEmail);
+    setSenderEmails([]);
+    setSenderEmailsLoading(true);
+    try {
+      const res = await gmailGet('search', { q: `from:${senderEmail}`, max: '4' });
+      if (res.success && res.data?.messages) {
+        setSenderEmails(res.data.messages);
+      }
+    } catch (e) {
+      console.error('Failed to load sender emails:', e);
+    }
+    setSenderEmailsLoading(false);
+  }
 
   async function loadData() {
     setLoading(true);
@@ -1662,30 +1684,71 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
                 <th className="text-left p-2">Sender</th><th className="p-2 text-center">Replies</th><th className="p-2">Tier</th><th className="p-2"></th>
               </tr></thead>
               <tbody>
-                {filteredSenders.slice(0, 100).map((s: any) => (
-                  <tr key={s.sender_email} className="border-t" style={{ borderColor: 'var(--border)' }}>
-                    <td className="p-2"><div className="font-medium text-sm">{s.display_name}</div><div className="text-xs" style={{ color: 'var(--muted)' }}>{s.sender_email}</div></td>
-                    <td className="p-2 text-center font-semibold">{s.reply_count}</td>
-                    <td className="p-2">
-                      <div className="flex gap-1">
-                        {tiers.map(t => (
-                          <button key={t} onClick={() => changeTier(s.sender_email, t)}
-                            className="text-[10px] font-bold px-2 py-0.5 rounded-full transition-all"
-                            style={{
-                              background: s.tier === t ? tierColors[t] : 'transparent',
-                              color: s.tier === t ? tierText[t] : 'var(--muted)',
-                              border: `1px solid ${s.tier === t ? tierText[t] + '40' : 'var(--border)'}`,
-                            }}>
-                            {t}
-                          </button>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="p-2">
-                      <button onClick={() => removeSender(s.sender_email)} className="text-xs px-2 py-0.5 rounded border text-red-400 hover:text-red-600" style={{ borderColor: 'var(--border)' }}>✕</button>
-                    </td>
-                  </tr>
-                ))}
+                {filteredSenders.slice(0, 100).map((s: any) => {
+                  const isExpanded = expandedSender === s.sender_email;
+                  return (
+                    <React.Fragment key={s.sender_email}>
+                      <tr className="border-t cursor-pointer hover:bg-gray-50" style={{ borderColor: 'var(--border)' }}>
+                        <td className="p-2" onClick={() => loadSenderEmails(s.sender_email)}>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{isExpanded ? '▼' : '▶'}</span>
+                            <div>
+                              <div className="font-medium text-sm">{s.display_name}</div>
+                              <div className="text-xs" style={{ color: 'var(--muted)' }}>{s.sender_email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-2 text-center font-semibold">{s.reply_count}</td>
+                        <td className="p-2">
+                          <div className="flex gap-1">
+                            {tiers.map(t => (
+                              <button key={t} onClick={() => changeTier(s.sender_email, t)}
+                                className="text-[10px] font-bold px-2 py-0.5 rounded-full transition-all"
+                                style={{
+                                  background: s.tier === t ? tierColors[t] : 'transparent',
+                                  color: s.tier === t ? tierText[t] : 'var(--muted)',
+                                  border: `1px solid ${s.tier === t ? tierText[t] + '40' : 'var(--border)'}`,
+                                }}>
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="p-2">
+                          <button onClick={() => removeSender(s.sender_email)} className="text-xs px-2 py-0.5 rounded border text-red-400 hover:text-red-600" style={{ borderColor: 'var(--border)' }}>✕</button>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr><td colSpan={4} className="p-0">
+                          <div className="px-4 py-3" style={{ background: '#f8fafc', borderBottom: '1px solid var(--border)' }}>
+                            {senderEmailsLoading ? (
+                              <div className="text-xs py-3 text-center" style={{ color: 'var(--muted)' }}>Loading recent emails...</div>
+                            ) : senderEmails.length === 0 ? (
+                              <div className="text-xs py-3 text-center" style={{ color: 'var(--muted)' }}>No recent emails found from this sender</div>
+                            ) : (
+                              <div className="flex flex-col gap-2">
+                                <div className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--muted)' }}>Last {senderEmails.length} emails</div>
+                                {senderEmails.map((msg: any) => (
+                                  <div key={msg.id} className="flex items-start gap-3 p-2.5 rounded-lg border" style={{ background: 'white', borderColor: 'var(--border)' }}>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-sm font-medium truncate">{msg.subject}</div>
+                                      <div className="text-xs mt-0.5 line-clamp-2" style={{ color: 'var(--muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                        {decodeHtmlEntities(msg.snippet)}
+                                      </div>
+                                    </div>
+                                    <div className="text-[10px] flex-shrink-0 whitespace-nowrap" style={{ color: 'var(--muted)' }}>
+                                      {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </td></tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
