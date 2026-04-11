@@ -1159,7 +1159,14 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
                           }
                         }} />
                     </div>
-                    <div className="text-sm font-medium mt-0.5 cursor-pointer hover:underline" onClick={() => onPreview(q.message_id, q.account_email)}>{q.subject}</div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-sm font-medium cursor-pointer hover:underline" onClick={() => onPreview(q.message_id, q.account_email)}>{q.subject}</span>
+                      {q.received && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                          {new Date(q.received).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(q.summary || '')}</div>
                     <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{q.account_email} &middot; Score: {q.priority_score}/10</div>
                   </div>
