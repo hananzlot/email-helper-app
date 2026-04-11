@@ -650,27 +650,28 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
     });
   }, [queue]);
 
-  const active = queue.filter(q => q.status === 'active');
-  const done = queue.filter(q => q.status === 'done');
-  const snoozed = queue.filter(q => q.status === 'snoozed');
+  // Filter out low-priority items — those belong in Cleanup, not here
+  const signalQueue = queue.filter(q => q.priority !== 'low');
+  const active = signalQueue.filter(q => q.status === 'active');
+  const done = signalQueue.filter(q => q.status === 'done');
+  const snoozed = signalQueue.filter(q => q.status === 'snoozed');
 
   const priorityColors: Record<string, { border: string; bg: string; label: string }> = {
     urgent: { border: 'var(--urgent)', bg: 'var(--urgent-bg)', label: 'Reply Now' },
     important: { border: 'var(--important)', bg: 'var(--important-bg)', label: 'Reply Today' },
     normal: { border: 'var(--normal)', bg: 'var(--normal-bg)', label: 'When Free' },
-    low: { border: 'var(--low)', bg: 'var(--low-bg)', label: 'Low Priority' },
   };
 
   if (loading) return <div className="text-center py-16" style={{ color: 'var(--muted)' }}>Loading triaged inbox...</div>;
 
-  if (queue.length === 0) return (
+  if (signalQueue.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
       <p className="text-lg mb-2">No priority emails in triage</p>
       <p className="text-sm">Click <strong>Triage Inbox</strong> above to scan and prioritize your unread emails. Only high-priority senders (Tier A/B) and emails needing replies appear here.</p>
     </div>
   );
 
-  const total = queue.length;
+  const total = signalQueue.length;
   const doneCount = done.length;
   const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
@@ -684,8 +685,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
         <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{doneCount} of {total} triaged</p>
       </div>
 
-      {/* Active items grouped by priority */}
-      {['urgent', 'important', 'normal', 'low'].map(priority => {
+      {/* Active items grouped by priority — low priority goes to Cleanup tab */}
+      {['urgent', 'important', 'normal'].map(priority => {
         const items = active.filter(q => q.priority === priority);
         if (items.length === 0) return null;
         const pc = priorityColors[priority];
