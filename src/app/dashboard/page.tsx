@@ -2823,10 +2823,18 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                         )}
                       </div>
                       <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{cleanSnippet(item.summary || '')}</div>
-                      <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-                        {item.account_email} &middot; Score: {item.priority_score}/10
-                        {item.reply_count > 0 && <> &middot; <span style={{ color: '#6366f1' }}>{item.reply_count} replies sent</span></>}
-                      </div>
+                      <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{item.account_email}</div>
+                    </div>
+                    {/* Score & reply count — top right */}
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: item.priority_score >= 7 ? '#eef2ff' : '#f1f5f9', color: item.priority_score >= 7 ? '#4338ca' : '#64748b' }}>
+                        {item.priority_score}/10
+                      </span>
+                      {item.reply_count > 0 && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: '#eef2ff', color: '#6366f1' }}>
+                          {item.reply_count} {item.reply_count === 1 ? 'reply' : 'replies'}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-2 mt-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
