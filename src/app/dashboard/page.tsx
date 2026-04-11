@@ -134,6 +134,7 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [replyOpen, setReplyOpen] = useState(false);
+  const [replyAllMode, setReplyAllMode] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [clickedBtn, setClickedBtn] = useState<string | null>(null);
 
@@ -203,6 +204,9 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
+  const [attachmentLoading, setAttachmentLoading] = useState<string | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<{ url: string; filename: string; mimeType: string } | null>(null);
+
   const attachmentIcon = (mime: string) => {
     if (mime.startsWith('image/')) return '🖼';
     if (mime.includes('pdf')) return '📄';
@@ -211,6 +215,43 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
     if (mime.includes('zip') || mime.includes('compressed')) return '📦';
     return '📎';
   };
+
+  async function openAttachment(att: { filename: string; mimeType: string; attachmentId: string }) {
+    setAttachmentLoading(att.attachmentId);
+    try {
+      const savedAccount = _currentAccount;
+      if (accountEmail && accountEmail !== _currentAccount) setCurrentAccount(accountEmail);
+      const res = await gmailGet('attachment', { id: messageId, attachmentId: att.attachmentId });
+      if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
+
+      if (!res.success || !res.data?.data) {
+        showToast('Error', 'Could not load attachment');
+        return;
+      }
+      // Gmail returns base64url — convert to standard base64
+      const base64 = res.data.data.replace(/-/g, '+').replace(/_/g, '/');
+      const dataUrl = `data:${att.mimeType};base64,${base64}`;
+
+      // For images and PDFs, show inline preview
+      if (att.mimeType.startsWith('image/') || att.mimeType === 'application/pdf') {
+        setPreviewAttachment({ url: dataUrl, filename: att.filename, mimeType: att.mimeType });
+      } else {
+        // For other files, trigger download
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = att.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast('Downloaded', att.filename);
+      }
+    } catch (err) {
+      console.error('Attachment fetch error:', err);
+      showToast('Error', 'Failed to load attachment');
+    } finally {
+      setAttachmentLoading(null);
+    }
+  }
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -268,13 +309,15 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {email.attachments.map((att: any, i: number) => (
-                      <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs" style={{ background: 'white', borderColor: '#fbbf24' }}>
-                        <span className="text-base">{attachmentIcon(att.mimeType)}</span>
+                      <button key={i} onClick={() => openAttachment(att)}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs text-left hover:shadow-md transition-shadow"
+                        style={{ background: 'white', borderColor: '#fbbf24', cursor: 'pointer', opacity: attachmentLoading === att.attachmentId ? 0.6 : 1 }}>
+                        <span className="text-base">{attachmentLoading === att.attachmentId ? '⏳' : attachmentIcon(att.mimeType)}</span>
                         <div>
                           <div className="font-medium truncate" style={{ maxWidth: 180 }}>{att.filename}</div>
-                          <div style={{ color: 'var(--muted)' }}>{formatSize(att.size)}</div>
+                          <div style={{ color: 'var(--muted)' }}>{formatSize(att.size)} · Click to {att.mimeType.startsWith('image/') || att.mimeType.includes('pdf') ? 'preview' : 'download'}</div>
                         </div>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -304,8 +347,10 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
                     messageId={email.id}
                     showToast={showToast}
                     accountEmail={accountEmail}
-                    onSent={() => { setReplyOpen(false); showToast('Reply sent', `To: ${email.senderEmail}`); }}
-                    onCancel={() => setReplyOpen(false)}
+                    replyAll={replyAllMode}
+                    cc={replyAllMode ? (email.cc || email.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(email.senderEmail.toLowerCase()) && !(accountEmail && e.toLowerCase().includes(accountEmail.toLowerCase()))).join(', ') : undefined}
+                    onSent={() => { setReplyOpen(false); setReplyAllMode(false); showToast('Reply sent', `To: ${email.senderEmail}`); }}
+                    onCancel={() => { setReplyOpen(false); setReplyAllMode(false); }}
                   />
                 </div>
               )}
@@ -316,9 +361,14 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
         {/* Sticky action bar */}
         {email && !loading && (
           <div className="border-t p-3 flex gap-2 flex-wrap items-center" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
-            <button onClick={() => setReplyOpen(!replyOpen)}
+            <button onClick={() => { setReplyAllMode(false); setReplyOpen(!replyOpen); }}
               className="px-4 py-2 text-xs font-semibold rounded-lg text-white transition-transform active:scale-90" style={{ background: 'var(--accent)' }}>
-              {replyOpen ? 'Cancel Reply' : 'Reply'}
+              {replyOpen && !replyAllMode ? 'Cancel Reply' : 'Reply'}
+            </button>
+            <button onClick={() => { setReplyAllMode(true); setReplyOpen(!replyOpen || !replyAllMode); }}
+              className="px-3 py-2 text-xs font-semibold rounded-lg transition-transform active:scale-90 border"
+              style={{ borderColor: 'var(--accent)', color: replyOpen && replyAllMode ? '#fff' : 'var(--accent)', background: replyOpen && replyAllMode ? 'var(--accent)' : undefined }}>
+              {replyOpen && replyAllMode ? 'Cancel' : 'Reply All'}
             </button>
             <button onClick={() => flashAction('archive', () => { onAction('archive', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 300); })}
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
@@ -356,6 +406,34 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
           </div>
         )}
       </div>
+
+      {/* Attachment preview overlay */}
+      {previewAttachment && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/60" onClick={() => setPreviewAttachment(null)} />
+          <div className="relative z-10 bg-white rounded-xl shadow-2xl max-w-3xl max-h-[85vh] overflow-auto" style={{ minWidth: 300 }}>
+            <div className="sticky top-0 flex items-center justify-between p-3 border-b bg-white rounded-t-xl" style={{ borderColor: 'var(--border)' }}>
+              <span className="font-medium text-sm truncate">{previewAttachment.filename}</span>
+              <div className="flex gap-2">
+                <a href={previewAttachment.url} download={previewAttachment.filename}
+                  className="px-3 py-1 text-xs font-medium rounded-lg text-white" style={{ background: 'var(--accent)' }}>
+                  Download
+                </a>
+                <button onClick={() => setPreviewAttachment(null)} className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>✕</button>
+              </div>
+            </div>
+            <div className="p-4 flex items-center justify-center">
+              {previewAttachment.mimeType.startsWith('image/') ? (
+                <img src={previewAttachment.url} alt={previewAttachment.filename} className="max-w-full max-h-[70vh] rounded-lg" />
+              ) : previewAttachment.mimeType === 'application/pdf' ? (
+                <iframe src={previewAttachment.url} className="w-full rounded-lg" style={{ height: '70vh' }} title={previewAttachment.filename} />
+              ) : (
+                <div className="text-sm py-8" style={{ color: 'var(--muted)' }}>Preview not available for this file type</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirmation */}
       {confirmDelete && (
@@ -1653,12 +1731,14 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
 
 // ============ REPLY COMPOSER ============
 
-function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, showToast, accountEmail }: {
+function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, showToast, accountEmail, replyAll, cc }: {
   to: string; subject: string; threadId: string; messageId: string;
   onSent: () => void; onCancel: () => void; showToast: (title: string, subtitle?: string) => void;
-  accountEmail?: string;
+  accountEmail?: string; replyAll?: boolean; cc?: string;
 }) {
   const [body, setBody] = useState('');
+  const [bcc, setBcc] = useState('');
+  const [showBcc, setShowBcc] = useState(false);
   const [sending, setSending] = useState(false);
 
   async function sendReply() {
@@ -1670,15 +1750,18 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
       setCurrentAccount(accountEmail);
     }
     try {
-      const res = await gmailPost('send', {
+      const sendPayload: Record<string, unknown> = {
         to,
         subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
         body: body.replace(/\n/g, '<br>'),
         threadId,
         inReplyTo: messageId,
-      });
+      };
+      if (replyAll && cc) sendPayload.cc = cc;
+      if (bcc.trim()) sendPayload.bcc = bcc.trim();
+      const res = await gmailPost('send', sendPayload);
       if (res.success) {
-        showToast('Reply sent', `To: ${to}${accountEmail ? ` (via ${accountEmail})` : ''}`);
+        showToast('Reply sent', `To: ${to}${replyAll ? ' + all' : ''}${accountEmail ? ` (via ${accountEmail})` : ''}`);
         onSent();
       } else {
         showToast('Send failed', res.error);
@@ -1695,8 +1778,22 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
   }
 
   return (
-    <div className="mt-3 p-3 rounded-lg border" style={{ background: '#f8fafc', borderColor: 'var(--accent)' }}>
-      <div className="text-xs mb-2" style={{ color: 'var(--muted)' }}>Replying to <strong>{to}</strong></div>
+    <div className="mt-3 p-3 rounded-lg border" style={{ background: '#f8fafc', borderColor: replyAll ? '#7c3aed' : 'var(--accent)' }}>
+      <div className="text-xs mb-2" style={{ color: 'var(--muted)' }}>
+        {replyAll ? '↩ Reply All' : 'Replying'} to <strong>{to}</strong>
+        {replyAll && cc && <span className="block mt-1">CC: {cc}</span>}
+        {!showBcc && <button onClick={() => setShowBcc(true)} className="ml-2 underline text-xs" style={{ color: 'var(--accent)' }}>+ BCC</button>}
+      </div>
+      {showBcc && (
+        <input
+          type="text"
+          value={bcc}
+          onChange={(e) => setBcc(e.target.value)}
+          placeholder="BCC: email@example.com, ..."
+          className="w-full p-2 mb-2 rounded-lg border text-xs"
+          style={{ borderColor: 'var(--border)' }}
+        />
+      )}
       <textarea
         value={body}
         onChange={(e) => setBody(e.target.value)}
@@ -3160,34 +3257,30 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
         }
 
         // Load recent sent messages to detect actual awaiting replies
-        const sentRes = await gmailGet('search', { q: 'in:sent newer_than:7d', max: '30' });
+        const sentRes = await gmailGet('search', { q: 'in:sent newer_than:7d', max: '20' });
         if (sentRes.success && sentRes.data?.messages) {
           // Only check messages older than 24h (too soon otherwise)
           const candidates = sentRes.data.messages.filter((msg: GmailMessage) => {
             const hoursSince = (Date.now() - new Date(msg.date).getTime()) / (1000 * 60 * 60);
-            return hoursSince >= 24;
+            return hoursSince >= 24 && !allStarred.find(s => s.id === msg.id);
           });
 
-          // Check threads in parallel (batches of 5 to avoid rate limits)
-          for (let i = 0; i < candidates.length; i += 5) {
-            const batch = candidates.slice(i, i + 5);
-            const results = await Promise.all(
-              batch.map(async (msg: GmailMessage) => {
-                // Skip if already in starred list
-                if (allStarred.find(s => s.id === msg.id)) return null;
-                const hasReply = await checkThreadForReply(msg, myEmail);
-                if (!hasReply) return { ...msg, accountEmail: myEmail };
-                return null;
-              })
-            );
-            for (const r of results) {
-              if (r) allAwaiting.push(r);
-            }
+          // Check all threads in parallel (fast)
+          const results = await Promise.all(
+            candidates.map(async (msg: GmailMessage) => {
+              const hasReply = await checkThreadForReply(msg, myEmail);
+              if (!hasReply) return { ...msg, accountEmail: myEmail };
+              return null;
+            })
+          );
+          for (const r of results) {
+            if (r) allAwaiting.push(r);
           }
         }
       };
 
       if (unified && accounts.length > 1) {
+        // Load accounts sequentially (setCurrentAccount is global) but each account's checks run in parallel
         const savedAccount = _currentAccount;
         for (const acct of accounts) {
           setCurrentAccount(acct.email);

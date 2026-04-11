@@ -72,6 +72,14 @@ export async function GET(request: NextRequest) {
       case 'drafts':
         return apiSuccess(await gmail.listDrafts(client, maxResults));
 
+      case 'attachment': {
+        if (!id) return apiError('Missing message id');
+        const attId = request.nextUrl.searchParams.get('attachmentId');
+        if (!attId) return apiError('Missing attachmentId');
+        const attData = await gmail.getAttachment(client, id, attId);
+        return apiSuccess(attData);
+      }
+
       default:
         return apiError(`Unknown action: ${action}`);
     }

@@ -161,6 +161,26 @@ function extractAttachments(payload: gmail_v1.Schema$MessagePart, messageId: str
   return attachments;
 }
 
+/**
+ * Fetch attachment data from Gmail.
+ * Returns base64url-encoded data string.
+ */
+export async function getAttachment(
+  client: gmail_v1.Gmail,
+  messageId: string,
+  attachmentId: string
+): Promise<{ data: string; size: number }> {
+  const res = await client.users.messages.attachments.get({
+    userId: 'me',
+    messageId,
+    id: attachmentId,
+  });
+  return {
+    data: res.data.data || '',
+    size: res.data.size || 0,
+  };
+}
+
 export async function getThread(gmail: gmail_v1.Gmail, threadId: string) {
   const res = await gmail.users.threads.get({
     userId: 'me',
