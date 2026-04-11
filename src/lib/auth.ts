@@ -63,23 +63,41 @@ export async function exchangeCodeForTokens(code: string, redirectUri?: string) 
 export async function signInOrCreateUser(email: string, name: string) {
   const admin = createSupabaseAdmin();
 
-  // Look up user by email directly — listUsers() paginates and can miss users
+  // 1. Check if an auth user exists with this exact email
   try {
-    const { data: lookupData, error: lookupError } = await admin.auth.admin.getUserByEmail(email);
-
+    const { data: lookupData } = await admin.auth.admin.getUserByEmail(email);
     if (lookupData?.user) {
-      // User exists — generate a magic link token for session
-      const { data, error } = await admin.auth.admin.generateLink({
-        type: 'magiclink',
-        email,
-      });
+      const { data } = await admin.auth.admin.generateLink({ type: 'magiclink', email });
       return { user: lookupData.user, isNew: false, token: data };
     }
   } catch {
-    // getUserByEmail throws when user not found — that's OK, we'll create one
+    // getUserByEmail throws when user not found — continue to check connected accounts
   }
 
-  // User doesn't exist — create a new one
+  // 2. Check if this email is already a connected Gmail account for an existing user
+  //    This prevents duplicate auth users when someone logs in with a secondary email
+  const { data: connectedAccount } = await admin
+    .from(TABLES.GMAIL_ACCOUNTS)
+    .select('user_id')
+    .eq('email', email)
+    .eq('status', 'connected')
+    .limit(1)
+    .single();
+
+  if (connectedAccount?.user_id) {
+    // Found an existing user who has this email connected — look up their auth user
+    try {
+      const { data: ownerData } = await admin.auth.admin.getUserById(connectedAccount.user_id);
+      if (ownerData?.user) {
+        const { data } = await admin.auth.admin.generateLink({ type: 'magiclink', email: ownerData.user.email! });
+        return { user: ownerData.user, isNew: false, token: data };
+      }
+    } catch {
+      // Owner auth user not found — fall through to create new user
+    }
+  }
+
+  // 3. No existing user found — create a new one
   const { data, error } = await admin.auth.admin.createUser({
     email,
     email_confirm: true,
