@@ -1436,29 +1436,6 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Account Switcher with Unified toggle */}
-            {accounts.length > 1 ? (
-              <select
-                value={unified ? '__unified__' : account}
-                onChange={(e) => {
-                  if (e.target.value === '__unified__') switchToUnified();
-                  else switchAccount(e.target.value);
-                }}
-                className="text-sm px-3 py-2 rounded-lg border font-medium appearance-none cursor-pointer"
-                style={{ background: unified ? '#ede9fe' : 'var(--normal-bg)', borderColor: unified ? '#8b5cf6' : 'var(--border)', color: unified ? '#5b21b6' : '#065f46' }}
-              >
-                <option value="__unified__">All Accounts (Unified)</option>
-                {accounts.map((a) => (
-                  <option key={a.email} value={a.email}>
-                    {a.email}{a.is_primary ? ' ★' : ''}
-                  </option>
-                ))}
-              </select>
-            ) : profile ? (
-              <div className="text-sm px-4 py-2 rounded-lg" style={{ background: 'var(--normal-bg)', color: '#065f46' }}>
-                <strong>{profile.emailAddress}</strong>
-              </div>
-            ) : null}
             {/* Layout toggle — hidden on mobile, auto-navigates to Inbox */}
             {!isMobile && <button
               onClick={() => setLayoutMode(layoutMode === 'cards' ? 'split' : 'cards')}
@@ -1668,6 +1645,32 @@ export default function Dashboard() {
         </div>
         {/* Bottom shadow to visually separate sticky header from scrolling content */}
         <div style={{ height: 4, background: 'linear-gradient(to bottom, rgba(0,0,0,0.04), transparent)', marginBottom: 12 }} />
+      </div>
+
+      {/* Account switcher — left-aligned below tabs */}
+      <div className="flex items-center gap-3 mb-3">
+        {accounts.length > 1 ? (
+          <select
+            value={unified ? '__unified__' : account}
+            onChange={(e) => {
+              if (e.target.value === '__unified__') switchToUnified();
+              else switchAccount(e.target.value);
+            }}
+            className="text-sm px-3 py-1.5 rounded-lg border font-medium appearance-none cursor-pointer"
+            style={{ background: unified ? '#ede9fe' : 'var(--normal-bg)', borderColor: unified ? '#8b5cf6' : 'var(--border)', color: unified ? '#5b21b6' : '#065f46' }}
+          >
+            <option value="__unified__">All Accounts (Unified)</option>
+            {accounts.map((a) => (
+              <option key={a.email} value={a.email}>
+                {a.email}{a.is_primary ? ' ★' : ''}
+              </option>
+            ))}
+          </select>
+        ) : profile ? (
+          <div className="text-sm px-3 py-1.5 rounded-lg" style={{ background: 'var(--normal-bg)', color: '#065f46' }}>
+            <strong>{profile.emailAddress}</strong>
+          </div>
+        ) : null}
       </div>
 
       {/* Background task banner — visible across all tabs */}
