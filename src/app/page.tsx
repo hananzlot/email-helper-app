@@ -1,12 +1,18 @@
 export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center" style={{ background: 'var(--bg)' }}>
-      <div className="max-w-md w-full mx-auto px-6 text-center">
-        <h1 className="text-3xl font-bold mb-2" style={{ color: 'var(--text)' }}>
-          Email Helper
+      <div className="max-w-lg w-full mx-auto px-6 text-center">
+        {/* Problem-statement hook */}
+        <p className="text-lg mb-4 font-medium" style={{ color: 'var(--muted)' }}>
+          Drowning in unread emails?
+        </p>
+
+        <img src="/clearbox-logo.svg" alt="Clearbox" width={80} height={80} className="rounded-xl mx-auto mb-3" />
+        <h1 className="text-4xl font-bold mb-2" style={{ color: 'var(--text)' }}>
+          Clearbox
         </h1>
-        <p className="mb-8" style={{ color: 'var(--muted)', fontSize: '16px' }}>
-          Inbox Command Center — triage, prioritize, and manage your Gmail with AI.
+        <p className="text-sm mb-8" style={{ color: 'var(--muted)' }}>
+          Your Inbox Command Center — triage, prioritize, and take control of your Gmail.
         </p>
 
         <a
@@ -23,7 +29,8 @@ export default function Home() {
           Sign in with Google
         </a>
 
-        <div className="mt-12 grid grid-cols-3 gap-6 text-center">
+        {/* Feature pillars */}
+        <div className="mt-10 grid grid-cols-3 gap-6 text-center">
           <div>
             <div className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>Triage</div>
             <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Smart inbox sorting based on your reply patterns</p>
@@ -35,6 +42,24 @@ export default function Home() {
           <div>
             <div className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>Clean</div>
             <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Archive newsletters, promos, and noise in bulk</p>
+          </div>
+        </div>
+
+        {/* Social proof stats */}
+        <div className="mt-10 pt-8 border-t" style={{ borderColor: 'var(--border)' }}>
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div>
+              <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>100%</div>
+              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Private — emails never stored</p>
+            </div>
+            <div>
+              <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>30s</div>
+              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Setup time — just sign in</p>
+            </div>
+            <div>
+              <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>1-click</div>
+              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Undo any action instantly</p>
+            </div>
           </div>
         </div>
       </div>
