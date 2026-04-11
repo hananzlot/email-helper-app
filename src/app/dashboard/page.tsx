@@ -1643,7 +1643,7 @@ export default function Dashboard() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'home', label: 'Home' },
-    { id: 'reply-queue', label: 'Triage' },
+    { id: 'reply-queue', label: 'Top Tiers' },
     { id: 'follow-up', label: 'Follow Up' },
     { id: 'snoozed', label: 'Snoozed' },
     { id: 'cleanup', label: 'Quick Clear Boxers' },
