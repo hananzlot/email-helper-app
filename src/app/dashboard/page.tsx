@@ -3,6 +3,30 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { GmailMessage } from '@/types';
 
+// ============ TYPES ============
+
+interface ActionHistoryEntry {
+  id: string;
+  action: string;
+  label: string;
+  messageIds: string[];
+  accountEmail: string;
+  subjects: string[];
+  timestamp: number;
+  undoAction?: string; // The reverse action (e.g., markRead → markUnread)
+  undone?: boolean;
+}
+
+// Reverse actions for undo
+const REVERSE_ACTIONS: Record<string, string> = {
+  markRead: 'markUnread',
+  markUnread: 'markRead',
+  star: 'unstar',
+  unstar: 'star',
+  archive: 'unarchive',
+  trash: 'untrash',
+};
+
 // ============ API HELPERS ============
 // All helpers append ?account= so the server always knows which Gmail account to use.
 
@@ -551,7 +575,7 @@ interface ConnectedAccount {
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
-  const [layoutMode, setLayoutMode] = useState<'cards' | 'split'>('cards');
+  const [layoutMode, setLayoutMode] = useState<'cards' | 'split'>('split');
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -592,6 +616,9 @@ export default function Dashboard() {
   const [authError, setAuthError] = useState(false);
   // Tab counts — each tab reports its count for display in tab bar
   const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
+  // Action history — log of all actions taken, with undo support
+  const [actionHistory, setActionHistory] = useState<ActionHistoryEntry[]>([]);
+  const [showActionHistory, setShowActionHistory] = useState(false);
 
   // Global search — searches Gmail via API across all accounts
   async function performSearch(query: string) {
@@ -948,6 +975,20 @@ export default function Dashboard() {
       addLabel: 'Label added', removeLabel: 'Label removed',
     };
 
+    // Log action to history
+    const subjects = messages.filter(m => messageIds.includes(m.id)).map(m => m.subject || '(no subject)');
+    const historyEntry: ActionHistoryEntry = {
+      id: `${action}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      action,
+      label: actionLabels[action] || action,
+      messageIds,
+      accountEmail: overrideAccount || _currentAccount,
+      subjects: subjects.length > 0 ? subjects : messageIds.map(() => '(email)'),
+      timestamp: Date.now(),
+      undoAction: REVERSE_ACTIONS[action],
+    };
+    setActionHistory(prev => [historyEntry, ...prev].slice(0, 50)); // Keep last 50
+
     // For undoable actions (archive/trash), animate out immediately but delay the API call
     const isUndoable = ['archive', 'trash'].includes(action);
 
@@ -1062,6 +1103,33 @@ export default function Dashboard() {
       showToast('Error', String(err));
     } finally {
       setActionLoading(null);
+    }
+  }
+
+  // Undo a history action
+  async function undoHistoryAction(entry: ActionHistoryEntry) {
+    if (!entry.undoAction || entry.undone) return;
+    try {
+      const savedAccount = _currentAccount;
+      if (entry.accountEmail && entry.accountEmail !== _currentAccount) setCurrentAccount(entry.accountEmail);
+      const res = await gmailPost(entry.undoAction, { action: entry.undoAction, messageIds: entry.messageIds });
+      if (entry.accountEmail) setCurrentAccount(savedAccount);
+      if (res.success) {
+        // Mark as undone in history
+        setActionHistory(prev => prev.map(h => h.id === entry.id ? { ...h, undone: true } : h));
+        // Update UI state
+        if (entry.undoAction === 'markUnread') {
+          setMessages(prev => prev.map(m => entry.messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
+        } else if (entry.undoAction === 'markRead') {
+          setMessages(prev => prev.map(m => entry.messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
+        }
+        showToast('Undone', `${entry.label} reversed`);
+        setTriageVersion(v => v + 1);
+      } else {
+        showToast('Undo failed', res.error);
+      }
+    } catch (err) {
+      showToast('Undo failed', String(err));
     }
   }
 
@@ -1306,7 +1374,7 @@ export default function Dashboard() {
             ) : null}
             {/* Layout toggle — hidden on mobile, auto-navigates to Inbox */}
             {!isMobile && <button
-              onClick={() => { const next = layoutMode === 'cards' ? 'split' : 'cards'; setLayoutMode(next); if (next === 'split') setActiveTab('inbox'); }}
+              onClick={() => setLayoutMode(layoutMode === 'cards' ? 'split' : 'cards')}
               className="w-9 h-9 rounded-lg border flex items-center justify-center transition-all hover:shadow-sm"
               title={layoutMode === 'cards' ? 'Switch to split view' : 'Switch to card view'}
               style={{ borderColor: layoutMode === 'split' ? 'var(--accent)' : 'var(--border)', background: layoutMode === 'split' ? '#eff6ff' : 'white', color: layoutMode === 'split' ? 'var(--accent)' : '#94a3b8' }}>
@@ -1316,6 +1384,21 @@ export default function Dashboard() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
               )}
             </button>}
+            {/* Action History button */}
+            <button
+              onClick={() => setShowActionHistory(!showActionHistory)}
+              className="w-9 h-9 rounded-lg border flex items-center justify-center transition-all hover:shadow-sm relative"
+              title="Action history"
+              style={{ borderColor: showActionHistory ? 'var(--accent)' : 'var(--border)', background: showActionHistory ? '#eff6ff' : 'white', color: showActionHistory ? 'var(--accent)' : '#94a3b8' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+              {actionHistory.filter(h => !h.undone && h.undoAction).length > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center" style={{ background: '#f59e0b' }}>
+                  {actionHistory.filter(h => !h.undone && h.undoAction).length}
+                </span>
+              )}
+            </button>
             {/* Accounts settings button */}
             <button
               onClick={() => setActiveTab('accounts')}
@@ -1551,6 +1634,81 @@ export default function Dashboard() {
 
       {/* Email Preview Modal — only used in card mode */}
       {previewMessageId && <EmailPreviewModal messageId={previewMessageId} accountEmail={previewAccount} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} onSnooze={snoozeFromPreview} />}
+
+      {/* Action History Panel */}
+      {showActionHistory && (
+        <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setShowActionHistory(false)}>
+          <div className="w-full max-w-sm bg-white shadow-2xl h-full overflow-y-auto border-l"
+            style={{ borderColor: 'var(--border)' }}
+            onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+              <div>
+                <h2 className="font-bold text-sm">Action History</h2>
+                <p className="text-xs" style={{ color: 'var(--muted)' }}>Recent actions with undo</p>
+              </div>
+              <div className="flex gap-2">
+                {actionHistory.length > 0 && (
+                  <button onClick={() => setActionHistory([])} className="text-xs px-2 py-1 rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                    Clear
+                  </button>
+                )}
+                <button onClick={() => setShowActionHistory(false)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-gray-100" style={{ color: 'var(--muted)' }}>
+                  ✕
+                </button>
+              </div>
+            </div>
+            {actionHistory.length === 0 ? (
+              <div className="text-center py-16 px-4" style={{ color: 'var(--muted)' }}>
+                <div className="text-3xl mb-2 opacity-30">📋</div>
+                <p className="text-sm">No actions yet</p>
+                <p className="text-xs mt-1">Actions you take (archive, mark read, trash, etc.) will appear here so you can undo them.</p>
+              </div>
+            ) : (
+              <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                {actionHistory.map((entry) => {
+                  const ago = Math.floor((Date.now() - entry.timestamp) / 1000);
+                  const timeLabel = ago < 60 ? `${ago}s ago` : ago < 3600 ? `${Math.floor(ago / 60)}m ago` : `${Math.floor(ago / 3600)}h ago`;
+                  return (
+                    <div key={entry.id} className="px-4 py-3" style={{ opacity: entry.undone ? 0.5 : 1 }}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                              style={{
+                                background: entry.undone ? '#f1f5f9' : entry.action === 'trash' || entry.action === 'delete' ? '#fee2e2' : entry.action === 'markRead' ? '#dbeafe' : entry.action === 'archive' ? '#f0fdf4' : '#f3f4f6',
+                                color: entry.undone ? '#94a3b8' : entry.action === 'trash' || entry.action === 'delete' ? '#dc2626' : entry.action === 'markRead' ? '#2563eb' : entry.action === 'archive' ? '#16a34a' : '#374151',
+                              }}>
+                              {entry.undone ? `${entry.label} (undone)` : entry.label}
+                            </span>
+                            <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{timeLabel}</span>
+                          </div>
+                          <div className="mt-1">
+                            {entry.subjects.slice(0, 3).map((subj, i) => (
+                              <div key={i} className="text-xs truncate" style={{ color: 'var(--text)' }}>{subj}</div>
+                            ))}
+                            {entry.subjects.length > 3 && (
+                              <div className="text-xs" style={{ color: 'var(--muted)' }}>+{entry.subjects.length - 3} more</div>
+                            )}
+                          </div>
+                          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>{entry.accountEmail}</div>
+                        </div>
+                        {entry.undoAction && !entry.undone && (
+                          <button
+                            onClick={() => undoHistoryAction(entry)}
+                            className="px-2.5 py-1 text-xs font-semibold rounded-lg border flex-shrink-0 hover:shadow-sm transition-all"
+                            style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: '#eff6ff' }}>
+                            Undo
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {toast && <UndoToast toast={toast} onDismiss={() => setToast(null)} />}
     </div>
