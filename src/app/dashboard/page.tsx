@@ -4,15 +4,28 @@ import { useState, useEffect, useCallback } from 'react';
 import type { GmailMessage } from '@/types';
 
 // ============ API HELPERS ============
+// All helpers append ?account= so the server always knows which Gmail account to use.
+
+let _currentAccount = '';
+
+function setCurrentAccount(acct: string) {
+  _currentAccount = acct;
+}
+
+function withAccount(url: string): string {
+  if (!_currentAccount) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}account=${encodeURIComponent(_currentAccount)}`;
+}
 
 async function gmailGet(action: string, params: Record<string, string> = {}) {
   const searchParams = new URLSearchParams({ action, ...params });
-  const res = await fetch(`/api/emailHelperV2/gmail?${searchParams}`);
+  const res = await fetch(withAccount(`/api/emailHelperV2/gmail?${searchParams}`));
   return res.json();
 }
 
 async function gmailPost(action: string, data: Record<string, unknown> = {}) {
-  const res = await fetch('/api/emailHelperV2/gmail', {
+  const res = await fetch(withAccount('/api/emailHelperV2/gmail'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...data }),
@@ -21,12 +34,12 @@ async function gmailPost(action: string, data: Record<string, unknown> = {}) {
 }
 
 async function apiGet(path: string) {
-  const res = await fetch(`/api/emailHelperV2/${path}`);
+  const res = await fetch(withAccount(`/api/emailHelperV2/${path}`));
   return res.json();
 }
 
 async function apiPost(path: string, data: Record<string, unknown> = {}) {
-  const res = await fetch(`/api/emailHelperV2/${path}`, {
+  const res = await fetch(withAccount(`/api/emailHelperV2/${path}`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -35,7 +48,7 @@ async function apiPost(path: string, data: Record<string, unknown> = {}) {
 }
 
 async function apiPut(path: string, data: Record<string, unknown> = {}) {
-  const res = await fetch(`/api/emailHelperV2/${path}`, {
+  const res = await fetch(withAccount(`/api/emailHelperV2/${path}`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -56,6 +69,7 @@ export default function Dashboard() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ title: string; subtitle?: string } | null>(null);
   const [triageLoading, setTriageLoading] = useState(false);
+  const [triageVersion, setTriageVersion] = useState(0);
 
   // Load account from URL params first, then cookies
   useEffect(() => {
@@ -63,6 +77,7 @@ export default function Dashboard() {
     const urlAccount = params.get('account');
     if (urlAccount) {
       setAccount(urlAccount);
+      setCurrentAccount(urlAccount);
       document.cookie = `email_helper_account=${urlAccount};path=/;max-age=${60*60*24*30};samesite=lax`;
       window.history.replaceState({}, '', '/dashboard');
       return;
@@ -79,6 +94,7 @@ export default function Dashboard() {
     }, {} as Record<string, string>);
     if (cookies.email_helper_account) {
       setAccount(cookies.email_helper_account);
+      setCurrentAccount(cookies.email_helper_account);
     }
   }, []);
 
@@ -138,6 +154,7 @@ export default function Dashboard() {
         const reply = data.categories.reply_needed.length;
         const important = data.categories.important_notifications.length;
         showToast(`Triage complete`, `${total} emails: ${reply} need replies, ${important} important`);
+        setTriageVersion(v => v + 1);
         setActiveTab('reply-queue');
       } else {
         showToast('Triage failed', res.error);
@@ -221,7 +238,7 @@ export default function Dashboard() {
         <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
           onAction={handleAction} onRefresh={loadInbox} />
       )}
-      {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} />}
+      {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} />}
       {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} />}
       {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
       {activeTab === 'accounts' && <AccountsTab currentAccount={account} />}
@@ -294,14 +311,15 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh }: {
 
 // ============ REPLY QUEUE TAB ============
 
-function ReplyQueueTab({ onAction, showToast }: {
+function ReplyQueueTab({ onAction, showToast, reloadKey }: {
   onAction: (action: string, ids: string[], label?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
+  reloadKey: number;
 }) {
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { loadQueue(); }, []);
+  useEffect(() => { loadQueue(); }, [reloadKey]);
 
   async function loadQueue() {
     setLoading(true);

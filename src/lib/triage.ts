@@ -134,9 +134,9 @@ export async function runTriage(
     { onConflict: 'user_id,account_email' }
   );
 
-  // Populate reply queue with reply-needed emails
-  if (replyNeeded.length > 0) {
-    const queueItems = replyNeeded.map((e) => ({
+  // Populate reply queue with ALL scored emails (so user sees full picture)
+  if (triaged.length > 0) {
+    const queueItems = triaged.map((e) => ({
       user_id: userId,
       message_id: e.id,
       thread_id: e.threadId,
@@ -153,10 +153,14 @@ export async function runTriage(
       status: 'active',
     }));
 
-    await admin.from(TABLES.REPLY_QUEUE).upsert(queueItems, {
-      onConflict: 'user_id,message_id',
-      ignoreDuplicates: true,
-    });
+    // Batch upsert in chunks of 25 to avoid payload limits
+    for (let i = 0; i < queueItems.length; i += 25) {
+      const chunk = queueItems.slice(i, i + 25);
+      await admin.from(TABLES.REPLY_QUEUE).upsert(chunk, {
+        onConflict: 'user_id,message_id',
+        ignoreDuplicates: true,
+      });
+    }
   }
 
   return result;
