@@ -162,5 +162,6 @@ export const ENCRYPTED_FIELDS = {
   REPLY_QUEUE: ['sender', 'subject', 'summary'],
   SENDER_PRIORITIES: ['display_name'],
   GMAIL_ACCOUNTS: ['access_token', 'refresh_token'],
+  ACTION_HISTORY: ['action_label', 'subjects', 'account_email'],
   // TRIAGE_RESULTS uses encryptJson for the entire `data` column
 } as const;

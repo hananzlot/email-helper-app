@@ -618,8 +618,21 @@ export default function Dashboard() {
   // Tab counts — each tab reports its count for display in tab bar
   const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
   // Action history — log of all actions taken, with undo support
+  // Persisted to Supabase (encrypted) so history survives refreshes (7-day window)
   const [actionHistory, setActionHistory] = useState<ActionHistoryEntry[]>([]);
   const [showActionHistory, setShowActionHistory] = useState(false);
+  // Load action history from Supabase on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/emailHelperV2/action-history');
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data) setActionHistory(json.data);
+        }
+      } catch {}
+    })();
+  }, []);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
 
   // Global search — searches Gmail via API across all accounts
@@ -749,8 +762,23 @@ export default function Dashboard() {
     setPreviewAccount(acctEmail);
   }
 
-  // Clear split preview when switching tabs
-  useEffect(() => { setSplitPreviewId(null); setSplitPreviewAccount(undefined); }, [activeTab]);
+  // Auto-select first email in split/pane mode when switching tabs
+  useEffect(() => {
+    setSplitPreviewId(null);
+    setSplitPreviewAccount(undefined);
+    if (layoutMode !== 'split' || isMobile) return;
+    // Wait for the tab to render, then auto-select the first previewable item
+    const timer = setTimeout(() => {
+      const container = splitContainerRef.current;
+      if (!container) return;
+      const first = container.querySelector('[data-preview-id]') as HTMLElement | null;
+      if (first) {
+        setSplitPreviewId(first.getAttribute('data-preview-id') || null);
+        setSplitPreviewAccount(first.getAttribute('data-preview-account') || undefined);
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [activeTab, layoutMode, isMobile]);
 
   // Arrow key navigation in split view
   useEffect(() => {
@@ -1018,10 +1046,11 @@ export default function Dashboard() {
       addLabel: 'Label added', removeLabel: 'Label removed',
     };
 
-    // Log action to history
+    // Log action to history (optimistic local + persist to Supabase)
     const subjects = messages.filter(m => messageIds.includes(m.id)).map(m => m.subject || '(no subject)');
+    const tempId = `${action}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const historyEntry: ActionHistoryEntry = {
-      id: `${action}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: tempId,
       action,
       label: actionLabels[action] || action,
       messageIds,
@@ -1030,7 +1059,20 @@ export default function Dashboard() {
       timestamp: Date.now(),
       undoAction: REVERSE_ACTIONS[action],
     };
-    setActionHistory(prev => [historyEntry, ...prev].slice(0, 50)); // Keep last 50
+    setActionHistory(prev => [historyEntry, ...prev].slice(0, 500));
+    // Persist to Supabase (fire-and-forget, update local id on success)
+    fetch('/api/emailHelperV2/action-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action, label: historyEntry.label, messageIds, accountEmail: historyEntry.accountEmail,
+        subjects: historyEntry.subjects, undoAction: historyEntry.undoAction,
+      }),
+    }).then(r => r.json()).then(json => {
+      if (json.data?.id) {
+        setActionHistory(prev => prev.map(h => h.id === tempId ? { ...h, id: json.data.id } : h));
+      }
+    }).catch(() => {});
 
     // For undoable actions (archive/trash), animate out immediately but delay the API call
     const isUndoable = ['archive', 'trash'].includes(action);
@@ -1158,8 +1200,13 @@ export default function Dashboard() {
       const res = await gmailPost(entry.undoAction, { action: entry.undoAction, messageIds: entry.messageIds });
       if (entry.accountEmail) setCurrentAccount(savedAccount);
       if (res.success) {
-        // Mark as undone in history
+        // Mark as undone in history (local + Supabase)
         setActionHistory(prev => prev.map(h => h.id === entry.id ? { ...h, undone: true } : h));
+        fetch('/api/emailHelperV2/action-history', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: entry.id, undone: true }),
+        }).catch(() => {});
         // Update UI state
         if (entry.undoAction === 'markUnread') {
           setMessages(prev => prev.map(m => entry.messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
@@ -1667,6 +1714,11 @@ export default function Dashboard() {
 
           // Split mode: tab on left, drag handle, inline preview on right
           return (
+            <>
+            {/* Highlight the card whose preview is showing in the right pane */}
+            {splitPreviewId && (
+              <style>{`[data-preview-id="${splitPreviewId}"] { outline: 2px solid var(--accent) !important; outline-offset: -2px; background: #eff6ff !important; }`}</style>
+            )}
             <div ref={splitContainerRef} className="flex rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)', height: 'calc(100vh - 220px)', minHeight: 400 }}>
               {/* Left panel — email list / tab content */}
               <div className="overflow-y-auto" style={{ width: `${splitLeftPct}%`, minWidth: 280, background: 'var(--bg)' }}>
@@ -1703,6 +1755,7 @@ export default function Dashboard() {
                 )}
               </div>
             </div>
+            </>
           );
         })()}
       </div>
@@ -1719,11 +1772,11 @@ export default function Dashboard() {
             <div className="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
               <div>
                 <h2 className="font-bold text-sm">Action History</h2>
-                <p className="text-xs" style={{ color: 'var(--muted)' }}>Recent actions with undo</p>
+                <p className="text-xs" style={{ color: 'var(--muted)' }}>Last 7 days · newest first</p>
               </div>
               <div className="flex gap-2">
                 {actionHistory.length > 0 && (
-                  <button onClick={() => setActionHistory([])} className="text-xs px-2 py-1 rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                  <button onClick={() => { setActionHistory([]); fetch('/api/emailHelperV2/action-history', { method: 'DELETE' }).catch(() => {}); }} className="text-xs px-2 py-1 rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
                     Clear
                   </button>
                 )}
@@ -1742,7 +1795,7 @@ export default function Dashboard() {
               <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
                 {actionHistory.map((entry) => {
                   const ago = Math.floor((Date.now() - entry.timestamp) / 1000);
-                  const timeLabel = ago < 60 ? `${ago}s ago` : ago < 3600 ? `${Math.floor(ago / 60)}m ago` : `${Math.floor(ago / 3600)}h ago`;
+                  const timeLabel = ago < 60 ? `${ago}s ago` : ago < 3600 ? `${Math.floor(ago / 60)}m ago` : ago < 86400 ? `${Math.floor(ago / 3600)}h ago` : new Date(entry.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
                   return (
                     <div key={entry.id} className="px-4 py-3" style={{ opacity: entry.undone ? 0.5 : 1 }}>
                       <div className="flex items-start justify-between gap-2">
@@ -1892,6 +1945,11 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
         <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: '#64748b' }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           {accounts.length} account{accounts.length !== 1 ? 's' : ''} connected
+        </div>
+        <div className="w-px h-3" style={{ background: '#cbd5e1' }} />
+        <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: '#16a34a' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+          AES-256 encrypted · zero risk
         </div>
       </div>
 
@@ -2823,10 +2881,10 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                         )}
                       </div>
                       <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{cleanSnippet(item.summary || '')}</div>
-                      <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{item.account_email}</div>
                     </div>
-                    {/* Score & reply count — top right */}
+                    {/* Account, score & reply count — top right */}
                     <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{item.account_email}</span>
                       <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: item.priority_score >= 7 ? '#eef2ff' : '#f1f5f9', color: item.priority_score >= 7 ? '#4338ca' : '#64748b' }}>
                         {item.priority_score}/10
                       </span>
@@ -3765,18 +3823,15 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
   const [starredSent, setStarredSent] = useState<GmailMessage[]>([]);
   const [awaitingReply, setAwaitingReply] = useState<GmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [bgRefreshing, setBgRefreshing] = useState(false);
   const [expandedConvo, setExpandedConvo] = useState<string | null>(null);
   const [cacheAge, setCacheAge] = useState<string | null>(null);
 
-  useEffect(() => { loadFromCacheThenLive(); }, []);
-
-  // Try to load from pre-computed cache first (instant), then refresh live in background
-  async function loadFromCacheThenLive() {
-    setLoading(true);
+  // Load follow-ups from Supabase cache only — heavy thread-checking runs in cron, not live
+  async function loadFromCache() {
     try {
       const cacheRes = await apiGet('follow-ups');
       if (cacheRes.success && cacheRes.data?.items?.length > 0) {
-        // Cache hit! Use cached data for instant load
         const items = cacheRes.data.items as { message_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; account_email: string; type: string }[];
         const starred = items.filter(i => i.type === 'starred').map(i => ({
           id: i.message_id, threadId: i.thread_id, sender: i.sender, senderEmail: i.sender_email,
@@ -3793,109 +3848,25 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
         setStarredSent(starred);
         setAwaitingReply(awaiting);
         reportCount?.(starred.length + awaiting.length);
-        setLoading(false);
-
-        // Show cache age
         if (cacheRes.data.computed_at) {
           const age = Math.round((Date.now() - new Date(cacheRes.data.computed_at).getTime()) / (1000 * 60));
           setCacheAge(age < 60 ? `${age}m ago` : `${Math.round(age / 60)}h ago`);
         }
-        return; // Use cache, skip live fetch
       }
     } catch (e) {
-      console.error('Cache load failed, falling back to live:', e);
-    }
-    // No cache or cache failed — fall back to live fetch
-    await loadFollowUps();
-  }
-
-  // Check if a sent message has gotten a reply by looking at the actual thread
-  async function checkThreadForReply(msg: GmailMessage, myEmail: string): Promise<boolean> {
-    try {
-      const threadRes = await gmailGet('thread', { id: msg.threadId });
-      if (!threadRes.success || !threadRes.data?.messages) return false;
-      const sentDate = new Date(msg.date);
-      // Look for any message in the thread that is:
-      // 1. After our sent message
-      // 2. NOT from us (i.e., it's a reply from the recipient)
-      for (const threadMsg of threadRes.data.messages) {
-        const headers = threadMsg.payload?.headers || [];
-        const from = (headers.find((h: any) => h.name?.toLowerCase() === 'from')?.value || '').toLowerCase();
-        const msgDate = new Date(headers.find((h: any) => h.name?.toLowerCase() === 'date')?.value || 0);
-        // Skip our own messages
-        if (from.includes(myEmail.toLowerCase())) continue;
-        // If this message is after our sent message, they replied
-        if (msgDate > sentDate) return true;
-      }
-      return false;
-    } catch {
-      return false; // On error, assume no reply (show as awaiting)
+      console.error('Follow-up cache load failed:', e);
     }
   }
 
-  async function loadFollowUps() {
-    setLoading(true);
-    try {
-      const allStarred: GmailMessage[] = [];
-      const allAwaiting: GmailMessage[] = [];
-
-      const loadForAccount = async (acctEmail?: string) => {
-        const myEmail = acctEmail || _currentAccount;
-
-        // Load starred sent messages (user-flagged)
-        const starredRes = await gmailGet('search', { q: 'in:sent is:starred', max: '30' });
-        if (starredRes.success && starredRes.data?.messages) {
-          for (const msg of starredRes.data.messages) {
-            allStarred.push({ ...msg, accountEmail: myEmail });
-          }
-        }
-
-        // Load recent sent messages to detect actual awaiting replies
-        const sentRes = await gmailGet('search', { q: 'in:sent newer_than:7d', max: '20' });
-        if (sentRes.success && sentRes.data?.messages) {
-          // Only check messages older than 24h (too soon otherwise)
-          const candidates = sentRes.data.messages.filter((msg: GmailMessage) => {
-            const hoursSince = (Date.now() - new Date(msg.date).getTime()) / (1000 * 60 * 60);
-            return hoursSince >= 24 && !allStarred.find(s => s.id === msg.id);
-          });
-
-          // Check all threads in parallel (fast)
-          const results = await Promise.all(
-            candidates.map(async (msg: GmailMessage) => {
-              const hasReply = await checkThreadForReply(msg, myEmail);
-              if (!hasReply) return { ...msg, accountEmail: myEmail };
-              return null;
-            })
-          );
-          for (const r of results) {
-            if (r) allAwaiting.push(r);
-          }
-        }
-      };
-
-      if (unified && accounts.length > 1) {
-        // Load accounts sequentially (setCurrentAccount is global) but each account's checks run in parallel
-        const savedAccount = _currentAccount;
-        for (const acct of accounts) {
-          setCurrentAccount(acct.email);
-          await loadForAccount(acct.email);
-        }
-        setCurrentAccount(savedAccount);
-      } else {
-        await loadForAccount();
-      }
-
-      allStarred.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      allAwaiting.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setStarredSent(allStarred);
-      setAwaitingReply(allAwaiting);
-      reportCount?.(allStarred.length + allAwaiting.length);
-    } catch (err) {
-      console.error('Failed to load follow-ups:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
+  // On mount: load from cache (instant, no heavy Gmail API calls)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await loadFromCache();
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Group messages by normalized subject for conversation view
   function groupByConversation(msgs: GmailMessage[]) {
@@ -3955,8 +3926,15 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
             {awaitingReply.length} awaiting reply
           </span>
         )}
-        {cacheAge && <span className="text-xs" style={{ color: 'var(--muted)' }}>Updated {cacheAge}</span>}
-        <button onClick={loadFollowUps} className="ml-auto px-3 py-1 text-xs rounded-full border font-medium" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Refresh Live</button>
+        {bgRefreshing ? (
+          <span className="text-xs flex items-center gap-1" style={{ color: 'var(--accent)' }}>
+            <span className="w-3 h-3 border border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+            Refreshing cache...
+          </span>
+        ) : cacheAge ? (
+          <span className="text-xs" style={{ color: 'var(--muted)' }}>Updated {cacheAge}</span>
+        ) : null}
+        <button onClick={() => { setBgRefreshing(true); loadFromCache().finally(() => setBgRefreshing(false)); }} disabled={bgRefreshing} className="ml-auto px-3 py-1 text-xs rounded-full border font-medium" style={{ borderColor: 'var(--border)', color: 'var(--muted)', opacity: bgRefreshing ? 0.5 : 1 }}>Refresh</button>
       </div>
 
       {/* Flagged for follow-up (starred sent) */}

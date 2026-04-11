@@ -12,4 +12,5 @@ export const TABLES = {
   REPLY_QUEUE: 'emailHelperV2_reply_queue',
   CLEANUP_REPORTS: 'emailHelperV2_cleanup_reports',
   FOLLOW_UP_CACHE: 'emailHelperV2_follow_up_cache',
+  ACTION_HISTORY: 'emailHelperV2_action_history',
 } as const;

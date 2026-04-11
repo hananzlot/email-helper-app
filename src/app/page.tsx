@@ -49,14 +49,23 @@ export default function Home() {
         <div className="mt-10 pt-8 border-t" style={{ borderColor: 'var(--border)' }}>
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
+              <div className="flex justify-center mb-1">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+              </div>
               <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>100%</div>
-              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Private — emails never stored</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Private — emails never stored, AES-256 encrypted</p>
             </div>
             <div>
+              <div className="flex justify-center mb-1">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              </div>
               <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>30s</div>
               <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Setup time — just sign in</p>
             </div>
             <div>
+              <div className="flex justify-center mb-1">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+              </div>
               <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>1-click</div>
               <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Undo any action instantly</p>
             </div>
