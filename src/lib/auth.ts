@@ -64,25 +64,29 @@ export async function signInOrCreateUser(email: string, name: string) {
   const admin = createSupabaseAdmin();
 
   // Look up user by email directly — listUsers() paginates and can miss users
-  const { data: lookupData, error: lookupError } = await admin.auth.admin.getUserByEmail(email);
+  try {
+    const { data: lookupData, error: lookupError } = await admin.auth.admin.getUserByEmail(email);
 
-  if (lookupData?.user) {
-    // User exists — generate a magic link token for session
-    const { data, error } = await admin.auth.admin.generateLink({
-      type: 'magiclink',
-      email,
-    });
-    return { user: lookupData.user, isNew: false, token: data };
-  } else {
-    // Create a new user
-    const { data, error } = await admin.auth.admin.createUser({
-      email,
-      email_confirm: true,
-      user_metadata: { full_name: name },
-    });
-    if (error) throw error;
-    return { user: data.user, isNew: true, token: null };
+    if (lookupData?.user) {
+      // User exists — generate a magic link token for session
+      const { data, error } = await admin.auth.admin.generateLink({
+        type: 'magiclink',
+        email,
+      });
+      return { user: lookupData.user, isNew: false, token: data };
+    }
+  } catch {
+    // getUserByEmail throws when user not found — that's OK, we'll create one
   }
+
+  // User doesn't exist — create a new one
+  const { data, error } = await admin.auth.admin.createUser({
+    email,
+    email_confirm: true,
+    user_metadata: { full_name: name },
+  });
+  if (error) throw new Error(`Failed to create user: ${error.message}`);
+  return { user: data.user, isNew: true, token: null };
 }
 
 /**
