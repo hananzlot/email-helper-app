@@ -750,6 +750,41 @@ export default function Dashboard() {
   // Clear split preview when switching tabs
   useEffect(() => { setSplitPreviewId(null); setSplitPreviewAccount(undefined); }, [activeTab]);
 
+  // Arrow key navigation in split view
+  useEffect(() => {
+    if (layoutMode !== 'split' || isMobile) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      // Don't intercept if user is typing in an input/textarea
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      const container = splitContainerRef.current;
+      if (!container) return;
+      // Find all previewable items in the left panel via data attribute
+      const items = Array.from(container.querySelectorAll('[data-preview-id]')) as HTMLElement[];
+      if (items.length === 0) return;
+
+      e.preventDefault();
+      const currentIdx = items.findIndex(el => el.getAttribute('data-preview-id') === splitPreviewId);
+      let nextIdx: number;
+      if (e.key === 'ArrowDown') {
+        nextIdx = currentIdx < 0 ? 0 : Math.min(items.length - 1, currentIdx + 1);
+      } else {
+        nextIdx = currentIdx < 0 ? 0 : Math.max(0, currentIdx - 1);
+      }
+      const nextEl = items[nextIdx];
+      const msgId = nextEl.getAttribute('data-preview-id') || '';
+      const acctEmail = nextEl.getAttribute('data-preview-account') || undefined;
+      setSplitPreviewId(msgId);
+      setSplitPreviewAccount(acctEmail);
+      // Scroll into view
+      nextEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [layoutMode, isMobile, splitPreviewId]);
+
   // Load account from URL params first, then cookies
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2267,6 +2302,8 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
         <div className="flex flex-col gap-2">
           {messages.map((msg) => (
             <div key={msg.id}
+              data-preview-id={msg.id}
+              data-preview-account={msg.accountEmail || ''}
               className={`rounded-xl border transition-all hover:shadow-sm ${
                 animatingOut[msg.id] === 'trash' ? 'animate-trash-out' :
                 animatingOut[msg.id] === 'delete' ? 'animate-delete-out' :
@@ -2540,8 +2577,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
   function handleDragEnd() { setDragId(null); setDragOverId(null); }
   function handleDrop(targetId: string) {
     if (!dragId || dragId === targetId) return;
-    // Build current order from active items, then swap
-    const currentIds = sortedActive.map(q => q.id);
+    // Build current order from grouped items (lead IDs), then swap
+    const currentIds = sortedActive.map(g => g.lead.id);
     const fromIdx = currentIds.indexOf(dragId);
     const toIdx = currentIds.indexOf(targetId);
     if (fromIdx === -1 || toIdx === -1) return;
@@ -2559,20 +2596,43 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
   const active = signalQueue.filter(q => q.status === 'active');
   const snoozed = signalQueue.filter(q => q.status === 'snoozed');
 
-  // Sort active: pinned first, then manual order if set, then default priority
-  const sortedActive = [...active].sort((a, b) => {
-    const aPinned = pinnedIds.has(a.id) ? 0 : 1;
-    const bPinned = pinnedIds.has(b.id) ? 0 : 1;
+  // Group active items by thread (thread_id or sender+subject)
+  const threadGroups = new Map<string, typeof active>();
+  for (const q of active) {
+    // Normalize subject: strip Re:/Fwd: prefixes
+    const normSubject = (q.subject || '').replace(/^(Re|Fwd|Fw):\s*/gi, '').trim().toLowerCase();
+    const groupKey = q.thread_id || `${(q.sender_email || '').toLowerCase()}::${normSubject}`;
+    if (!threadGroups.has(groupKey)) threadGroups.set(groupKey, []);
+    threadGroups.get(groupKey)!.push(q);
+  }
+  // Sort items within each group by date (newest first)
+  for (const [, items] of threadGroups) {
+    items.sort((a, b) => new Date(b.received || 0).getTime() - new Date(a.received || 0).getTime());
+  }
+  // Build grouped list: use the newest item as the "lead" for sorting, attach children
+  const groupedItems = Array.from(threadGroups.values()).map(items => ({
+    lead: items[0],
+    children: items.slice(1),
+    allIds: items.map(i => i.id),
+    allMessageIds: items.map(i => i.message_id),
+    count: items.length,
+  }));
+
+  // Sort groups: pinned first, then manual order, then priority score (using lead item)
+  const sortedActive = groupedItems.sort((a, b) => {
+    const aPinned = pinnedIds.has(a.lead.id) ? 0 : 1;
+    const bPinned = pinnedIds.has(b.lead.id) ? 0 : 1;
     if (aPinned !== bPinned) return aPinned - bPinned;
-    // If manual order exists, use it
-    const aIdx = manualOrder.indexOf(a.id);
-    const bIdx = manualOrder.indexOf(b.id);
+    const aIdx = manualOrder.indexOf(a.lead.id);
+    const bIdx = manualOrder.indexOf(b.lead.id);
     if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
     if (aIdx !== -1) return -1;
     if (bIdx !== -1) return 1;
-    // Default: by priority score
-    return (b.priority_score || 0) - (a.priority_score || 0);
+    return (b.lead.priority_score || 0) - (a.lead.priority_score || 0);
   });
+
+  // Track expanded thread groups
+  const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
 
   const priorityColors: Record<string, { border: string; bg: string; label: string }> = {
     urgent: { border: 'var(--urgent)', bg: 'var(--urgent-bg)', label: 'Reply Now' },
@@ -2601,7 +2661,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     if (t in tierCounts) tierCounts[t]++;
   });
 
-  const filteredActive = tierFilter ? sortedActive.filter(q => q.tier === tierFilter) : sortedActive;
+  const filteredActive = tierFilter ? sortedActive.filter(g => g.lead.tier === tierFilter) : sortedActive;
 
   return (
     <div>
@@ -2628,123 +2688,140 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
         })}
       </div>
 
-      {/* Active items grouped by priority — low priority goes to Cleanup tab */}
+      {/* Active items grouped by priority + thread — low priority goes to Cleanup tab */}
       {['urgent', 'important', 'normal'].map(priority => {
-        const items = filteredActive.filter(q => q.priority === priority);
-        if (items.length === 0) return null;
+        const groups = filteredActive.filter(g => g.lead.priority === priority);
+        if (groups.length === 0) return null;
         const pc = priorityColors[priority];
         return (
           <div key={priority}>
             <p className="text-xs font-semibold uppercase tracking-wide mt-4 mb-2 pb-2 border-b pl-3"
               style={{ color: pc.border, borderLeftWidth: 3, borderLeftColor: pc.border, borderBottomColor: 'var(--border)' }}>
-              {pc.label} ({items.length})
+              {pc.label} ({groups.reduce((s, g) => s + g.count, 0)})
             </p>
-            {items.map(q => {
+            {groups.map(group => {
+              const q = group.lead;
               const isPinned = pinnedIds.has(q.id);
               const isDragging = dragId === q.id;
               const isDragOver = dragOverId === q.id;
-              return (
-              <div key={q.id}
-                draggable
-                onDragStart={() => handleDragStart(q.id)}
-                onDragOver={(e) => handleDragOver(e, q.id)}
-                onDragEnd={handleDragEnd}
-                onDrop={() => handleDrop(q.id)}
-                className="p-4 rounded-xl border mb-2 transition-all"
-                style={{
-                  background: pc.bg,
-                  borderColor: isDragOver ? 'var(--accent)' : 'var(--border)',
-                  borderLeftWidth: 4,
-                  borderLeftColor: isPinned ? '#f59e0b' : pc.border,
-                  opacity: isDragging ? 0.4 : 1,
-                  boxShadow: isDragOver ? '0 0 0 2px var(--accent)' : undefined,
-                  cursor: 'grab',
-                }}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => togglePin(q.id)} title={isPinned ? 'Unpin' : 'Pin to top'}
-                        className="text-sm flex-shrink-0 transition-transform hover:scale-110"
-                        style={{ opacity: isPinned ? 1 : 0.3 }}>
-                        📌
-                      </button>
-                      <span className="font-semibold text-sm">{q.sender}</span>
-                      <TierDropdown currentTier={q.tier || ''} senderEmail={q.sender_email} senderName={q.sender}
-                        onTierChanged={(newTier) => {
-                          // If downgraded to C/D, remove from queue view
-                          if (newTier === 'C' || newTier === 'D') {
-                            setQueue(prev => prev.filter(item => item.id !== q.id));
-                            showToast(`Moved to Cleanup`, `${q.sender} is now Tier ${newTier}`);
-                          } else {
-                            setQueue(prev => prev.map(item => item.id === q.id ? { ...item, tier: newTier } : item));
-                            showToast(`Updated to Tier ${newTier}`, q.sender);
-                          }
-                        }} />
-                    </div>
-                    <div className="cursor-pointer" onClick={() => onPreview(q.message_id, q.account_email)} onDoubleClick={() => onDialogPreview?.(q.message_id, q.account_email)}>
+              const isThreadExpanded = expandedThreads.has(q.id);
+              const hasThread = group.count > 1;
+
+              // Render a single queue item card (used for lead + children)
+              const renderQueueCard = (item: typeof q, isChild = false) => (
+                <div key={item.id}
+                  data-preview-id={item.message_id}
+                  data-preview-account={item.account_email || ''}
+                  className={`p-4 rounded-xl border mb-2 transition-all cursor-pointer ${isChild ? 'ml-6 border-l-2' : ''}`}
+                  style={{
+                    background: isChild ? '#f8fafc' : pc.bg,
+                    borderColor: isDragOver && !isChild ? 'var(--accent)' : 'var(--border)',
+                    borderLeftWidth: isChild ? 2 : 4,
+                    borderLeftColor: isChild ? 'var(--muted)' : (isPinned ? '#f59e0b' : pc.border),
+                    opacity: isDragging && !isChild ? 0.4 : 1,
+                  }}
+                  onClick={() => onPreview(item.message_id, item.account_email)}
+                  onDoubleClick={() => onDialogPreview?.(item.message_id, item.account_email)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        {!isChild && (
+                          <button onClick={(e) => { e.stopPropagation(); togglePin(q.id); }} title={isPinned ? 'Unpin' : 'Pin to top'}
+                            className="text-sm flex-shrink-0 transition-transform hover:scale-110"
+                            style={{ opacity: isPinned ? 1 : 0.3 }}>
+                            📌
+                          </button>
+                        )}
+                        <span className="font-semibold text-sm">{item.sender}</span>
+                        {!isChild && (
+                          <TierDropdown currentTier={item.tier || ''} senderEmail={item.sender_email} senderName={item.sender}
+                            onTierChanged={(newTier) => {
+                              if (newTier === 'C' || newTier === 'D') {
+                                setQueue(prev => prev.filter(i => !group.allIds.includes(i.id)));
+                                showToast(`Moved to Cleanup`, `${item.sender} is now Tier ${newTier}`);
+                              } else {
+                                setQueue(prev => prev.map(i => group.allIds.includes(i.id) ? { ...i, tier: newTier } : i));
+                                showToast(`Updated to Tier ${newTier}`, item.sender);
+                              }
+                            }} />
+                        )}
+                        {hasThread && !isChild && (
+                          <button onClick={(e) => { e.stopPropagation(); setExpandedThreads(prev => { const next = new Set(prev); next.has(q.id) ? next.delete(q.id) : next.add(q.id); return next; }); }}
+                            className="px-2 py-0.5 text-[10px] font-semibold rounded-full border"
+                            style={{ borderColor: '#c7d2fe', background: '#eef2ff', color: '#4338ca' }}>
+                            {group.count} messages {isThreadExpanded ? '▾' : '▸'}
+                          </button>
+                        )}
+                      </div>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-sm font-medium hover:underline">{q.subject}</span>
-                        {q.received && (
+                        <span className="text-sm font-medium">{item.subject}</span>
+                        {item.received && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#f1f5f9', color: '#64748b' }}>
-                            {new Date(q.received).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                            {new Date(item.received).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                           </span>
                         )}
                       </div>
-                      <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{cleanSnippet(q.summary || '')}</div>
+                      <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{cleanSnippet(item.summary || '')}</div>
                       <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-                        {q.account_email} &middot; Score: {q.priority_score}/10
-                        {q.reply_count > 0 && <> &middot; <span style={{ color: '#6366f1' }}>{q.reply_count} replies sent</span></>}
+                        {item.account_email} &middot; Score: {item.priority_score}/10
+                        {item.reply_count > 0 && <> &middot; <span style={{ color: '#6366f1' }}>{item.reply_count} replies sent</span></>}
                       </div>
                     </div>
                   </div>
-                </div>
-                <div className="flex gap-2 mt-3 flex-wrap">
-                  <button onClick={() => setReplyingTo(replyingTo === q.id ? null : q.id)}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
-                  {quickReplyTemplates.length > 0 && (
-                    <QuickReplyDropdown templates={quickReplyTemplates} onSend={async (body, label) => {
-                      try {
-                        const savedAccount = _currentAccount;
-                        if (q.account_email && q.account_email !== _currentAccount) setCurrentAccount(q.account_email);
-                        const res = await gmailPost('reply', {
-                          to: q.sender_email,
-                          subject: q.subject,
-                          body,
-                          threadId: q.thread_id,
-                          inReplyTo: q.message_id,
-                        });
-                        if (q.account_email) setCurrentAccount(savedAccount);
-                        if (res.success) {
-                          showToast(`Quick reply sent: ${label}`, q.sender);
-                          queueAction('archive', q.message_id, q.id, q.account_email);
-                        } else {
-                          showToast('Failed to send', res.error);
-                        }
-                      } catch (e) { showToast('Error', String(e)); }
-                    }} />
-                  )}
-                  <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(q.id, hours, label)} />
-                  <button onClick={() => queueAction('archive', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
-                  <button onClick={() => queueAction('markRead', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Mark Read</button>
-                  <button onClick={() => queueAction('trash', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
-                  <button onClick={() => setConfirmDelete(q.id + '::' + q.message_id + '::' + q.account_email)}
-                    className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
-                </div>
-                {replyingTo === q.id && (
-                  <div className="mt-3">
-                    <ReplyComposer
-                      to={q.sender_email}
-                      subject={q.subject}
-                      threadId={q.thread_id}
-                      messageId={q.message_id}
-                      showToast={showToast}
-                      accountEmail={q.account_email}
-                      onSent={() => { setReplyingTo(null); queueAction('archive', q.message_id, q.id, q.account_email); }}
-                      onCancel={() => setReplyingTo(null)}
-                    />
+                  <div className="flex gap-2 mt-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => setReplyingTo(replyingTo === item.id ? null : item.id)}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
+                    {!isChild && quickReplyTemplates.length > 0 && (
+                      <QuickReplyDropdown templates={quickReplyTemplates} onSend={async (body, label) => {
+                        try {
+                          const savedAccount = _currentAccount;
+                          if (item.account_email && item.account_email !== _currentAccount) setCurrentAccount(item.account_email);
+                          const res = await gmailPost('reply', {
+                            to: item.sender_email, subject: item.subject, body,
+                            threadId: item.thread_id, inReplyTo: item.message_id,
+                          });
+                          if (item.account_email) setCurrentAccount(savedAccount);
+                          if (res.success) {
+                            showToast(`Quick reply sent: ${label}`, item.sender);
+                            queueAction('archive', item.message_id, item.id, item.account_email);
+                          } else { showToast('Failed to send', res.error); }
+                        } catch (e) { showToast('Error', String(e)); }
+                      }} />
+                    )}
+                    <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(item.id, hours, label)} />
+                    <button onClick={() => queueAction('archive', item.message_id, item.id, item.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                    <button onClick={() => queueAction('markRead', item.message_id, item.id, item.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Mark Read</button>
+                    <button onClick={() => queueAction('trash', item.message_id, item.id, item.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                    <button onClick={() => setConfirmDelete(item.id + '::' + item.message_id + '::' + item.account_email)}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
                   </div>
-                )}
-              </div>
+                  {replyingTo === item.id && (
+                    <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+                      <ReplyComposer
+                        to={item.sender_email} subject={item.subject}
+                        threadId={item.thread_id} messageId={item.message_id}
+                        showToast={showToast} accountEmail={item.account_email}
+                        onSent={() => { setReplyingTo(null); queueAction('archive', item.message_id, item.id, item.account_email); }}
+                        onCancel={() => setReplyingTo(null)}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+
+              return (
+                <div key={q.id}
+                  draggable
+                  onDragStart={() => handleDragStart(q.id)}
+                  onDragOver={(e) => handleDragOver(e, q.id)}
+                  onDragEnd={handleDragEnd}
+                  onDrop={() => handleDrop(q.id)}
+                >
+                  {renderQueueCard(q)}
+                  {/* Thread children — shown when expanded */}
+                  {hasThread && isThreadExpanded && group.children.map(child => renderQueueCard(child, true))}
+                </div>
               );
             })}
           </div>
@@ -3064,7 +3141,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
                   {group.messages.map(msg => {
                     const isMsgSelected = isGroupSelected || selectedMessages.has(msg.id);
                     return (
-                      <div key={msg.id} className="flex items-center justify-between py-2 text-xs border-b" style={{ borderColor: 'var(--border)', background: isMsgSelected ? '#dbeafe' : 'transparent' }}>
+                      <div key={msg.id} className="flex items-center justify-between py-2 text-xs border-b" style={{ borderColor: 'var(--border)', background: isMsgSelected ? '#dbeafe' : 'transparent' }} data-preview-id={msg.id} data-preview-account={msg.accountEmail || ''}>
                         <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
                           <input type="checkbox" checked={isMsgSelected} onChange={() => toggleMessage(msg.id)}
                             disabled={isGroupSelected} className="rounded flex-shrink-0" style={{ accentColor: 'var(--accent)' }} />
@@ -3314,7 +3391,7 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
                   borderLeftColor: convo.hasAwaiting ? '#f59e0b' : 'var(--border)',
                 }}>
                 {/* Conversation header — click to expand */}
-                <div className="p-4 cursor-pointer" onClick={() => setExpandedConvo(isExpanded ? null : convo.normalizedSubject)} onDoubleClick={() => onDialogPreview?.(latestMsg.id, latestMsg.accountEmail)}>
+                <div className="p-4 cursor-pointer" onClick={() => setExpandedConvo(isExpanded ? null : convo.normalizedSubject)} onDoubleClick={() => onDialogPreview?.(latestMsg.id, latestMsg.accountEmail)} data-preview-id={latestMsg.id} data-preview-account={latestMsg.accountEmail || ''}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -3364,7 +3441,7 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
                     {convo.messages.map((msg, idx) => (
                       <div key={msg.id} className="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition-colors"
                         onClick={() => onPreview(msg.id, msg.accountEmail)}
-                        onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)}>
+                        onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)} data-preview-id={msg.id} data-preview-account={msg.accountEmail || ''}>
                         <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: 'var(--accent)' }}>
                           {idx + 1}
                         </div>
@@ -3431,7 +3508,7 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
                   {group.messages.slice(0, 5).map((msg) => (
                     <div key={msg.id} className="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition-colors"
                       onClick={() => onPreview(msg.id, msg.accountEmail)}
-                      onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)}>
+                      onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)} data-preview-id={msg.id} data-preview-account={msg.accountEmail || ''}>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium truncate">{msg.subject || '(no subject)'}</span>
@@ -3549,7 +3626,7 @@ function SnoozedTab({ onAction, showToast, onPreview, onDialogPreview, reloadKey
               borderColor: isOverdue ? '#fbbf24' : 'var(--border)',
               borderLeftWidth: 4,
               borderLeftColor: isOverdue ? '#f59e0b' : '#8b5cf6',
-            }}>
+            }} data-preview-id={q.message_id} data-preview-account={q.account_email || ''}>
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
@@ -3826,7 +3903,7 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
               return (
                 <div key={`s-${convo.subject}`} className="rounded-xl border overflow-hidden"
                   style={{ background: '#fffbeb', borderColor: '#fbbf24', borderLeftWidth: 4, borderLeftColor: '#f59e0b' }}>
-                  <div className="p-4 cursor-pointer" onClick={() => setExpandedConvo(isExpanded ? null : `s-${convo.subject}`)}>
+                  <div className="p-4 cursor-pointer" onClick={() => setExpandedConvo(isExpanded ? null : `s-${convo.subject}`)} data-preview-id={latest.id} data-preview-account={latest.accountEmail || ''}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -3909,7 +3986,7 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                 <div key={`a-${convo.subject}`} className="p-4 rounded-xl border cursor-pointer hover:shadow-sm transition-shadow"
                   onClick={() => onPreview(latest.id, latest.accountEmail)}
                   onDoubleClick={() => onDialogPreview?.(latest.id, latest.accountEmail)}
-                  style={{ background: 'var(--card)', borderColor: 'var(--border)', borderLeftWidth: 3, borderLeftColor: urgencyColor }}>
+                  style={{ background: 'var(--card)', borderColor: 'var(--border)', borderLeftWidth: 3, borderLeftColor: urgencyColor }} data-preview-id={latest.id} data-preview-account={latest.accountEmail || ''}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -4166,7 +4243,16 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   const tierColors: Record<string, string> = { A: '#dcfce7', B: '#fef3c7', C: '#e0f2fe', D: '#f1f5f9' };
   const tierText: Record<string, string> = { A: '#166534', B: '#92400e', C: '#075985', D: '#475569' };
   const tiers = ['A', 'B', 'C', 'D'];
-  const filteredSenders = filterTier === 'all' ? senders : senders.filter(s => s.tier === filterTier);
+  // Sort senders: by interactions (reply_count) DESC, then name ASC
+  const sortedSenders = [...senders].sort((a: any, b: any) => {
+    const aCount = (a.reply_count || 0);
+    const bCount = (b.reply_count || 0);
+    if (bCount !== aCount) return bCount - aCount;
+    const aName = (a.display_name || a.sender_email || '').toLowerCase();
+    const bName = (b.display_name || b.sender_email || '').toLowerCase();
+    return aName.localeCompare(bName);
+  });
+  const filteredSenders = filterTier === 'all' ? sortedSenders : sortedSenders.filter(s => s.tier === filterTier);
 
   return (
     <div className="flex flex-col gap-6">
