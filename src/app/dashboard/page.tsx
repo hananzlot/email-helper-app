@@ -613,6 +613,8 @@ export default function Dashboard() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [searchSelectedIds, setSearchSelectedIds] = useState<Set<string>>(new Set());
+  const [searchSelectionActive, setSearchSelectionActive] = useState<GmailMessage[]>([]);
   // Auth error state — show login prompt instead of auto-redirect loop
   const [authError, setAuthError] = useState(false);
   // Tab counts — each tab reports its count for display in tab bar
@@ -698,6 +700,7 @@ export default function Dashboard() {
     setSearchOpen(false);
     setSearchQuery('');
     setSearchResults([]);
+    setSearchSelectedIds(new Set());
   }
 
   const splitSupportedTabs: Tab[] = ['inbox', 'reply-queue', 'follow-up', 'snoozed', 'cleanup', 'sent'];
@@ -1672,14 +1675,70 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   <div>
-                    <div className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)', background: '#f8fafc', borderBottom: '1px solid var(--border)' }}>
-                      {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}
-                      {searchLoading && ' (loading more...)'}
+                    <div className="px-4 py-2 flex items-center justify-between sticky top-0 z-10" style={{ background: '#f8fafc', borderBottom: '1px solid var(--border)' }}>
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox"
+                          checked={searchSelectedIds.size === searchResults.length && searchResults.length > 0}
+                          onChange={() => {
+                            if (searchSelectedIds.size === searchResults.length) {
+                              setSearchSelectedIds(new Set());
+                            } else {
+                              setSearchSelectedIds(new Set(searchResults.map(m => m.id)));
+                            }
+                          }}
+                          className="rounded flex-shrink-0" style={{ accentColor: 'var(--accent)' }} />
+                        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+                          {searchSelectedIds.size > 0 ? `${searchSelectedIds.size} selected` : `${searchResults.length} result${searchResults.length !== 1 ? 's' : ''}`}
+                          {searchLoading && ' (loading more...)'}
+                        </span>
+                      </div>
+                      {searchSelectedIds.size > 0 && (
+                        <div className="flex gap-1.5">
+                          <button onClick={() => {
+                            const selected = searchResults.filter(m => searchSelectedIds.has(m.id));
+                            setSearchSelectionActive(selected);
+                            setSearchOpen(false);
+                          }}
+                            className="px-3 py-1 text-[10px] font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
+                            Open {searchSelectedIds.size} Selected
+                          </button>
+                          <button onClick={() => {
+                            const ids = Array.from(searchSelectedIds);
+                            const msgs = searchResults.filter(m => searchSelectedIds.has(m.id));
+                            // Group by account for proper action routing
+                            const byAccount = new Map<string, string[]>();
+                            for (const m of msgs) {
+                              const acct = m.accountEmail || _currentAccount;
+                              if (!byAccount.has(acct)) byAccount.set(acct, []);
+                              byAccount.get(acct)!.push(m.id);
+                            }
+                            for (const [acct, mIds] of byAccount) handleAction('archive', mIds, undefined, acct);
+                            setSearchResults(prev => prev.filter(r => !searchSelectedIds.has(r.id)));
+                            setSearchSelectedIds(new Set());
+                          }}
+                            className="px-3 py-1 text-[10px] font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                          <button onClick={() => {
+                            const msgs = searchResults.filter(m => searchSelectedIds.has(m.id));
+                            const byAccount = new Map<string, string[]>();
+                            for (const m of msgs) {
+                              const acct = m.accountEmail || _currentAccount;
+                              if (!byAccount.has(acct)) byAccount.set(acct, []);
+                              byAccount.get(acct)!.push(m.id);
+                            }
+                            for (const [acct, mIds] of byAccount) handleAction('trash', mIds, undefined, acct);
+                            setSearchResults(prev => prev.filter(r => !searchSelectedIds.has(r.id)));
+                            setSearchSelectedIds(new Set());
+                          }}
+                            className="px-3 py-1 text-[10px] font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                        </div>
+                      )}
                     </div>
-                    {searchResults.map((msg) => (
+                    {searchResults.map((msg) => {
+                      const isSelected = searchSelectedIds.has(msg.id);
+                      return (
                       <div key={`${msg.id}-${msg.accountEmail}`}
                         className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
-                        style={{ borderBottom: '1px solid var(--border)' }}
+                        style={{ borderBottom: '1px solid var(--border)', background: isSelected ? '#eff6ff' : undefined }}
                         onClick={() => {
                           if (layoutMode === 'split' && !isMobile && splitSupportedTabs.includes(activeTab)) {
                             setSplitPreviewId(msg.id);
@@ -1690,6 +1749,16 @@ export default function Dashboard() {
                           }
                           closeSearch();
                         }}>
+                        <input type="checkbox" checked={isSelected}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => {
+                            setSearchSelectedIds(prev => {
+                              const next = new Set(prev);
+                              next.has(msg.id) ? next.delete(msg.id) : next.add(msg.id);
+                              return next;
+                            });
+                          }}
+                          className="rounded flex-shrink-0 mt-1" style={{ accentColor: 'var(--accent)' }} />
                         <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
                           style={{ background: msg.isUnread ? 'var(--accent)' : '#94a3b8' }}>
                           {(msg.sender || '?')[0]?.toUpperCase()}
@@ -1716,7 +1785,8 @@ export default function Dashboard() {
                             className="px-2 py-1 text-[10px] rounded border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1768,6 +1838,98 @@ export default function Dashboard() {
           <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: '#6366f1', borderTopColor: 'transparent' }} />
           <span className="text-sm font-medium" style={{ color: '#4338ca' }}>{bgTaskLabel}</span>
           <span className="text-xs ml-auto" style={{ color: '#6366f1' }}>You can keep working</span>
+        </div>
+      )}
+
+      {/* Search selection results — shown when user selects multiple search results */}
+      {searchSelectionActive.length > 0 && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-3 p-3 rounded-xl sticky top-0 z-20" style={{ background: '#eff6ff', border: '2px solid var(--accent)' }}>
+            <span className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>
+              {searchSelectionActive.length} search result{searchSelectionActive.length !== 1 ? 's' : ''} selected
+            </span>
+            <div className="flex gap-2">
+              <button onClick={() => {
+                const byAccount = new Map<string, string[]>();
+                for (const m of searchSelectionActive) {
+                  const acct = m.accountEmail || _currentAccount;
+                  if (!byAccount.has(acct)) byAccount.set(acct, []);
+                  byAccount.get(acct)!.push(m.id);
+                }
+                for (const [acct, mIds] of byAccount) handleAction('markRead', mIds, undefined, acct);
+              }}
+                className="px-4 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', background: 'white' }}>
+                Mark Read
+              </button>
+              <button onClick={() => {
+                const byAccount = new Map<string, string[]>();
+                for (const m of searchSelectionActive) {
+                  const acct = m.accountEmail || _currentAccount;
+                  if (!byAccount.has(acct)) byAccount.set(acct, []);
+                  byAccount.get(acct)!.push(m.id);
+                }
+                for (const [acct, mIds] of byAccount) handleAction('archive', mIds, undefined, acct);
+                setSearchSelectionActive([]);
+              }}
+                className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
+                Archive All
+              </button>
+              <button onClick={() => {
+                const byAccount = new Map<string, string[]>();
+                for (const m of searchSelectionActive) {
+                  const acct = m.accountEmail || _currentAccount;
+                  if (!byAccount.has(acct)) byAccount.set(acct, []);
+                  byAccount.get(acct)!.push(m.id);
+                }
+                for (const [acct, mIds] of byAccount) handleAction('trash', mIds, undefined, acct);
+                setSearchSelectionActive([]);
+              }}
+                className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--urgent)' }}>
+                Trash All
+              </button>
+              <button onClick={() => setSearchSelectionActive([])}
+                className="px-4 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                Close
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2">
+            {searchSelectionActive.map(msg => (
+              <div key={msg.id} className="p-4 rounded-xl border cursor-pointer hover:shadow-md transition-all"
+                style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+                data-preview-id={msg.id} data-preview-account={msg.accountEmail || ''}
+                onClick={() => openPreview(msg.id, msg.accountEmail)}
+                onDoubleClick={() => openDialogPreview?.(msg.id, msg.accountEmail)}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                      style={{ background: msg.isUnread ? 'var(--accent)' : '#94a3b8' }}>
+                      {(msg.sender || '?')[0]?.toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">{msg.sender}</span>
+                        <span className="text-[10px]" style={{ color: 'var(--muted)' }}>
+                          {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                        </span>
+                        {msg.accountEmail && accounts.length > 1 && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#f1f5f9', color: '#64748b' }}>{msg.accountEmail}</span>
+                        )}
+                      </div>
+                      <div className="text-sm font-medium">{msg.subject}</div>
+                      <div className="text-xs line-clamp-2" style={{ color: 'var(--muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{cleanSnippet(msg.snippet || '')}</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <button onClick={() => handleAction('archive', [msg.id], undefined, msg.accountEmail)}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                    <button onClick={() => { handleAction('trash', [msg.id], undefined, msg.accountEmail); setSearchSelectionActive(prev => prev.filter(m => m.id !== msg.id)); }}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
