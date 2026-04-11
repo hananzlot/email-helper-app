@@ -1680,7 +1680,16 @@ export default function Dashboard() {
                       <div key={`${msg.id}-${msg.accountEmail}`}
                         className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
                         style={{ borderBottom: '1px solid var(--border)' }}
-                        onClick={() => { openPreview(msg.id, msg.accountEmail); closeSearch(); }}>
+                        onClick={() => {
+                          if (layoutMode === 'split' && !isMobile && splitSupportedTabs.includes(activeTab)) {
+                            setSplitPreviewId(msg.id);
+                            setSplitPreviewAccount(msg.accountEmail);
+                          } else {
+                            setPreviewMessageId(msg.id);
+                            setPreviewAccount(msg.accountEmail);
+                          }
+                          closeSearch();
+                        }}>
                         <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
                           style={{ background: msg.isUnread ? 'var(--accent)' : '#94a3b8' }}>
                           {(msg.sender || '?')[0]?.toUpperCase()}
