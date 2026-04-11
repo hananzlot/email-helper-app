@@ -134,12 +134,11 @@ export async function runTriage(
     { onConflict: 'user_id,account_email' }
   );
 
-  // Only add HIGH-PRIORITY emails to reply queue (signal, not noise).
-  // Signal = Tier A/B senders, urgent/important priority, or needs-reply heuristics.
-  // Noise (Tier C/D, unknown, automated) stays out — that's for Cleanup.
+  // Add signal emails to reply queue. Signal = Tier A/B/C senders + high priority.
+  // Noise (Tier D, unknown, automated) stays out — that's for the Cleanup tab.
   const signalEmails = triaged.filter((e) => {
-    // Tier A/B senders always go to reply queue
-    if (e.tier === 'A' || e.tier === 'B') return true;
+    // Tier A/B/C senders go to reply queue (Triage tab)
+    if (e.tier === 'A' || e.tier === 'B' || e.tier === 'C') return true;
     // Urgent or important priority (high score) go to reply queue
     if (e.priority === 'urgent' || e.priority === 'important') return true;
     // Emails with reply-needed signals go to reply queue

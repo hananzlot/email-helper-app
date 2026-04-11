@@ -303,14 +303,13 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
               style={{ borderColor: 'var(--border)', background: clickedBtn === 'markRead' ? '#dbeafe' : undefined, color: clickedBtn === 'markRead' ? '#1e40af' : undefined }}>
               {clickedBtn === 'markRead' ? 'Marked read!' : (email.isUnread ? 'Mark Read' : 'Mark Unread')}
             </button>
-            <button onClick={() => flashAction('followUp', async () => {
-              // Add INBOX label + mark unread so it appears in inbox as a reminder
-              onAction('addLabel', [messageId], 'INBOX', accountEmail || _currentAccount);
-              onAction('markUnread', [messageId], undefined, accountEmail || _currentAccount);
+            <button onClick={() => flashAction('followUp', () => {
+              // Star the message so it appears in the Follow-Up tab
+              onAction('star', [messageId], undefined, accountEmail || _currentAccount);
             })}
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
-              style={{ borderColor: 'var(--border)', background: clickedBtn === 'followUp' ? '#dbeafe' : undefined, color: clickedBtn === 'followUp' ? '#1e40af' : '#2563eb' }}>
-              {clickedBtn === 'followUp' ? 'Added to Inbox!' : 'Follow Up'}
+              style={{ borderColor: '#fbbf24', background: clickedBtn === 'followUp' ? '#fef3c7' : undefined, color: clickedBtn === 'followUp' ? '#92400e' : '#b45309' }}>
+              {clickedBtn === 'followUp' ? 'Added to Follow Up!' : 'Follow Up'}
             </button>
             <button onClick={() => flashAction('star', () => { onAction('star', [messageId], undefined, accountEmail || _currentAccount); })}
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
@@ -361,7 +360,7 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
   const btnRef = React.useRef<HTMLButtonElement>(null);
 
   const tiers = [
-    { value: 'A', label: 'Tier A', desc: 'Top priority', bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' },
+    { value: 'A', label: 'Tier A', desc: 'Top priority', bg: '#dcfce7', color: '#166534', border: '#86efac' },
     { value: 'B', label: 'Tier B', desc: 'Important', bg: '#fef3c7', color: '#92400e', border: '#fbbf24' },
     { value: 'C', label: 'Tier C', desc: 'Low priority', bg: '#e0f2fe', color: '#075985', border: '#7dd3fc' },
     { value: 'D', label: 'Tier D', desc: 'Noise', bg: '#f1f5f9', color: '#475569', border: '#cbd5e1' },
@@ -432,7 +431,7 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
 
 // ============ MAIN DASHBOARD ============
 
-type Tab = 'inbox' | 'reply-queue' | 'cleanup' | 'sent' | 'priorities' | 'accounts';
+type Tab = 'inbox' | 'reply-queue' | 'cleanup' | 'sent' | 'follow-up' | 'priorities' | 'accounts';
 
 interface ConnectedAccount {
   email: string;
@@ -464,6 +463,8 @@ export default function Dashboard() {
   const [previewAccount, setPreviewAccount] = useState<string | undefined>(undefined);
   // Auth error state — show login prompt instead of auto-redirect loop
   const [authError, setAuthError] = useState(false);
+  // Tab counts — each tab reports its count for display in tab bar
+  const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
 
   function openPreview(messageId: string, acctEmail?: string) {
     setPreviewMessageId(messageId);
@@ -772,8 +773,20 @@ export default function Dashboard() {
     }
   }
 
+  // Callback for tabs to report their item count
+  const reportTabCount = useCallback((tabId: string, count: number) => {
+    setTabCounts(prev => prev[tabId] === count ? prev : { ...prev, [tabId]: count });
+  }, []);
+
+  // Report All Mail count from loaded messages
+  useEffect(() => {
+    const unread = messages.filter(m => m.isUnread).length;
+    reportTabCount('inbox', unread);
+  }, [messages, reportTabCount]);
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'reply-queue', label: 'Inbox (Triage)' },
+    { id: 'follow-up', label: 'Follow Up' },
     { id: 'cleanup', label: 'Cleanup' },
     { id: 'sent', label: 'Sent Mail' },
     { id: 'inbox', label: 'All Mail' },
@@ -836,20 +849,32 @@ export default function Dashboard() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-0 border-b-2 mb-6" style={{ borderColor: 'var(--border)' }}>
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className="px-6 py-3 text-sm font-medium transition-all border-b-2 -mb-[2px]"
-            style={{
-              color: activeTab === tab.id ? 'var(--accent)' : 'var(--muted)',
-              borderBottomColor: activeTab === tab.id ? 'var(--accent)' : 'transparent',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="flex gap-0 border-b-2 mb-6 overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
+        {tabs.map((tab) => {
+          const count = tabCounts[tab.id];
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className="px-5 py-3 text-sm font-medium transition-all border-b-2 -mb-[2px] whitespace-nowrap flex items-center gap-1.5"
+              style={{
+                color: activeTab === tab.id ? 'var(--accent)' : 'var(--muted)',
+                borderBottomColor: activeTab === tab.id ? 'var(--accent)' : 'transparent',
+              }}
+            >
+              {tab.label}
+              {count != null && count > 0 && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
+                  style={{
+                    background: activeTab === tab.id ? 'var(--accent)' : '#e2e8f0',
+                    color: activeTab === tab.id ? 'white' : '#64748b',
+                  }}>
+                  {count > 99 ? '99+' : count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Background task banner — visible across all tabs */}
@@ -867,8 +892,9 @@ export default function Dashboard() {
           <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
             onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} />
         )}
-        {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} />}
-        {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} />}
+        {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} />}
+        {activeTab === 'follow-up' && <FollowUpTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
+        {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
         {activeTab === 'sent' && <SentMailTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} />}
         {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
         {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
@@ -1109,11 +1135,12 @@ function SnoozeDropdown({ onSnooze }: { onSnooze: (hours: number, label: string)
 
 // ============ REPLY QUEUE TAB ============
 
-function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
+function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount }: {
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
   reloadKey: number;
   onPreview: (messageId: string, accountEmail?: string) => void;
+  reportCount?: (count: number) => void;
 }) {
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1126,7 +1153,11 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
   async function loadQueue() {
     setLoading(true);
     const res = await apiGet('queue');
-    if (res.success) setQueue(res.data);
+    if (res.success) {
+      setQueue(res.data);
+      const activeCount = (res.data || []).filter((q: any) => q.status === 'active').length;
+      reportCount?.(activeCount);
+    }
     setLoading(false);
   }
 
@@ -1222,7 +1253,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
       <div className="flex gap-2 mb-4">
         {([
           { tier: null, label: 'All', bg: '#f3f4f6', color: '#374151', border: '#d1d5db', activeBg: '#374151', activeColor: '#fff' },
-          { tier: 'A', label: `Tier A (${tierCounts.A})`, bg: '#fee2e2', color: '#991b1b', border: '#fca5a5', activeBg: '#991b1b', activeColor: '#fff' },
+          { tier: 'A', label: `Tier A (${tierCounts.A})`, bg: '#dcfce7', color: '#166534', border: '#86efac', activeBg: '#166534', activeColor: '#fff' },
           { tier: 'B', label: `Tier B (${tierCounts.B})`, bg: '#fef3c7', color: '#92400e', border: '#fbbf24', activeBg: '#92400e', activeColor: '#fff' },
           { tier: 'C', label: `Tier C (${tierCounts.C})`, bg: '#e0f2fe', color: '#075985', border: '#7dd3fc', activeBg: '#075985', activeColor: '#fff' },
         ] as const).map(b => {
@@ -1354,12 +1385,13 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; }) {
+function CleanupTab({ messages, onAction, showToast, onPreview, reportCount }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name'>('tier');
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
   const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
+  const [senderReplyCounts, setSenderReplyCounts] = useState<Record<string, number>>({});
   const [tiersLoaded, setTiersLoaded] = useState(false);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
 
@@ -1370,10 +1402,13 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
         const res = await apiGet('senders');
         if (res.success && res.data) {
           const tiers: Record<string, string> = {};
+          const counts: Record<string, number> = {};
           for (const s of res.data) {
             tiers[s.sender_email.toLowerCase()] = s.tier;
+            counts[s.sender_email.toLowerCase()] = s.reply_count || 0;
           }
           setSenderTiers(tiers);
+          setSenderReplyCounts(counts);
         }
       } catch (e) { console.error('Failed to load sender tiers for cleanup:', e); }
       setTiersLoaded(true);
@@ -1402,10 +1437,10 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
   function isNoiseSender(email: string): boolean {
     const lower = email.toLowerCase();
     const tier = senderTiers[lower];
-    // Signal senders (Tier A/B) go to Reply Queue, not here
-    if (tier === 'A' || tier === 'B') return false;
-    // Tier C/D = low priority = cleanup
-    if (tier === 'C' || tier === 'D') return true;
+    // Signal senders (Tier A/B/C) go to Reply Queue / Triage, not here
+    if (tier === 'A' || tier === 'B' || tier === 'C') return false;
+    // Tier D = low priority = cleanup
+    if (tier === 'D') return true;
     // No-reply / automated senders = always noise
     if (noReplyPatterns.some(p => lower.includes(p))) return true;
     if (automatedPatterns.some(p => lower.includes(p))) return true;
@@ -1416,6 +1451,9 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
 
   // Filter messages to only noise senders
   const cleanupMessages = tiersLoaded ? messages.filter(m => isNoiseSender(m.senderEmail)) : [];
+
+  // Report count to parent
+  useEffect(() => { reportCount?.(cleanupMessages.length); }, [cleanupMessages.length]);
 
   // Group filtered messages by sender email
   const senderGroups: Record<string, { name: string; email: string; messages: GmailMessage[] }> = {};
@@ -1428,18 +1466,27 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
   }
 
   const groups = Object.values(senderGroups);
-  const tierOrder: Record<string, number> = { C: 0, D: 1 };
+  const tierOrder: Record<string, number> = { D: 0 };
   if (sortBy === 'tier') {
     groups.sort((a, b) => {
       const tierA = senderTiers[a.email.toLowerCase()] || '';
       const tierB = senderTiers[b.email.toLowerCase()] || '';
-      const orderA = tierOrder[tierA] ?? 2; // no tier = last
-      const orderB = tierOrder[tierB] ?? 2;
+      const orderA = tierOrder[tierA] ?? 1; // no tier = after D
+      const orderB = tierOrder[tierB] ?? 1;
       if (orderA !== orderB) return orderA - orderB;
-      return b.messages.length - a.messages.length; // within same tier, most emails first
+      // Within same tier, sort by reply count (most sent first), then by message count
+      const rcA = senderReplyCounts[a.email.toLowerCase()] || 0;
+      const rcB = senderReplyCounts[b.email.toLowerCase()] || 0;
+      if (rcB !== rcA) return rcB - rcA;
+      return b.messages.length - a.messages.length;
     });
   } else if (sortBy === 'count') {
-    groups.sort((a, b) => b.messages.length - a.messages.length);
+    groups.sort((a, b) => {
+      if (b.messages.length !== a.messages.length) return b.messages.length - a.messages.length;
+      const rcA = senderReplyCounts[a.email.toLowerCase()] || 0;
+      const rcB = senderReplyCounts[b.email.toLowerCase()] || 0;
+      return rcB - rcA;
+    });
   } else {
     groups.sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -2022,6 +2069,257 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
   );
 }
 
+// ============ FOLLOW-UP TAB ============
+
+function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, reportCount }: {
+  accounts: ConnectedAccount[];
+  unified: boolean;
+  onPreview: (messageId: string, accountEmail?: string) => void;
+  showToast: (title: string, subtitle?: string) => void;
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
+  reportCount?: (count: number) => void;
+}) {
+  const [starredSent, setStarredSent] = useState<GmailMessage[]>([]);
+  const [awaitingReply, setAwaitingReply] = useState<GmailMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedConvo, setExpandedConvo] = useState<string | null>(null);
+
+  useEffect(() => { loadFollowUps(); }, []);
+
+  function isAwaitingReply(msg: GmailMessage): boolean {
+    const sentDate = new Date(msg.date);
+    const hoursSince = (Date.now() - sentDate.getTime()) / (1000 * 60 * 60);
+    if (hoursSince < 24) return false;
+    if (hoursSince > 48) return true;
+    return !msg.subject?.startsWith('Re:');
+  }
+
+  async function loadFollowUps() {
+    setLoading(true);
+    try {
+      const allStarred: GmailMessage[] = [];
+      const allAwaiting: GmailMessage[] = [];
+
+      const loadForAccount = async (acctEmail?: string) => {
+        // Load starred sent messages
+        const starredRes = await gmailGet('search', { q: 'in:sent is:starred', max: '30' });
+        if (starredRes.success && starredRes.data?.messages) {
+          for (const msg of starredRes.data.messages) {
+            allStarred.push({ ...msg, accountEmail: acctEmail || _currentAccount });
+          }
+        }
+        // Load recent sent messages to detect awaiting reply
+        const sentRes = await gmailGet('search', { q: 'in:sent newer_than:7d', max: '30' });
+        if (sentRes.success && sentRes.data?.messages) {
+          for (const msg of sentRes.data.messages) {
+            if (isAwaitingReply(msg) && !allStarred.find(s => s.id === msg.id)) {
+              allAwaiting.push({ ...msg, accountEmail: acctEmail || _currentAccount });
+            }
+          }
+        }
+      };
+
+      if (unified && accounts.length > 1) {
+        const savedAccount = _currentAccount;
+        for (const acct of accounts) {
+          setCurrentAccount(acct.email);
+          await loadForAccount(acct.email);
+        }
+        setCurrentAccount(savedAccount);
+      } else {
+        await loadForAccount();
+      }
+
+      allStarred.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      allAwaiting.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setStarredSent(allStarred);
+      setAwaitingReply(allAwaiting);
+      reportCount?.(allStarred.length + allAwaiting.length);
+    } catch (err) {
+      console.error('Failed to load follow-ups:', err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Group messages by normalized subject for conversation view
+  function groupByConversation(msgs: GmailMessage[]) {
+    const groups: Record<string, { subject: string; messages: GmailMessage[]; recipients: string[] }> = {};
+    for (const msg of msgs) {
+      const normSubj = normalizeSubject(msg.subject);
+      if (!groups[normSubj]) {
+        groups[normSubj] = { subject: normSubj, messages: [], recipients: [] };
+      }
+      groups[normSubj].messages.push(msg);
+      const to = (msg as any).to || '';
+      const toEmail = extractEmail(to);
+      if (toEmail && !groups[normSubj].recipients.includes(toEmail)) {
+        groups[normSubj].recipients.push(toEmail);
+      }
+    }
+    return Object.values(groups);
+  }
+
+  async function unstarMessage(msgId: string, acctEmail?: string) {
+    onAction('unstar', [msgId], undefined, acctEmail || _currentAccount);
+    setStarredSent(prev => prev.filter(m => m.id !== msgId));
+    showToast('Removed from follow-up');
+    reportCount?.((starredSent.length - 1) + awaitingReply.length);
+  }
+
+  if (loading) return (
+    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+      <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+      <p className="text-sm">Loading follow-ups...</p>
+    </div>
+  );
+
+  const totalItems = starredSent.length + awaitingReply.length;
+  if (totalItems === 0) return (
+    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+      <p className="text-lg mb-2">No follow-ups needed</p>
+      <p className="text-sm">Star a sent email or use the "Follow Up" button in previews to track conversations here.</p>
+    </div>
+  );
+
+  const starredConversations = groupByConversation(starredSent);
+  const awaitingConversations = groupByConversation(awaitingReply);
+
+  return (
+    <div>
+      {/* Summary */}
+      <div className="flex items-center gap-3 mb-4">
+        <p className="text-sm font-semibold">{totalItems} conversations to follow up</p>
+        {starredSent.length > 0 && (
+          <span className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ background: '#fef3c7', color: '#92400e' }}>
+            {starredSent.length} flagged
+          </span>
+        )}
+        {awaitingReply.length > 0 && (
+          <span className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ background: '#fee2e2', color: '#991b1b' }}>
+            {awaitingReply.length} awaiting reply
+          </span>
+        )}
+        <button onClick={loadFollowUps} className="ml-auto px-3 py-1 text-xs rounded-full border font-medium" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Refresh</button>
+      </div>
+
+      {/* Flagged for follow-up (starred sent) */}
+      {starredConversations.length > 0 && (
+        <div className="mb-6">
+          <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: '#92400e' }}>Flagged by you</div>
+          <div className="flex flex-col gap-2">
+            {starredConversations.map((convo) => {
+              const latest = convo.messages[0];
+              const isExpanded = expandedConvo === `s-${convo.subject}`;
+              const daysSince = Math.floor((Date.now() - new Date(latest.date).getTime()) / (1000 * 60 * 60 * 24));
+              return (
+                <div key={`s-${convo.subject}`} className="rounded-xl border overflow-hidden"
+                  style={{ background: '#fffbeb', borderColor: '#fbbf24', borderLeftWidth: 4, borderLeftColor: '#f59e0b' }}>
+                  <div className="p-4 cursor-pointer" onClick={() => setExpandedConvo(isExpanded ? null : `s-${convo.subject}`)}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-sm">To: {convo.recipients.join(', ')}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#fef3c7', color: '#92400e' }}>
+                            {daysSince === 0 ? 'Today' : daysSince === 1 ? '1 day ago' : `${daysSince} days ago`}
+                          </span>
+                          {convo.messages.length > 1 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: '#f0fdf4', color: '#166534' }}>
+                              {convo.messages.length} messages
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm font-medium mt-0.5 truncate">{convo.subject}</div>
+                        <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(latest.snippet || '')}</div>
+                        {latest.accountEmail && accounts.length > 1 && (
+                          <div className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>via {latest.accountEmail}</div>
+                        )}
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button onClick={(e) => { e.stopPropagation(); unstarMessage(latest.id, latest.accountEmail); }}
+                          className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: '#fbbf24', color: '#92400e' }}>
+                          Dismiss
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); onPreview(latest.id, latest.accountEmail); }}
+                          className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                          Preview
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  {isExpanded && convo.messages.length > 1 && (
+                    <div className="border-t divide-y" style={{ borderColor: '#fde68a' }}>
+                      {convo.messages.map((msg, idx) => (
+                        <div key={msg.id} className="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-amber-50"
+                          onClick={() => onPreview(msg.id, msg.accountEmail)}>
+                          <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: '#f59e0b' }}>
+                            {idx + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs font-medium">To: {(msg as any).to || 'Unknown'}</span>
+                            <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet || '')}</div>
+                          </div>
+                          <span className="text-[10px] whitespace-nowrap" style={{ color: 'var(--muted)' }}>
+                            {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Awaiting reply (auto-detected) */}
+      {awaitingConversations.length > 0 && (
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: '#991b1b' }}>Awaiting reply (auto-detected)</div>
+          <div className="flex flex-col gap-2">
+            {awaitingConversations.map((convo) => {
+              const latest = convo.messages[0];
+              const daysSince = Math.floor((Date.now() - new Date(latest.date).getTime()) / (1000 * 60 * 60 * 24));
+              const urgencyColor = daysSince > 5 ? '#dc2626' : daysSince > 3 ? '#f59e0b' : '#64748b';
+              return (
+                <div key={`a-${convo.subject}`} className="p-4 rounded-xl border cursor-pointer hover:shadow-sm transition-shadow"
+                  onClick={() => onPreview(latest.id, latest.accountEmail)}
+                  style={{ background: 'var(--card)', borderColor: 'var(--border)', borderLeftWidth: 3, borderLeftColor: urgencyColor }}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">To: {convo.recipients.join(', ')}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: daysSince > 5 ? '#fee2e2' : daysSince > 3 ? '#fef3c7' : '#f1f5f9', color: urgencyColor }}>
+                          {daysSince === 0 ? 'Today' : daysSince === 1 ? '1 day' : `${daysSince} days`} — no reply
+                        </span>
+                        {convo.messages.length > 1 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: '#f0fdf4', color: '#166534' }}>
+                            {convo.messages.length} messages
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm font-medium mt-0.5 truncate">{convo.subject}</div>
+                      <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(latest.snippet || '')}</div>
+                      {latest.accountEmail && accounts.length > 1 && (
+                        <div className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>via {latest.accountEmail}</div>
+                      )}
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); onPreview(latest.id, latest.accountEmail); }}
+                      className="px-2 py-1 text-xs rounded-lg border flex-shrink-0" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                      Preview
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ PRIORITIES TAB ============
 
 // Detect potential duplicate senders by name similarity
@@ -2196,8 +2494,8 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
 
   if (loading) return <div className="text-center py-16" style={{ color: 'var(--muted)' }}>Loading priorities...</div>;
 
-  const tierColors: Record<string, string> = { A: '#fee2e2', B: '#fef3c7', C: '#e0f2fe', D: '#f1f5f9' };
-  const tierText: Record<string, string> = { A: '#991b1b', B: '#92400e', C: '#075985', D: '#475569' };
+  const tierColors: Record<string, string> = { A: '#dcfce7', B: '#fef3c7', C: '#e0f2fe', D: '#f1f5f9' };
+  const tierText: Record<string, string> = { A: '#166534', B: '#92400e', C: '#075985', D: '#475569' };
   const tiers = ['A', 'B', 'C', 'D'];
   const filteredSenders = filterTier === 'all' ? senders : senders.filter(s => s.tier === filterTier);
 
