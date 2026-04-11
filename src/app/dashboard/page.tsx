@@ -2116,45 +2116,9 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-                {actionHistory.map((entry) => {
-                  const ago = Math.floor((Date.now() - entry.timestamp) / 1000);
-                  const timeLabel = ago < 60 ? `${ago}s ago` : ago < 3600 ? `${Math.floor(ago / 60)}m ago` : ago < 86400 ? `${Math.floor(ago / 3600)}h ago` : new Date(entry.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-                  return (
-                    <div key={entry.id} className="px-4 py-3" style={{ opacity: entry.undone ? 0.5 : 1 }}>
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                              style={{
-                                background: entry.undone ? '#f1f5f9' : entry.action === 'trash' || entry.action === 'delete' ? '#fee2e2' : entry.action === 'markRead' ? '#dbeafe' : entry.action === 'archive' ? '#f0fdf4' : '#f3f4f6',
-                                color: entry.undone ? '#94a3b8' : entry.action === 'trash' || entry.action === 'delete' ? '#dc2626' : entry.action === 'markRead' ? '#2563eb' : entry.action === 'archive' ? '#16a34a' : '#374151',
-                              }}>
-                              {entry.undone ? `${entry.label} (undone)` : entry.label}
-                            </span>
-                            <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{timeLabel}</span>
-                          </div>
-                          <div className="mt-1">
-                            {entry.subjects.slice(0, 3).map((subj, i) => (
-                              <div key={i} className="text-xs truncate" style={{ color: 'var(--text)' }}>{subj}</div>
-                            ))}
-                            {entry.subjects.length > 3 && (
-                              <div className="text-xs" style={{ color: 'var(--muted)' }}>+{entry.subjects.length - 3} more</div>
-                            )}
-                          </div>
-                          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>{entry.accountEmail}</div>
-                        </div>
-                        {entry.undoAction && !entry.undone && (
-                          <button
-                            onClick={() => undoHistoryAction(entry)}
-                            className="px-2.5 py-1 text-xs font-semibold rounded-lg border flex-shrink-0 hover:shadow-sm transition-all"
-                            style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: '#eff6ff' }}>
-                            Undo
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                {actionHistory.map((entry) => (
+                  <HistoryEntryCard key={entry.id} entry={entry} onUndo={() => undoHistoryAction(entry)} />
+                ))}
               </div>
             )}
           </div>
@@ -2162,6 +2126,56 @@ export default function Dashboard() {
       )}
 
       {toast && <UndoToast toast={toast} onDismiss={() => setToast(null)} />}
+    </div>
+  );
+}
+
+// ============ HISTORY ENTRY CARD ============
+
+function HistoryEntryCard({ entry, onUndo }: { entry: ActionHistoryEntry; onUndo: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const ago = Math.floor((Date.now() - entry.timestamp) / 1000);
+  const timeLabel = ago < 60 ? `${ago}s ago` : ago < 3600 ? `${Math.floor(ago / 60)}m ago` : ago < 86400 ? `${Math.floor(ago / 3600)}h ago` : new Date(entry.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const visibleSubjects = expanded ? entry.subjects : entry.subjects.slice(0, 3);
+  const hiddenCount = entry.subjects.length - 3;
+
+  return (
+    <div className="px-4 py-3" style={{ opacity: entry.undone ? 0.5 : 1 }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+              style={{
+                background: entry.undone ? '#f1f5f9' : entry.action === 'trash' || entry.action === 'delete' ? '#fee2e2' : entry.action === 'markRead' ? '#dbeafe' : entry.action === 'archive' ? '#f0fdf4' : '#f3f4f6',
+                color: entry.undone ? '#94a3b8' : entry.action === 'trash' || entry.action === 'delete' ? '#dc2626' : entry.action === 'markRead' ? '#2563eb' : entry.action === 'archive' ? '#16a34a' : '#374151',
+              }}>
+              {entry.undone ? `${entry.label} (undone)` : entry.label}
+            </span>
+            <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{timeLabel}</span>
+            <span className="text-[10px] font-medium" style={{ color: 'var(--muted)' }}>{entry.subjects.length} email{entry.subjects.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="mt-1">
+            {visibleSubjects.map((subj, i) => (
+              <div key={i} className="text-xs truncate" style={{ color: 'var(--text)' }}>{subj}</div>
+            ))}
+            {hiddenCount > 0 && (
+              <button onClick={() => setExpanded(!expanded)}
+                className="text-xs font-medium mt-0.5 hover:underline"
+                style={{ color: 'var(--accent)' }}>
+                {expanded ? 'Show less' : `+${hiddenCount} more`}
+              </button>
+            )}
+          </div>
+          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>{entry.accountEmail}</div>
+        </div>
+        {entry.undoAction && !entry.undone && (
+          <button onClick={onUndo}
+            className="px-2.5 py-1 text-xs font-semibold rounded-lg border flex-shrink-0 hover:shadow-sm transition-all"
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: '#eff6ff' }}>
+            Undo
+          </button>
+        )}
+      </div>
     </div>
   );
 }
