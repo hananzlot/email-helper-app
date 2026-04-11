@@ -423,7 +423,7 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
 
 // ============ MAIN DASHBOARD ============
 
-type Tab = 'inbox' | 'reply-queue' | 'cleanup' | 'priorities' | 'accounts';
+type Tab = 'inbox' | 'reply-queue' | 'cleanup' | 'sent' | 'priorities' | 'accounts';
 
 interface ConnectedAccount {
   email: string;
@@ -765,7 +765,8 @@ export default function Dashboard() {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'reply-queue', label: 'Inbox (Triage)' },
     { id: 'cleanup', label: 'Cleanup' },
-    { id: 'inbox', label: 'All Mail (Normal View)' },
+    { id: 'sent', label: 'Sent Mail' },
+    { id: 'inbox', label: 'All Mail' },
     { id: 'priorities', label: 'My Priorities' },
     { id: 'accounts', label: 'Accounts' },
   ];
@@ -858,6 +859,7 @@ export default function Dashboard() {
         )}
         {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} />}
         {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} />}
+        {activeTab === 'sent' && <SentMailTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} />}
         {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
         {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
       </div>
@@ -1632,6 +1634,264 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
           onConfirm={() => { onAction('delete', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); setConfirmDeleteAll(false); }}
           onCancel={() => setConfirmDeleteAll(false)}
         />
+      )}
+    </div>
+  );
+}
+
+// ============ SENT MAIL TAB ============
+
+function SentMailTab({ accounts, unified, onPreview, showToast }: {
+  accounts: ConnectedAccount[];
+  unified: boolean;
+  onPreview: (messageId: string, accountEmail?: string) => void;
+  showToast: (title: string, subtitle?: string) => void;
+}) {
+  const [sentMessages, setSentMessages] = useState<GmailMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'chronological' | 'grouped'>('chronological');
+  const [senderPriorities, setSenderPriorities] = useState<Record<string, number>>({});
+
+  useEffect(() => { loadSentMail(); }, []);
+
+  async function loadSentMail() {
+    setLoading(true);
+    try {
+      // Load sender reply counts for badges
+      const sendersRes = await apiGet('senders');
+      if (sendersRes.success && sendersRes.data) {
+        const counts: Record<string, number> = {};
+        for (const s of sendersRes.data) counts[s.sender_email.toLowerCase()] = s.reply_count || 0;
+        setSenderPriorities(counts);
+      }
+
+      // Fetch sent mail from all accounts if unified, otherwise current
+      const allSent: GmailMessage[] = [];
+      if (unified && accounts.length > 1) {
+        const savedAccount = _currentAccount;
+        for (const acct of accounts) {
+          setCurrentAccount(acct.email);
+          try {
+            const res = await gmailGet('search', { q: 'in:sent', max: '30' });
+            if (res.success && res.data?.messages) {
+              for (const msg of res.data.messages) {
+                allSent.push({ ...msg, accountEmail: acct.email });
+              }
+            }
+          } catch (e) { console.error(`Failed to load sent for ${acct.email}:`, e); }
+        }
+        setCurrentAccount(savedAccount);
+      } else {
+        const res = await gmailGet('search', { q: 'in:sent', max: '50' });
+        if (res.success && res.data?.messages) {
+          for (const msg of res.data.messages) {
+            allSent.push({ ...msg, accountEmail: _currentAccount });
+          }
+        }
+      }
+
+      // Sort by date descending
+      allSent.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setSentMessages(allSent);
+    } catch (err) {
+      console.error('Failed to load sent mail:', err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Detect "awaiting reply" — sent more than 24h ago, no reply in thread
+  function isAwaitingReply(msg: GmailMessage): boolean {
+    const sentDate = new Date(msg.date);
+    const hoursSince = (Date.now() - sentDate.getTime()) / (1000 * 60 * 60);
+    // Only flag if sent > 24h ago and it's a direct email (not a reply chain where we're the last)
+    if (hoursSince < 24) return false;
+    // Simple heuristic: if subject starts with "Re:" we already replied to something,
+    // but it could still be awaiting response. Flag anything > 48h.
+    if (hoursSince > 48) return true;
+    // Between 24-48h, only flag non-reply messages
+    return !msg.subject?.startsWith('Re:');
+  }
+
+  // Group by recipient
+  const recipientGroups: Record<string, { name: string; email: string; messages: GmailMessage[] }> = {};
+  for (const msg of sentMessages) {
+    // For sent mail, "sender" is us — we want to group by recipient (stored in "to" or we parse from snippet)
+    // The Gmail search returns messages where senderEmail is us. The "to" field isn't in the list view.
+    // We'll use senderEmail as a fallback key and group by thread subject prefix
+    const recipientKey = msg.senderEmail?.toLowerCase() || 'unknown';
+    // Actually for sent mail via search, the API returns the message metadata.
+    // Let's group by the first word of the subject to approximate recipient grouping
+    // Better: use the "to" header if available from the message
+    const toEmail = (msg as any).to?.toLowerCase() || recipientKey;
+    const toName = (msg as any).to?.split('<')[0]?.trim() || msg.sender || toEmail;
+    if (!recipientGroups[toEmail]) {
+      recipientGroups[toEmail] = { name: toName, email: toEmail, messages: [] };
+    }
+    recipientGroups[toEmail].messages.push(msg);
+  }
+  const groups = Object.values(recipientGroups).sort((a, b) => b.messages.length - a.messages.length);
+
+  if (loading) return (
+    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+      <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+      <p className="text-sm">Loading sent mail...</p>
+    </div>
+  );
+
+  if (sentMessages.length === 0) return (
+    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+      <p className="text-lg mb-2">No sent messages found</p>
+    </div>
+  );
+
+  const awaitingCount = sentMessages.filter(isAwaitingReply).length;
+
+  return (
+    <div>
+      {/* Header bar */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <p className="text-sm font-semibold">{sentMessages.length} sent messages</p>
+          {awaitingCount > 0 && (
+            <span className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ background: '#fef3c7', color: '#92400e' }}>
+              {awaitingCount} awaiting reply
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setViewMode('chronological')}
+            className="px-3 py-1 text-xs rounded-full border font-medium"
+            style={{ background: viewMode === 'chronological' ? 'var(--accent)' : 'transparent', color: viewMode === 'chronological' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
+            Timeline
+          </button>
+          <button onClick={() => setViewMode('grouped')}
+            className="px-3 py-1 text-xs rounded-full border font-medium"
+            style={{ background: viewMode === 'grouped' ? 'var(--accent)' : 'transparent', color: viewMode === 'grouped' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
+            By Recipient
+          </button>
+          <button onClick={loadSentMail}
+            className="px-3 py-1 text-xs rounded-full border font-medium"
+            style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Chronological view */}
+      {viewMode === 'chronological' && (
+        <div className="flex flex-col gap-2">
+          {sentMessages.map((msg) => {
+            const awaiting = isAwaitingReply(msg);
+            const replyCount = senderPriorities[(msg as any).to?.toLowerCase()?.replace(/.*</, '').replace(/>.*/, '')] || 0;
+            return (
+              <div key={msg.id} className="p-4 rounded-xl border cursor-pointer hover:shadow-sm transition-shadow"
+                onClick={() => onPreview(msg.id, msg.accountEmail)}
+                style={{
+                  background: awaiting ? '#fffbeb' : 'var(--card)',
+                  borderColor: awaiting ? '#fbbf24' : 'var(--border)',
+                  borderLeftWidth: awaiting ? 4 : 1,
+                  borderLeftColor: awaiting ? '#f59e0b' : 'var(--border)',
+                }}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm truncate">To: {(msg as any).to || msg.sender || 'Unknown'}</span>
+                      {awaiting && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap" style={{ background: '#fef3c7', color: '#92400e' }}>
+                          Awaiting reply
+                        </span>
+                      )}
+                      {replyCount > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#ede9fe', color: '#6366f1' }}>
+                          {replyCount} exchanges
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-sm font-medium truncate">{msg.subject || '(no subject)'}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                        {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet || '')}</div>
+                    {msg.accountEmail && accounts.length > 1 && (
+                      <div className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>via {msg.accountEmail}</div>
+                    )}
+                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); onPreview(msg.id, msg.accountEmail); }}
+                    className="px-2 py-1 text-xs rounded-lg border flex-shrink-0" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                    Preview
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Grouped by recipient view */}
+      {viewMode === 'grouped' && (
+        <div className="flex flex-col gap-3">
+          {groups.map((group) => {
+            const replyCount = senderPriorities[group.email.replace(/.*</, '').replace(/>.*/, '')] || 0;
+            const hasAwaiting = group.messages.some(isAwaitingReply);
+            return (
+              <div key={group.email} className="rounded-xl border overflow-hidden" style={{ background: 'var(--card)', borderColor: hasAwaiting ? '#fbbf24' : 'var(--border)' }}>
+                <div className="flex items-center justify-between p-4" style={{ background: hasAwaiting ? '#fffbeb' : '#f8fafc' }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0" style={{ background: 'var(--accent)' }}>
+                      {(group.name || '?')[0]?.toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">{group.name}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: '#e0f2fe', color: '#075985' }}>
+                          {group.messages.length} sent
+                        </span>
+                        {replyCount > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: '#ede9fe', color: '#6366f1' }}>
+                            {replyCount} exchanges
+                          </span>
+                        )}
+                        {hasAwaiting && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#fef3c7', color: '#92400e' }}>
+                            Awaiting reply
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs" style={{ color: 'var(--muted)' }}>{group.email}</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                  {group.messages.slice(0, 5).map((msg) => (
+                    <div key={msg.id} className="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                      onClick={() => onPreview(msg.id, msg.accountEmail)}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate">{msg.subject || '(no subject)'}</span>
+                          {isAwaitingReply(msg) && (
+                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#f59e0b' }} />
+                          )}
+                        </div>
+                        <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet || '')}</div>
+                      </div>
+                      <span className="text-[10px] whitespace-nowrap flex-shrink-0" style={{ color: 'var(--muted)' }}>
+                        {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))}
+                  {group.messages.length > 5 && (
+                    <div className="px-4 py-2 text-xs text-center" style={{ color: 'var(--muted)' }}>
+                      + {group.messages.length - 5} more
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
