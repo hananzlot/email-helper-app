@@ -288,7 +288,7 @@ export default function Dashboard() {
 
       {activeTab === 'inbox' && (
         <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
-          onAction={handleAction} onRefresh={loadInbox} />
+          onAction={handleAction} onRefresh={loadInbox} showToast={showToast} />
       )}
       {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} />}
       {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} />}
@@ -308,11 +308,73 @@ export default function Dashboard() {
 
 // ============ INBOX TAB ============
 
-function InboxTab({ messages, loading, actionLoading, onAction, onRefresh }: {
+// ============ REPLY COMPOSER ============
+
+function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, showToast }: {
+  to: string; subject: string; threadId: string; messageId: string;
+  onSent: () => void; onCancel: () => void; showToast: (title: string, subtitle?: string) => void;
+}) {
+  const [body, setBody] = useState('');
+  const [sending, setSending] = useState(false);
+
+  async function sendReply() {
+    if (!body.trim()) return;
+    setSending(true);
+    try {
+      const res = await gmailPost('send', {
+        to,
+        subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
+        body: body.replace(/\n/g, '<br>'),
+        threadId,
+        inReplyTo: messageId,
+      });
+      if (res.success) {
+        showToast('Reply sent', `To: ${to}`);
+        onSent();
+      } else {
+        showToast('Send failed', res.error);
+      }
+    } catch (err) {
+      showToast('Send failed', String(err));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 p-3 rounded-lg border" style={{ background: '#f8fafc', borderColor: 'var(--accent)' }}>
+      <div className="text-xs mb-2" style={{ color: 'var(--muted)' }}>Replying to <strong>{to}</strong></div>
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder="Type your reply..."
+        rows={4}
+        className="w-full p-3 rounded-lg border text-sm resize-y"
+        style={{ borderColor: 'var(--border)' }}
+        autoFocus
+      />
+      <div className="flex gap-2 mt-2">
+        <button onClick={sendReply} disabled={sending || !body.trim()}
+          className="px-4 py-2 text-xs font-semibold rounded-lg text-white"
+          style={{ background: sending ? 'var(--muted)' : 'var(--accent)' }}>
+          {sending ? 'Sending...' : 'Send Reply'}
+        </button>
+        <button onClick={onCancel} className="px-4 py-2 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ============ INBOX TAB ============
+
+function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast }: {
   messages: GmailMessage[]; loading: boolean; actionLoading: string | null;
   onAction: (action: string, ids: string[], label?: string) => void; onRefresh: () => void;
+  showToast: (title: string, subtitle?: string) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const toggleSelect = (id: string) => setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectAll = () => setSelected(selected.size === messages.length ? new Set() : new Set(messages.map(m => m.id)));
   const selectedIds = Array.from(selected);
@@ -326,33 +388,63 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh }: {
         {messages.length > 0 && <button onClick={selectAll} className="px-3 py-2 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>{selected.size === messages.length ? 'Deselect All' : 'Select All'}</button>}
         {selected.size > 0 && (<>
           <button onClick={() => { onAction('archive', selectedIds); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive ({selected.size})</button>
-          <button onClick={() => { onAction('trash', selectedIds); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border text-red-600" style={{ borderColor: 'var(--border)' }}>Trash ({selected.size})</button>
           <button onClick={() => { onAction('markRead', selectedIds); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Mark Read ({selected.size})</button>
+          <button onClick={() => { onAction('trash', selectedIds); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border text-red-600" style={{ borderColor: 'var(--border)' }}>Trash ({selected.size})</button>
+          <button onClick={() => { if (confirm('Permanently delete selected messages?')) { onAction('delete', selectedIds); setSelected(new Set()); }}} className="px-3 py-2 text-xs font-medium rounded-lg border text-red-700 font-bold" style={{ borderColor: '#fca5a5' }}>Delete ({selected.size})</button>
         </>)}
-        <span className="text-xs ml-auto" style={{ color: 'var(--muted)' }}>{messages.length} unread</span>
+        <span className="text-xs ml-auto" style={{ color: 'var(--muted)' }}>{messages.length} messages</span>
       </div>
       {loading ? (
         <div className="text-center py-16" style={{ color: 'var(--muted)' }}><p className="text-lg mb-2">Loading inbox...</p></div>
       ) : messages.length === 0 ? (
-        <div className="text-center py-16" style={{ color: 'var(--muted)' }}><p className="text-lg mb-2">Inbox Zero!</p><p className="text-sm">No unread messages.</p></div>
+        <div className="text-center py-16" style={{ color: 'var(--muted)' }}><p className="text-lg mb-2">Inbox Zero!</p><p className="text-sm">No messages.</p></div>
       ) : (
         <div className="flex flex-col gap-2">
           {messages.map((msg) => (
-            <div key={msg.id} className="flex items-start gap-3 p-4 rounded-xl border transition-all hover:shadow-sm" style={{ background: selected.has(msg.id) ? '#eff6ff' : 'var(--card)', borderColor: selected.has(msg.id) ? 'var(--accent)' : 'var(--border)', opacity: actionLoading === msg.id ? 0.5 : 1 }}>
-              <input type="checkbox" checked={selected.has(msg.id)} onChange={() => toggleSelect(msg.id)} className="mt-1 rounded" />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-sm truncate">{msg.sender}</span>
-                  <span className="text-xs whitespace-nowrap" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleDateString()}</span>
+            <div key={msg.id} className="rounded-xl border transition-all hover:shadow-sm"
+              style={{ background: selected.has(msg.id) ? '#eff6ff' : 'var(--card)', borderColor: selected.has(msg.id) ? 'var(--accent)' : 'var(--border)', opacity: actionLoading === msg.id ? 0.5 : 1 }}>
+              <div className="flex items-start gap-3 p-4">
+                <input type="checkbox" checked={selected.has(msg.id)} onChange={() => toggleSelect(msg.id)} className="mt-1 rounded" />
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedId(expandedId === msg.id ? null : msg.id)}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-sm truncate">{msg.sender}</span>
+                    <div className="flex items-center gap-2">
+                      {msg.isUnread && <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent)' }} />}
+                      <span className="text-xs whitespace-nowrap" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                  <div className="text-sm font-medium truncate">{msg.subject}</div>
+                  <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>{msg.snippet}</div>
                 </div>
-                <div className="text-sm font-medium truncate">{msg.subject}</div>
-                <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>{msg.snippet}</div>
               </div>
-              <div className="flex gap-1 flex-shrink-0">
-                <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-1 text-xs rounded border" style={{ borderColor: 'var(--border)' }}>Archive</button>
-                <button onClick={() => onAction('star', [msg.id])} className="px-2 py-1 text-xs rounded border" style={{ borderColor: 'var(--border)' }}>Star</button>
-                <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-1 text-xs rounded border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+              {/* Action bar */}
+              <div className="flex gap-1 px-4 pb-3 flex-wrap">
+                <button onClick={() => { setReplyingTo(replyingTo === msg.id ? null : msg.id); setExpandedId(msg.id); }}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
+                <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
+                <button onClick={() => onAction(msg.isUnread ? 'markRead' : 'markUnread', [msg.id])}
+                  className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+                  {msg.isUnread ? 'Mark Read' : 'Mark Unread'}
+                </button>
+                <button onClick={() => onAction('star', [msg.id])} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
+                <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-1.5 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                <button onClick={() => { if (confirm('Permanently delete?')) onAction('delete', [msg.id]); }}
+                  className="px-2 py-1.5 text-xs rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
               </div>
+              {/* Inline Reply Composer */}
+              {replyingTo === msg.id && (
+                <div className="px-4 pb-4">
+                  <ReplyComposer
+                    to={msg.senderEmail}
+                    subject={msg.subject}
+                    threadId={msg.threadId}
+                    messageId={msg.id}
+                    showToast={showToast}
+                    onSent={() => { setReplyingTo(null); onRefresh(); }}
+                    onCancel={() => setReplyingTo(null)}
+                  />
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -370,6 +462,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
 }) {
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
 
   useEffect(() => { loadQueue(); }, [reloadKey]);
 
@@ -446,13 +539,31 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
                     <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{q.account_email} &middot; Score: {q.priority_score}/10</div>
                   </div>
                 </div>
-                <div className="flex gap-2 mt-3">
-                  {q.gmail_url && <a href={q.gmail_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-xs font-medium rounded-lg text-white" style={{ background: 'var(--accent)' }}>Open in Gmail</a>}
+                <div className="flex gap-2 mt-3 flex-wrap">
+                  <button onClick={() => setReplyingTo(replyingTo === q.id ? null : q.id)}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
                   <button onClick={() => updateStatus(q.id, 'done')} className="px-3 py-1.5 text-xs font-medium rounded-lg" style={{ background: '#dcfce7', color: '#166534' }}>Done</button>
                   <button onClick={() => updateStatus(q.id, 'snoozed')} className="px-3 py-1.5 text-xs font-medium rounded-lg" style={{ background: '#fef9c3', color: '#854d0e' }}>Snooze</button>
                   <button onClick={() => updateStatus(q.id, 'later')} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Later</button>
                   <button onClick={() => onAction('archive', [q.message_id])} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                  <button onClick={() => onAction('markRead', [q.message_id])} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Mark Read</button>
+                  <button onClick={() => onAction('trash', [q.message_id])} className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                  <button onClick={() => { if (confirm('Permanently delete?')) onAction('delete', [q.message_id]); }}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
                 </div>
+                {replyingTo === q.id && (
+                  <div className="mt-3">
+                    <ReplyComposer
+                      to={q.sender_email}
+                      subject={q.subject}
+                      threadId={q.thread_id}
+                      messageId={q.message_id}
+                      showToast={showToast}
+                      onSent={() => { setReplyingTo(null); updateStatus(q.id, 'done'); }}
+                      onCancel={() => setReplyingTo(null)}
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>
