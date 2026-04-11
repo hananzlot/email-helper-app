@@ -774,16 +774,22 @@ export default function Dashboard() {
     setSplitPreviewId(null);
     setSplitPreviewAccount(undefined);
     if (layoutMode !== 'split' || isMobile) return;
-    // Wait for the tab to render, then auto-select the first previewable item
-    const timer = setTimeout(() => {
+    // Retry until content renders (async tabs like Triage load data after mount)
+    let attempts = 0;
+    const maxAttempts = 15;
+    const trySelect = () => {
       const container = splitContainerRef.current;
       if (!container) return;
       const first = container.querySelector('[data-preview-id]') as HTMLElement | null;
       if (first) {
         setSplitPreviewId(first.getAttribute('data-preview-id') || null);
         setSplitPreviewAccount(first.getAttribute('data-preview-account') || undefined);
+      } else if (attempts < maxAttempts) {
+        attempts++;
+        timer = setTimeout(trySelect, 200);
       }
-    }, 150);
+    };
+    let timer = setTimeout(trySelect, 100);
     return () => clearTimeout(timer);
   }, [activeTab, layoutMode, isMobile]);
 
@@ -869,15 +875,20 @@ export default function Dashboard() {
     document.cookie = `email_helper_account=${newAccount};path=/;max-age=${60*60*24*30};samesite=lax`;
     setMessages([]);
     setProfile(null);
+    setTabCounts({});
     showToast('Switched account', newAccount);
+    // Reload inbox + triage data for the new account
+    setTriageVersion(v => v + 1);
+    setTimeout(() => loadInbox(true), 50);
   }
 
   function switchToUnified() {
     setUnified(true);
     setMessages([]);
     setProfile(null);
+    setTabCounts({});
     showToast('Unified view', 'Showing all accounts');
-    loadUnifiedInbox();
+    loadUnifiedInbox(true);
   }
 
   // Save messages to Supabase cache in background (fire-and-forget)
@@ -1511,11 +1522,16 @@ export default function Dashboard() {
     }
   }, [messages, reportTabCount]);
 
-  // Load tab counts on initial page load and whenever messages change
+  // Load tab counts on initial page load and whenever messages stabilize
+  // Debounce to avoid flickering during pagination (messages change every 200 batch)
+  const tabCountTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    if (account && messages.length > 0) {
+    if (!account || messages.length === 0) return;
+    if (tabCountTimerRef.current) clearTimeout(tabCountTimerRef.current);
+    tabCountTimerRef.current = setTimeout(() => {
       loadAllTabCounts();
-    }
+    }, 1500); // Wait 1.5s after last message batch before recalculating
+    return () => { if (tabCountTimerRef.current) clearTimeout(tabCountTimerRef.current); };
   }, [account, messages.length, loadAllTabCounts]);
 
   // Run background cron on first load to populate follow-up cache & sender priorities
