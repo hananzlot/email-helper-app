@@ -97,10 +97,17 @@ function decodeHtmlEntities(text: string): string {
   return text.replace(/&(?:#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match) => entities[match] || match);
 }
 
-function EmailPreviewModal({ messageId, onClose }: { messageId: string; onClose: () => void }) {
+function EmailPreviewModal({ messageId, onClose, onAction, showToast }: {
+  messageId: string;
+  onClose: () => void;
+  onAction: (action: string, ids: string[], label?: string) => void;
+  showToast: (title: string, subtitle?: string) => void;
+}) {
   const [email, setEmail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const iframeRef = useCallback((node: HTMLIFrameElement | null) => {
     if (node && email?.bodyHtml) {
       const doc = node.contentDocument;
@@ -236,10 +243,63 @@ function EmailPreviewModal({ messageId, onClose }: { messageId: string; onClose:
                   <div className="text-sm text-center py-8" style={{ color: 'var(--muted)' }}>No body content</div>
                 )}
               </div>
+              {/* Inline Reply Composer */}
+              {replyOpen && (
+                <div className="px-5 pb-4">
+                  <ReplyComposer
+                    to={email.senderEmail}
+                    subject={email.subject}
+                    threadId={email.threadId}
+                    messageId={email.id}
+                    showToast={showToast}
+                    onSent={() => { setReplyOpen(false); showToast('Reply sent', `To: ${email.senderEmail}`); }}
+                    onCancel={() => setReplyOpen(false)}
+                  />
+                </div>
+              )}
             </>
           ) : null}
         </div>
+
+        {/* Sticky action bar */}
+        {email && !loading && (
+          <div className="border-t p-3 flex gap-2 flex-wrap items-center" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
+            <button onClick={() => setReplyOpen(!replyOpen)}
+              className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
+              {replyOpen ? 'Cancel Reply' : 'Reply'}
+            </button>
+            <button onClick={() => { onAction('archive', [messageId]); onClose(); }}
+              className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
+            <button onClick={() => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId]); }}
+              className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+              {email.isUnread ? 'Mark Read' : 'Mark Unread'}
+            </button>
+            <button onClick={() => { onAction('star', [messageId]); }}
+              className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
+            <button onClick={() => { onAction('trash', [messageId]); onClose(); }}
+              className="px-3 py-2 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+            <button onClick={() => setConfirmDelete(true)}
+              className="px-3 py-2 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
+          </div>
+        )}
       </div>
+
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/40" onClick={() => setConfirmDelete(false)} />
+          <div className="relative z-10">
+            <ConfirmModal
+              title="Permanently Delete"
+              message="This will permanently delete this message from Gmail. This cannot be undone."
+              confirmLabel="Delete Forever"
+              confirmColor="#dc2626"
+              onConfirm={() => { onAction('delete', [messageId]); setConfirmDelete(false); onClose(); }}
+              onCancel={() => setConfirmDelete(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -590,7 +650,7 @@ export default function Dashboard() {
       {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} />}
 
       {/* Email Preview Modal */}
-      {previewMessageId && <EmailPreviewModal messageId={previewMessageId} onClose={() => setPreviewMessageId(null)} />}
+      {previewMessageId && <EmailPreviewModal messageId={previewMessageId} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} />}
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl text-white text-sm font-medium shadow-lg z-50 text-center"
