@@ -24,6 +24,29 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* Action button hover effects — applies to all card and modal buttons */
+button {
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease, background 0.15s ease;
+}
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  filter: brightness(0.95);
+}
+button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+  box-shadow: none;
+}
+/* White/bordered buttons get a subtle background fill on hover */
+button[style*="border"]:hover:not(:disabled) {
+  background: #f1f5f9 !important;
+}
+/* Colored (filled) buttons get brighter on hover */
+button[style*="background: var(--accent)"]:hover:not(:disabled),
+button[style*="background: var(--urgent)"]:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
 /* Trash animation: red flash + slide left */
 @keyframes trash-out {
   0% { transform: translateX(0); opacity: 1; background: var(--card); }
