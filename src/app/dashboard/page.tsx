@@ -397,7 +397,7 @@ interface ConnectedAccount {
 }
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>('inbox');
+  const [activeTab, setActiveTab] = useState<Tab>('reply-queue');
   const [account, setAccount] = useState<string>('');
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
   const [profile, setProfile] = useState<{ emailAddress: string } | null>(null);
@@ -479,17 +479,8 @@ export default function Dashboard() {
     loadUnifiedInbox();
   }
 
-  useEffect(() => {
-    if (!account) return;
-    if (unified && accounts.length > 1) {
-      loadUnifiedInbox();
-    } else {
-      loadInbox();
-    }
-  }, [account, unified]);
-
-  // Load inbox for a single account
-  const loadInbox = useCallback(async () => {
+  // Load inbox for a single account, optionally run silent triage after
+  const loadInbox = useCallback(async (silentTriage = false) => {
     setLoading(true);
     try {
       const [profileRes, inboxRes] = await Promise.all([
@@ -512,14 +503,22 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
+    // Silent triage: score new unread emails in background
+    if (silentTriage) {
+      try {
+        const res = await apiPost('triage', { action: 'triage' });
+        if (res.success && res.data.total_unread > 0) {
+          setTriageVersion(v => v + 1);
+        }
+      } catch { /* silent */ }
+    }
   }, [account]);
 
-  // Load inbox from ALL accounts and merge
-  const loadUnifiedInbox = useCallback(async () => {
+  // Load inbox from ALL accounts and merge, optionally run silent triage
+  const loadUnifiedInbox = useCallback(async (silentTriage = false) => {
     if (accounts.length === 0) return;
     setLoading(true);
     try {
-      // Fetch profile from primary/first account
       const savedAccount = _currentAccount;
       const primaryAcct = accounts.find(a => a.is_primary)?.email || accounts[0].email;
       setCurrentAccount(primaryAcct);
@@ -546,7 +545,6 @@ export default function Dashboard() {
         }
       }));
 
-      // Sort merged messages by date (newest first)
       allMessages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setMessages(allMessages);
       setCurrentAccount(savedAccount);
@@ -555,7 +553,43 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
+    // Silent triage for each account in background
+    if (silentTriage) {
+      for (const acct of accounts) {
+        try {
+          setCurrentAccount(acct.email);
+          const res = await apiPost('triage', { action: 'triage' });
+          if (res.success && res.data.total_unread > 0) {
+            setTriageVersion(v => v + 1);
+          }
+        } catch { /* silent */ }
+      }
+      setCurrentAccount(_currentAccount);
+    }
   }, [accounts]);
+
+  // Initial load + triage on first load
+  useEffect(() => {
+    if (!account) return;
+    if (unified && accounts.length > 1) {
+      loadUnifiedInbox(true);
+    } else {
+      loadInbox(true);
+    }
+  }, [account, unified]);
+
+  // Auto-refresh every 2 minutes with silent triage
+  useEffect(() => {
+    if (!account) return;
+    const interval = setInterval(() => {
+      if (unified && accounts.length > 1) {
+        loadUnifiedInbox(true);
+      } else {
+        loadInbox(true);
+      }
+    }, 2 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [account, unified, accounts.length, loadInbox, loadUnifiedInbox]);
 
   function showToast(title: string, subtitle?: string) {
     setToast({ title, subtitle });
@@ -656,8 +690,8 @@ export default function Dashboard() {
   }
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: 'inbox', label: 'Inbox' },
     { id: 'reply-queue', label: 'Inbox (Triage)' },
+    { id: 'inbox', label: 'All Mail' },
     { id: 'cleanup', label: 'Cleanup' },
     { id: 'priorities', label: 'My Priorities' },
     { id: 'accounts', label: 'Accounts' },
@@ -857,7 +891,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                     <span className="font-semibold text-sm truncate">{msg.sender}</span>
                     <div className="flex items-center gap-2">
                       {msg.isUnread && <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent)' }} />}
-                      <span className="text-xs whitespace-nowrap" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleDateString()}</span>
+                      <span className="text-xs whitespace-nowrap" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                     </div>
                   </div>
                   <div className="text-sm font-medium truncate">{msg.subject}</div>
@@ -1450,7 +1484,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
                           </div>
                         </div>
                         <div className="flex gap-1 flex-shrink-0">
-                          <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleDateString()}</span>
+                          <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                           <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-0.5 rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
                           <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-0.5 rounded border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                         </div>
