@@ -109,6 +109,13 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
   const [error, setError] = useState('');
   const [replyOpen, setReplyOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [clickedBtn, setClickedBtn] = useState<string | null>(null);
+
+  function flashAction(name: string, fn: () => void) {
+    setClickedBtn(name);
+    fn();
+    setTimeout(() => setClickedBtn(null), 600);
+  }
   const iframeRef = useCallback((node: HTMLIFrameElement | null) => {
     if (node && email?.bodyHtml) {
       const doc = node.contentDocument;
@@ -283,21 +290,31 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
         {email && !loading && (
           <div className="border-t p-3 flex gap-2 flex-wrap items-center" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
             <button onClick={() => setReplyOpen(!replyOpen)}
-              className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
+              className="px-4 py-2 text-xs font-semibold rounded-lg text-white transition-transform active:scale-90" style={{ background: 'var(--accent)' }}>
               {replyOpen ? 'Cancel Reply' : 'Reply'}
             </button>
-            <button onClick={() => { onAction('archive', [messageId], undefined, accountEmail); onClose(); }}
-              className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
-            <button onClick={() => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId], undefined, accountEmail); }}
-              className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
-              {email.isUnread ? 'Mark Read' : 'Mark Unread'}
+            <button onClick={() => flashAction('archive', () => { onAction('archive', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 300); })}
+              className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
+              style={{ borderColor: 'var(--border)', background: clickedBtn === 'archive' ? '#dcfce7' : undefined, color: clickedBtn === 'archive' ? '#166534' : undefined }}>
+              {clickedBtn === 'archive' ? 'Archived!' : 'Archive'}
             </button>
-            <button onClick={() => { onAction('star', [messageId], undefined, accountEmail); }}
-              className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
-            <button onClick={() => { onAction('trash', [messageId], undefined, accountEmail); onClose(); }}
-              className="px-3 py-2 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+            <button onClick={() => flashAction('markRead', () => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId], undefined, accountEmail || _currentAccount); })}
+              className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
+              style={{ borderColor: 'var(--border)', background: clickedBtn === 'markRead' ? '#dbeafe' : undefined, color: clickedBtn === 'markRead' ? '#1e40af' : undefined }}>
+              {clickedBtn === 'markRead' ? 'Done!' : (email.isUnread ? 'Mark Read' : 'Mark Unread')}
+            </button>
+            <button onClick={() => flashAction('star', () => { onAction('star', [messageId], undefined, accountEmail || _currentAccount); })}
+              className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
+              style={{ borderColor: 'var(--border)', background: clickedBtn === 'star' ? '#fef3c7' : undefined, color: clickedBtn === 'star' ? '#92400e' : undefined }}>
+              {clickedBtn === 'star' ? 'Starred!' : 'Star'}
+            </button>
+            <button onClick={() => flashAction('trash', () => { onAction('trash', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 300); })}
+              className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
+              style={{ borderColor: 'var(--border)', color: clickedBtn === 'trash' ? '#fff' : '#ef4444', background: clickedBtn === 'trash' ? '#ef4444' : undefined }}>
+              {clickedBtn === 'trash' ? 'Trashed!' : 'Trash'}
+            </button>
             <button onClick={() => setConfirmDelete(true)}
-              className="px-3 py-2 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
+              className="px-3 py-2 text-xs font-medium rounded-lg border text-red-700 transition-transform active:scale-90" style={{ borderColor: '#fca5a5' }}>Delete</button>
           </div>
         )}
       </div>
@@ -312,7 +329,7 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
               message="This will permanently delete this message from Gmail. This cannot be undone."
               confirmLabel="Delete Forever"
               confirmColor="#dc2626"
-              onConfirm={() => { onAction('delete', [messageId], undefined, accountEmail); setConfirmDelete(false); onClose(); }}
+              onConfirm={() => { onAction('delete', [messageId], undefined, accountEmail || _currentAccount); setConfirmDelete(false); onClose(); }}
               onCancel={() => setConfirmDelete(false)}
             />
           </div>
@@ -1033,6 +1050,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
   const [loading, setLoading] = useState(true);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [tierFilter, setTierFilter] = useState<string | null>(null);
 
   useEffect(() => { loadQueue(); }, [reloadKey]);
 
@@ -1115,11 +1133,43 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
     </div>
   );
 
+  // Count emails per tier for badges
+  const tierCounts = { A: 0, B: 0, C: 0 };
+  active.forEach(q => {
+    const t = q.tier as 'A' | 'B' | 'C';
+    if (t in tierCounts) tierCounts[t]++;
+  });
+
+  const filteredActive = tierFilter ? active.filter(q => q.tier === tierFilter) : active;
+
   return (
     <div>
+      {/* Tier filter badges */}
+      <div className="flex gap-2 mb-4">
+        {([
+          { tier: null, label: 'All', bg: '#f3f4f6', color: '#374151', border: '#d1d5db', activeBg: '#374151', activeColor: '#fff' },
+          { tier: 'A', label: `Tier A (${tierCounts.A})`, bg: '#fee2e2', color: '#991b1b', border: '#fca5a5', activeBg: '#991b1b', activeColor: '#fff' },
+          { tier: 'B', label: `Tier B (${tierCounts.B})`, bg: '#fef3c7', color: '#92400e', border: '#fbbf24', activeBg: '#92400e', activeColor: '#fff' },
+          { tier: 'C', label: `Tier C (${tierCounts.C})`, bg: '#e0f2fe', color: '#075985', border: '#7dd3fc', activeBg: '#075985', activeColor: '#fff' },
+        ] as const).map(b => {
+          const isActive = tierFilter === b.tier;
+          return (
+            <button key={b.label} onClick={() => setTierFilter(b.tier)}
+              className="px-3 py-1.5 text-xs font-semibold rounded-full transition-all"
+              style={{
+                background: isActive ? b.activeBg : b.bg,
+                color: isActive ? b.activeColor : b.color,
+                border: `1.5px solid ${isActive ? b.activeBg : b.border}`,
+              }}>
+              {b.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Active items grouped by priority — low priority goes to Cleanup tab */}
       {['urgent', 'important', 'normal'].map(priority => {
-        const items = active.filter(q => q.priority === priority);
+        const items = filteredActive.filter(q => q.priority === priority);
         if (items.length === 0) return null;
         const pc = priorityColors[priority];
         return (
@@ -1155,7 +1205,10 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
                       )}
                     </div>
                     <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(q.summary || '')}</div>
-                    <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{q.account_email} &middot; Score: {q.priority_score}/10</div>
+                    <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                      {q.account_email} &middot; Score: {q.priority_score}/10
+                      {q.reply_count > 0 && <> &middot; <span style={{ color: '#6366f1' }}>{q.reply_count} replies sent</span></>}
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-2 mt-3 flex-wrap">

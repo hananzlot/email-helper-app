@@ -12,14 +12,43 @@ export async function GET(request: NextRequest) {
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();
-  const { data, error } = await admin
-    .from(TABLES.REPLY_QUEUE)
-    .select('*')
-    .eq('user_id', userId)
-    .order('priority_score', { ascending: false });
 
-  if (error) return apiError(error.message, 500);
-  return apiSuccess(data || []);
+  // Fetch queue and sender priorities in parallel
+  const [queueResult, sendersResult] = await Promise.all([
+    admin
+      .from(TABLES.REPLY_QUEUE)
+      .select('*')
+      .eq('user_id', userId)
+      .order('priority_score', { ascending: false }),
+    admin
+      .from(TABLES.SENDER_PRIORITIES)
+      .select('sender_email, reply_count')
+      .eq('user_id', userId),
+  ]);
+
+  if (queueResult.error) return apiError(queueResult.error.message, 500);
+
+  // Build lookup of reply counts by sender email
+  const replyCountMap: Record<string, number> = {};
+  if (sendersResult.data) {
+    for (const s of sendersResult.data) {
+      replyCountMap[s.sender_email] = s.reply_count || 0;
+    }
+  }
+
+  // Enrich queue items with reply_count and sort: within same priority, higher reply_count first
+  const enriched = (queueResult.data || []).map((item: Record<string, unknown>) => ({
+    ...item,
+    reply_count: replyCountMap[item.sender_email as string] || 0,
+  }));
+
+  // Sort by priority_score desc, then reply_count desc as tiebreaker
+  enriched.sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
+    if ((b.priority_score as number) !== (a.priority_score as number)) return (b.priority_score as number) - (a.priority_score as number);
+    return (b.reply_count as number) - (a.reply_count as number);
+  });
+
+  return apiSuccess(enriched);
 }
 
 /**
