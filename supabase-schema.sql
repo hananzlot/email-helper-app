@@ -1,5 +1,5 @@
 -- ============================================================
--- Email Helper — Supabase Database Schema
+-- Clearbox — Supabase Database Schema
 -- All tables prefixed with emailHelperV2_ to coexist with other data
 -- Run this in the Supabase SQL Editor
 -- ============================================================
@@ -56,6 +56,8 @@ create table public."emailHelperV2_sender_priorities" (
   last_reply date,
   tier text default 'D' check (tier in ('A', 'B', 'C', 'D')),
   accounts_seen text[] default '{}',
+  aliases text[] default '{}',
+  auto_archive_updates boolean default false,
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
   unique(user_id, sender_email)
@@ -185,9 +187,26 @@ create trigger "emailHelperV2_on_auth_user_created"
   after insert on auth.users
   for each row execute procedure public."emailHelperV2_handle_new_user"();
 
+-- ============ FOLLOW-UP CACHE ============
+create table public."emailHelperV2_follow_up_cache" (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  account_email text not null,
+  data jsonb not null default '{}',
+  computed_at timestamptz default now(),
+  starred_count integer default 0,
+  awaiting_count integer default 0,
+  unique(user_id, account_email)
+);
+
+alter table public."emailHelperV2_follow_up_cache" enable row level security;
+create policy "ehv2_follow_up_cache_all" on public."emailHelperV2_follow_up_cache"
+  for all using (auth.uid() = user_id);
+
 -- ============ INDEXES ============
 create index "ehv2_idx_gmail_accounts_user" on public."emailHelperV2_gmail_accounts"(user_id);
 create index "ehv2_idx_sender_priorities_user" on public."emailHelperV2_sender_priorities"(user_id);
 create index "ehv2_idx_sender_priorities_tier" on public."emailHelperV2_sender_priorities"(user_id, tier);
 create index "ehv2_idx_reply_queue_user_status" on public."emailHelperV2_reply_queue"(user_id, status);
 create index "ehv2_idx_triage_results_user" on public."emailHelperV2_triage_results"(user_id);
+create index "ehv2_idx_follow_up_cache_user" on public."emailHelperV2_follow_up_cache"(user_id);
