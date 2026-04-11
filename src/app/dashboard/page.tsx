@@ -191,7 +191,7 @@ function EmailPreviewModal({ messageId, onClose }: { messageId: string; onClose:
                     <div className="text-xs" style={{ color: 'var(--muted)' }}>&lt;{email.senderEmail}&gt;</div>
                   </div>
                   <div className="ml-auto text-xs text-right flex-shrink-0" style={{ color: 'var(--muted)' }}>
-                    {new Date(email.date).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                    {new Date(email.date).toLocaleString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}
                   </div>
                 </div>
                 {email.to && <div className="text-xs pl-12" style={{ color: 'var(--muted)' }}><span className="font-semibold">To:</span> {email.to}</div>}
