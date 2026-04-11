@@ -92,6 +92,31 @@ function ConfirmModal({ title, message, confirmLabel, confirmColor, onConfirm, o
 
 // ============ EMAIL PREVIEW MODAL ============
 
+// Clean snippet text — strip forwarded headers, quoted reply text, email addresses, and noise
+function cleanSnippet(text: string): string {
+  if (!text) return '';
+  let s = text;
+  // Remove "---------- Forwarded message ----------" and everything after
+  s = s.replace(/-{5,}\s*Forwarded message\s*-{5,}[\s\S]*/i, '');
+  // Remove "On <date>, <person> wrote:" quoted reply headers
+  s = s.replace(/On\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s\S]*wrote:\s*/gi, '');
+  // Remove email headers like "From: ... Date: ... Subject: ... To: ..."
+  s = s.replace(/\b(From|Date|Subject|To|Cc|Sent|Received):\s*[^\n]*/gi, '');
+  // Remove email addresses in angle brackets
+  s = s.replace(/<[^>]+@[^>]+>/g, '');
+  // Remove standalone email addresses
+  s = s.replace(/\S+@\S+\.\S+/g, '');
+  // Remove "Re:" "Fwd:" "FW:" prefixes
+  s = s.replace(/^(Re|Fwd|FW)\s*:\s*/gi, '');
+  // Remove lines that are just dashes
+  s = s.replace(/-{3,}/g, ' ');
+  // Collapse whitespace
+  s = s.replace(/\s+/g, ' ').trim();
+  // If result is too short after cleanup, return original (decoded)
+  if (s.length < 10) return decodeHtmlEntities(text).replace(/\s+/g, ' ').trim();
+  return decodeHtmlEntities(s);
+}
+
 function decodeHtmlEntities(text: string): string {
   const entities: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#x27;': "'", '&apos;': "'", '&#x2F;': '/', '&nbsp;': ' ' };
   return text.replace(/&(?:#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match) => entities[match] || match);
@@ -1525,7 +1550,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                   <div className="text-sm font-medium truncate">{msg.subject}</div>
                   <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>
                     {msg.accountEmail && <span className="inline-block mr-1 px-1.5 py-0 rounded text-[9px] font-medium" style={{ background: '#f3f4f6', color: '#6b7280' }}>{msg.accountEmail.split('@')[0]}</span>}
-                    {decodeHtmlEntities(msg.snippet)}
+                    {cleanSnippet(msg.snippet || '')}
                   </div>
                 </div>
               </div>
@@ -1926,7 +1951,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount,
                         </span>
                       )}
                     </div>
-                    <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(q.summary || '')}</div>
+                    <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{cleanSnippet(q.summary || '')}</div>
                     <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
                       {q.account_email} &middot; Score: {q.priority_score}/10
                       {q.reply_count > 0 && <> &middot; <span style={{ color: '#6366f1' }}>{q.reply_count} replies sent</span></>}
@@ -2307,7 +2332,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview, reportCount }: {
                             disabled={isGroupSelected} className="rounded flex-shrink-0" style={{ accentColor: 'var(--accent)' }} />
                           <div className="min-w-0 cursor-pointer" onClick={() => onPreview(msg.id, msg.accountEmail)}>
                             <div className="font-medium truncate hover:underline">{msg.subject}</div>
-                            <div className="truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet)}</div>
+                            <div className="truncate" style={{ color: 'var(--muted)' }}>{cleanSnippet(msg.snippet || '')}</div>
                           </div>
                         </div>
                         <div className="flex gap-1 flex-shrink-0 items-center">
@@ -2803,7 +2828,7 @@ function SnoozedTab({ onAction, showToast, onPreview, reloadKey, reportCount }: 
                   <div className="text-sm font-medium mt-0.5 cursor-pointer hover:underline" onClick={() => onPreview(q.message_id, q.account_email)}>
                     {q.subject}
                   </div>
-                  <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(q.summary || '')}</div>
+                  <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{cleanSnippet(q.summary || '')}</div>
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{
                       background: isOverdue ? '#fee2e2' : '#ede9fe',
@@ -3042,7 +3067,7 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
                           )}
                         </div>
                         <div className="text-sm font-medium mt-0.5 truncate">{convo.subject}</div>
-                        <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(latest.snippet || '')}</div>
+                        <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{cleanSnippet(latest.snippet || '')}</div>
                         {latest.accountEmail && accounts.length > 1 && (
                           <div className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>via {latest.accountEmail}</div>
                         )}
@@ -3127,7 +3152,7 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
                         )}
                       </div>
                       <div className="text-sm font-medium mt-0.5 truncate">{convo.subject}</div>
-                      <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(latest.snippet || '')}</div>
+                      <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{cleanSnippet(latest.snippet || '')}</div>
                       {latest.accountEmail && accounts.length > 1 && (
                         <div className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>via {latest.accountEmail}</div>
                       )}
@@ -3262,6 +3287,10 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   const [senderEmailsLoading, setSenderEmailsLoading] = useState(false);
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
   const [merging, setMerging] = useState<string | null>(null);
+  // Manual merge state
+  const [showManualMerge, setShowManualMerge] = useState(false);
+  const [mergePrimary, setMergePrimary] = useState('');
+  const [mergeSecondary, setMergeSecondary] = useState('');
 
   useEffect(() => { loadData(); }, []);
 
@@ -3381,7 +3410,11 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
             <p className="text-xs" style={{ color: 'var(--muted)' }}>{senders.length} senders ranked by reply frequency</p>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setShowAddForm(!showAddForm)}
+            <button onClick={() => { setShowManualMerge(!showManualMerge); if (showAddForm) setShowAddForm(false); }}
+              className="px-4 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: showManualMerge ? '#16a34a' : 'var(--border)', color: showManualMerge ? '#16a34a' : undefined }}>
+              {showManualMerge ? 'Cancel Merge' : 'Merge Senders'}
+            </button>
+            <button onClick={() => { setShowAddForm(!showAddForm); if (showManualMerge) setShowManualMerge(false); }}
               className="px-4 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
               {showAddForm ? 'Cancel' : '+ Add Sender'}
             </button>
@@ -3413,6 +3446,56 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
                 </select>
               </div>
               <button onClick={addSender} className="px-4 py-2 text-sm font-medium rounded-lg text-white" style={{ background: 'var(--accent)' }}>Add</button>
+            </div>
+          </div>
+        )}
+
+        {/* Manual merge form */}
+        {showManualMerge && (
+          <div className="mb-4 p-4 rounded-lg border" style={{ background: '#f0fdf4', borderColor: '#16a34a' }}>
+            <div className="text-xs font-semibold mb-2" style={{ color: '#166534' }}>Merge two senders into one</div>
+            <p className="text-[11px] mb-3" style={{ color: '#475569' }}>
+              Pick the <strong>primary</strong> sender (the one to keep) and the <strong>secondary</strong> (will be absorbed). Reply counts and tier will be combined.
+            </p>
+            <div className="flex gap-2 flex-wrap items-end">
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-[10px] font-medium block mb-1" style={{ color: '#166534' }}>Keep (primary)</label>
+                <select value={mergePrimary} onChange={e => setMergePrimary(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border" style={{ borderColor: '#86efac' }}>
+                  <option value="">Select sender...</option>
+                  {senders.sort((a: any, b: any) => (a.display_name || a.sender_email).localeCompare(b.display_name || b.sender_email)).map((s: any) => (
+                    <option key={s.sender_email} value={s.sender_email}>
+                      {s.display_name || s.sender_email} — {s.sender_email} ({s.reply_count || 0} replies, Tier {s.tier || '?'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-shrink-0 text-xs font-bold self-center px-2" style={{ color: '#16a34a' }}>←</div>
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-[10px] font-medium block mb-1" style={{ color: '#dc2626' }}>Absorb (secondary)</label>
+                <select value={mergeSecondary} onChange={e => setMergeSecondary(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-lg border" style={{ borderColor: '#fca5a5' }}>
+                  <option value="">Select sender...</option>
+                  {senders.filter((s: any) => s.sender_email !== mergePrimary).sort((a: any, b: any) => (a.display_name || a.sender_email).localeCompare(b.display_name || b.sender_email)).map((s: any) => (
+                    <option key={s.sender_email} value={s.sender_email}>
+                      {s.display_name || s.sender_email} — {s.sender_email} ({s.reply_count || 0} replies, Tier {s.tier || '?'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!mergePrimary || !mergeSecondary) { showToast('Select both senders'); return; }
+                  if (mergePrimary === mergeSecondary) { showToast('Cannot merge sender with itself'); return; }
+                  await mergeSenders(mergePrimary, [mergeSecondary]);
+                  setMergePrimary('');
+                  setMergeSecondary('');
+                }}
+                disabled={!mergePrimary || !mergeSecondary || !!merging}
+                className="px-4 py-2 text-xs font-semibold rounded-lg text-white transition-all active:scale-95"
+                style={{ background: mergePrimary && mergeSecondary ? '#16a34a' : '#94a3b8' }}>
+                {merging ? 'Merging...' : 'Merge'}
+              </button>
             </div>
           </div>
         )}
@@ -3566,7 +3649,7 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
                                     <div className="flex-1 min-w-0">
                                       <div className="text-sm font-medium truncate">{msg.subject}</div>
                                       <div className="text-xs mt-0.5 line-clamp-2" style={{ color: 'var(--muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                                        {decodeHtmlEntities(msg.snippet)}
+                                        {cleanSnippet(msg.snippet || '')}
                                       </div>
                                     </div>
                                     <div className="text-[10px] flex-shrink-0 whitespace-nowrap" style={{ color: 'var(--muted)' }}>
