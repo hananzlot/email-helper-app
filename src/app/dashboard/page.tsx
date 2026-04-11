@@ -775,14 +775,6 @@ export default function Dashboard() {
               <strong>{profile.emailAddress}</strong>
             </div>
           ) : null}
-          <button
-            onClick={runTriage}
-            disabled={triageLoading}
-            className="px-4 py-2 text-sm font-semibold rounded-lg text-white"
-            style={{ background: triageLoading ? 'var(--muted)' : 'var(--urgent)' }}
-          >
-            {triageLoading ? 'Working...' : 'Triage Inbox'}
-          </button>
         </div>
       </div>
 
@@ -812,7 +804,7 @@ export default function Dashboard() {
         {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} />}
         {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} />}
         {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
-        {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} />}
+        {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} />}
       </div>
 
       {/* Email Preview Modal */}
@@ -1136,7 +1128,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
   if (signalQueue.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
       <p className="text-lg mb-2">No priority emails in triage</p>
-      <p className="text-sm">Click <strong>Triage Inbox</strong> above to scan and prioritize your unread emails. Only high-priority senders (Tier A/B) and emails needing replies appear here.</p>
+      <p className="text-sm">Triage runs automatically every 2 minutes. Only high-priority senders (Tier A/B) and emails needing replies appear here. You can also run it manually from the Accounts tab.</p>
     </div>
   );
 
@@ -1849,12 +1841,15 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
 
 // ============ ACCOUNTS TAB ============
 
-function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast }: {
+function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast, onRunTriage, onScanSent, triageLoading }: {
   currentAccount: string;
   accounts: ConnectedAccount[];
   onSwitch: (email: string) => void;
   onRefresh: () => void;
   showToast: (title: string, subtitle?: string) => void;
+  onRunTriage: () => void;
+  onScanSent: () => void;
+  triageLoading: boolean;
 }) {
   async function setPrimary(email: string) {
     const res = await apiPut('accounts', { email, action: 'set_primary' });
@@ -1911,6 +1906,24 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast 
             ))}
           </div>
         )}
+      </div>
+
+      {/* Manual Tools */}
+      <div className="rounded-xl border p-6" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
+        <h3 className="font-semibold mb-2">Manual Tools</h3>
+        <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>Triage runs automatically every 2 minutes. Use these to run manually.</p>
+        <div className="flex gap-3 flex-wrap">
+          <button onClick={onRunTriage} disabled={triageLoading}
+            className="px-4 py-2 text-sm font-semibold rounded-lg text-white"
+            style={{ background: triageLoading ? 'var(--muted)' : 'var(--urgent)' }}>
+            {triageLoading ? 'Working...' : 'Triage Inbox'}
+          </button>
+          <button onClick={onScanSent} disabled={triageLoading}
+            className="px-4 py-2 text-sm font-semibold rounded-lg text-white"
+            style={{ background: triageLoading ? 'var(--muted)' : 'var(--accent)' }}>
+            {triageLoading ? 'Working...' : 'Scan Sent Mail'}
+          </button>
+        </div>
       </div>
 
       {/* Connect Another */}
