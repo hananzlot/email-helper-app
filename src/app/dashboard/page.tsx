@@ -298,10 +298,10 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
               style={{ borderColor: 'var(--border)', background: clickedBtn === 'archive' ? '#dcfce7' : undefined, color: clickedBtn === 'archive' ? '#166534' : undefined }}>
               {clickedBtn === 'archive' ? 'Archived!' : 'Archive'}
             </button>
-            <button onClick={() => flashAction('markRead', () => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId], undefined, accountEmail || _currentAccount); })}
+            <button onClick={() => flashAction('markRead', () => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 400); })}
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
               style={{ borderColor: 'var(--border)', background: clickedBtn === 'markRead' ? '#dbeafe' : undefined, color: clickedBtn === 'markRead' ? '#1e40af' : undefined }}>
-              {clickedBtn === 'markRead' ? 'Done!' : (email.isUnread ? 'Mark Read' : 'Mark Unread')}
+              {clickedBtn === 'markRead' ? 'Marked read!' : (email.isUnread ? 'Mark Read' : 'Mark Unread')}
             </button>
             <button onClick={() => flashAction('star', () => { onAction('star', [messageId], undefined, accountEmail || _currentAccount); })}
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
