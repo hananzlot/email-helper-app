@@ -108,6 +108,14 @@ export async function GET(request: NextRequest) {
       redirectUrl.searchParams.set('account_added', gmailProfile.email);
       redirectUrl.searchParams.set('account', gmailProfile.email);
       const response = NextResponse.redirect(redirectUrl);
+      // Re-set BOTH cookies so the session survives the OAuth redirect
+      response.cookies.set('email_helper_user_id', userId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 30,
+        path: '/',
+      });
       response.cookies.set('email_helper_account', gmailProfile.email, {
         httpOnly: false,
         secure: process.env.NODE_ENV === 'production',
