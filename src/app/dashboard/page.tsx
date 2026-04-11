@@ -859,7 +859,7 @@ export default function Dashboard() {
         {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} />}
         {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} />}
         {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
-        {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} />}
+        {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
       </div>
 
       {/* Email Preview Modal */}
@@ -1921,7 +1921,7 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
 
 // ============ ACCOUNTS TAB ============
 
-function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast, onRunTriage, onScanSent, triageLoading }: {
+function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast, onRunTriage, onScanSent, triageLoading, bgTaskLabel }: {
   currentAccount: string;
   accounts: ConnectedAccount[];
   onSwitch: (email: string) => void;
@@ -1930,6 +1930,7 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
   onRunTriage: () => void;
   onScanSent: () => void;
   triageLoading: boolean;
+  bgTaskLabel: string | null;
 }) {
   async function setPrimary(email: string) {
     const res = await apiPut('accounts', { email, action: 'set_primary' });
@@ -1996,12 +1997,12 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
           <button onClick={onRunTriage} disabled={triageLoading}
             className="px-4 py-2 text-sm font-semibold rounded-lg text-white"
             style={{ background: triageLoading ? 'var(--muted)' : 'var(--urgent)' }}>
-            {triageLoading ? 'Working...' : 'Triage Inbox'}
+            {bgTaskLabel?.includes('Triaging') ? 'Triaging...' : 'Triage Inbox'}
           </button>
           <button onClick={onScanSent} disabled={triageLoading}
             className="px-4 py-2 text-sm font-semibold rounded-lg text-white"
             style={{ background: triageLoading ? 'var(--muted)' : 'var(--accent)' }}>
-            {triageLoading ? 'Working...' : 'Scan Sent Mail'}
+            {bgTaskLabel?.includes('Scanning') ? 'Scanning...' : 'Scan Sent Mail'}
           </button>
         </div>
       </div>
