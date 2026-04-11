@@ -79,3 +79,15 @@ button[style*="background: #"]:hover:not(:disabled) {
 .animate-archive-out {
   animation: archive-out 0.4s ease-in-out forwards;
 }
+
+/* Mobile responsive adjustments */
+@media (max-width: 640px) {
+  /* Reduce padding on small screens */
+  .max-w-4xl { padding-left: 12px !important; padding-right: 12px !important; }
+  /* Make modals full-width on mobile */
+  .max-w-3xl { max-width: calc(100vw - 16px) !important; }
+  /* Tighter button spacing */
+  button { font-size: 12px; }
+  /* Stack header elements */
+  .sticky .flex.items-center.justify-between { flex-wrap: wrap; gap: 8px; }
+}

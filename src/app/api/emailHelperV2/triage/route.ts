@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getGmailFromRequest, getRequestContext, apiSuccess, apiError } from '@/lib/api-helpers';
-import { runTriage, scanSentMail } from '@/lib/triage';
+import { runTriage, scanSentMail, computeFollowUps } from '@/lib/triage';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { TABLES } from '@/lib/tables';
 import { decryptJson } from '@/lib/crypto';
@@ -26,11 +26,18 @@ export async function POST(request: NextRequest) {
 
     if (action === 'triage') {
       const result = await runTriage(gmail, userId, account);
+      // Also refresh follow-up cache in the background (don't block triage response)
+      computeFollowUps(gmail, userId, account).catch(err => console.error('Follow-up cache refresh failed:', err));
       return apiSuccess(result);
     }
 
     if (action === 'scan_sent') {
       const result = await scanSentMail(gmail, userId, account);
+      return apiSuccess(result);
+    }
+
+    if (action === 'compute_follow_ups') {
+      const result = await computeFollowUps(gmail, userId, account);
       return apiSuccess(result);
     }
 
@@ -69,3 +76,9 @@ export async function GET(request: NextRequest) {
 
   return apiSuccess(data);
 }
+
+/**
+ * GET /api/emailHelperV2/triage/follow-ups?account=email
+ * Returns cached follow-up items for this account
+ * (Handled in the main GET by checking for a 'type' param)
+ */

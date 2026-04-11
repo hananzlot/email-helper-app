@@ -2,11 +2,15 @@ export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center" style={{ background: 'var(--bg)' }}>
       <div className="max-w-md w-full mx-auto px-6 text-center">
-        <h1 className="text-3xl font-bold mb-2" style={{ color: 'var(--text)' }}>
-          Email Helper
-        </h1>
+        {/* Clearbox Logo */}
+        <div className="flex items-center justify-center gap-3 mb-2">
+          <img src="/clearbox-logo.svg" alt="Clearbox" width={48} height={48} className="rounded-xl" />
+          <h1 className="text-3xl font-bold" style={{ color: 'var(--text)' }}>
+            Clearbox
+          </h1>
+        </div>
         <p className="mb-8" style={{ color: 'var(--muted)', fontSize: '16px' }}>
-          Inbox Command Center — triage, prioritize, and manage your Gmail with AI.
+          Your Inbox Command Center
         </p>
 
         <a
@@ -37,6 +41,10 @@ export default function Home() {
             <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Archive newsletters, promos, and noise in bulk</p>
           </div>
         </div>
+
+        <p className="mt-10 text-xs" style={{ color: 'var(--muted)' }}>
+          Your email content is never stored. Clearbox encrypts all metadata at rest.
+        </p>
       </div>
     </div>
   );

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 80" width="360" height="80">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#0891B2"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Icon -->
+  <rect x="4" y="4" width="72" height="72" rx="16" ry="16" fill="url(#bg)"/>
+  <!-- Box shape -->
+  <path d="M 22 30 L 40 22 L 58 30 L 58 50 L 40 58 L 22 50 Z"
+        fill="rgba(255,255,255,0.12)" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M 22 30 L 40 22 L 58 30 L 40 38 Z"
+        fill="rgba(255,255,255,0.1)" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+  <line x1="40" y1="38" x2="40" y2="58" stroke="#ffffff" stroke-width="1.5" opacity="0.4"/>
+  <!-- Checkmark -->
+  <polyline points="31,44 36,49 49,37" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Wordmark text -->
+  <text x="92" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="34" font-weight="700" fill="#1e293b" letter-spacing="-0.5">
+    Clearbox
+  </text>
+  <!-- Tagline -->
+  <text x="93" y="58" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="400" fill="#64748b" letter-spacing="0.5">
+    Your Inbox Command Center
+  </text>
+</svg>

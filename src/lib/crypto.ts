@@ -16,7 +16,7 @@ const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 
 // Salt from environment, with a fallback for dev
-const SALT = process.env.ENCRYPTION_SALT || 'email-helper-v2-default-salt-change-in-prod';
+const SALT = process.env.ENCRYPTION_SALT || 'clearbox-v2-default-salt-change-in-prod';
 
 /**
  * Derive a 256-bit encryption key from a userId.

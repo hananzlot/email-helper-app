@@ -496,3 +496,118 @@ export async function scanSentMail(
     totalReplies: entries.reduce((sum, [, d]) => sum + d.count, 0),
   };
 }
+
+// ============ FOLLOW-UP CACHE ============
+
+interface FollowUpItem {
+  message_id: string;
+  thread_id: string;
+  sender: string;
+  sender_email: string;
+  subject: string;
+  snippet: string;
+  date: string;
+  account_email: string;
+  type: 'starred' | 'awaiting';
+}
+
+/**
+ * Pre-compute follow-up items for a user/account.
+ * Finds starred sent messages and sent messages awaiting replies.
+ * Stores results in the follow_up_cache table for instant loading.
+ */
+export async function computeFollowUps(
+  client: gmail_v1.Gmail,
+  userId: string,
+  accountEmail: string
+): Promise<{ starred: number; awaiting: number }> {
+  const admin = createSupabaseAdmin();
+  const items: FollowUpItem[] = [];
+
+  // 1. Starred sent messages (user-flagged for follow-up)
+  const starredRes = await gmail.listMessages(client, { query: 'in:sent is:starred', maxResults: 30 });
+  if (starredRes.messages?.length) {
+    const starredDetails = await Promise.all(
+      starredRes.messages.map(m => gmail.getMessage(client, m.id!, 'metadata'))
+    );
+    for (const msg of starredDetails) {
+      items.push({
+        message_id: msg.id,
+        thread_id: msg.threadId,
+        sender: msg.sender,
+        sender_email: msg.senderEmail,
+        subject: msg.subject,
+        snippet: msg.snippet,
+        date: msg.date,
+        account_email: accountEmail,
+        type: 'starred',
+      });
+    }
+  }
+
+  // 2. Sent messages awaiting replies (sent in last 7 days, no reply after 24h)
+  const sentRes = await gmail.listMessages(client, { query: 'in:sent newer_than:7d', maxResults: 20 });
+  if (sentRes.messages?.length) {
+    const sentDetails = await Promise.all(
+      sentRes.messages.map(m => gmail.getMessage(client, m.id!, 'metadata'))
+    );
+    const candidates = sentDetails.filter(msg => {
+      const hoursSince = (Date.now() - new Date(msg.date).getTime()) / (1000 * 60 * 60);
+      return hoursSince >= 24 && !items.find(s => s.message_id === msg.id);
+    });
+
+    // Check threads in parallel for replies
+    const results = await Promise.all(
+      candidates.map(async (msg) => {
+        try {
+          const threadRes = await client.users.threads.get({
+            userId: 'me', id: msg.threadId, format: 'metadata',
+          });
+          const sentDate = new Date(msg.date);
+          for (const threadMsg of (threadRes.data.messages || [])) {
+            const headers = threadMsg.payload?.headers || [];
+            const from = (headers.find((h: any) => h.name?.toLowerCase() === 'from')?.value || '').toLowerCase();
+            const msgDate = new Date(headers.find((h: any) => h.name?.toLowerCase() === 'date')?.value || 0);
+            if (!from.includes(accountEmail.toLowerCase()) && msgDate > sentDate) return null; // Has reply
+          }
+          return msg; // No reply found
+        } catch { return null; }
+      })
+    );
+
+    for (const msg of results) {
+      if (msg) {
+        items.push({
+          message_id: msg.id,
+          thread_id: msg.threadId,
+          sender: msg.sender,
+          sender_email: msg.senderEmail,
+          subject: msg.subject,
+          snippet: msg.snippet,
+          date: msg.date,
+          account_email: accountEmail,
+          type: 'awaiting',
+        });
+      }
+    }
+  }
+
+  // Encrypt and store in cache (replace existing cache for this user+account)
+  const encrypted = encryptJson(items, userId);
+  await admin.from(TABLES.FOLLOW_UP_CACHE).upsert(
+    {
+      user_id: userId,
+      account_email: accountEmail,
+      data: encrypted,
+      computed_at: new Date().toISOString(),
+      starred_count: items.filter(i => i.type === 'starred').length,
+      awaiting_count: items.filter(i => i.type === 'awaiting').length,
+    },
+    { onConflict: 'user_id,account_email' }
+  );
+
+  return {
+    starred: items.filter(i => i.type === 'starred').length,
+    awaiting: items.filter(i => i.type === 'awaiting').length,
+  };
+}

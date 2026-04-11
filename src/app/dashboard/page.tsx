@@ -551,6 +551,15 @@ interface ConnectedAccount {
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
+  const [layoutMode, setLayoutMode] = useState<'cards' | 'split'>('cards');
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   const [account, setAccount] = useState<string>('');
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
   const [profile, setProfile] = useState<{ emailAddress: string } | null>(null);
@@ -1186,7 +1195,10 @@ export default function Dashboard() {
   if (authError) {
     return (
       <div className="max-w-md mx-auto px-4 py-20 text-center">
-        <h1 className="text-2xl font-bold mb-3">Email Helper</h1>
+        <div className="flex items-center justify-center gap-2 mb-3">
+          <img src="/clearbox-logo.svg" alt="Clearbox" width={36} height={36} className="rounded-lg" />
+          <h1 className="text-2xl font-bold">Clearbox</h1>
+        </div>
         <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>
           Your session has expired or you need to sign in.
         </p>
@@ -1207,9 +1219,12 @@ export default function Dashboard() {
       <div className="sticky top-0 z-30 -mx-4 px-4 pb-0 pt-0" style={{ background: 'var(--bg, #f8fafc)' }}>
         {/* Header */}
         <div className="flex items-center justify-between mb-3 pt-2">
-          <div>
-            <h1 className="text-2xl font-bold">Email Helper</h1>
-            <p className="text-sm" style={{ color: 'var(--muted)' }}>Inbox Command Center</p>
+          <div className="flex items-center gap-2.5">
+            <img src="/clearbox-logo.svg" alt="Clearbox" width={36} height={36} className="rounded-lg" />
+            <div>
+              <h1 className="text-xl font-bold leading-tight">Clearbox</h1>
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>Your Inbox Command Center</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {/* Account Switcher with Unified toggle */}
@@ -1235,6 +1250,18 @@ export default function Dashboard() {
                 <strong>{profile.emailAddress}</strong>
               </div>
             ) : null}
+            {/* Layout toggle (hidden on mobile) */}
+            {!isMobile && <button
+              onClick={() => setLayoutMode(layoutMode === 'cards' ? 'split' : 'cards')}
+              className="w-9 h-9 rounded-lg border flex items-center justify-center transition-all hover:shadow-sm"
+              title={layoutMode === 'cards' ? 'Switch to split view' : 'Switch to card view'}
+              style={{ borderColor: layoutMode === 'split' ? 'var(--accent)' : 'var(--border)', background: layoutMode === 'split' ? '#eff6ff' : 'white', color: layoutMode === 'split' ? 'var(--accent)' : '#94a3b8' }}>
+              {layoutMode === 'cards' ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+              )}
+            </button>}
             {/* Accounts settings button */}
             <button
               onClick={() => setActiveTab('accounts')}
@@ -1404,10 +1431,21 @@ export default function Dashboard() {
             triageLoading={triageLoading}
           />
         )}
-        {activeTab === 'inbox' && (
+        {activeTab === 'inbox' && layoutMode === 'split' && !isMobile ? (
+          <SplitView
+            messages={messages}
+            loading={loading}
+            onAction={handleAction}
+            onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox}
+            showToast={showToast}
+            animatingOut={animatingOut}
+            accountEmail={undefined}
+            onSnooze={snoozeFromPreview}
+          />
+        ) : activeTab === 'inbox' ? (
           <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
             onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} />
-        )}
+        ) : null}
         {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} />}
         {activeTab === 'follow-up' && <FollowUpTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
         {activeTab === 'snoozed' && <SnoozedTab onAction={handleAction} showToast={showToast} onPreview={openPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
@@ -1573,7 +1611,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
           className="w-full flex items-center justify-between p-4 text-left"
           style={{ background: '#f8fafc' }}>
           <div>
-            <span className="font-semibold text-sm">How Email Helper works</span>
+            <span className="font-semibold text-sm">How Clearbox works</span>
             <span className="text-xs ml-2" style={{ color: 'var(--muted)' }}>
               {showGuide ? 'Click to collapse' : 'Click to expand'}
             </span>
@@ -1717,7 +1755,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
             <div className="mt-2 p-4 rounded-xl" style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
               <div className="font-semibold text-xs mb-2" style={{ color: '#0c4a6e' }}>🔒 Your Privacy</div>
               <div className="text-xs leading-relaxed" style={{ color: '#0369a1' }}>
-                Email Helper <strong>never reads, stores, or retains the content of your emails</strong>. Full email bodies are fetched directly from Gmail in real time and are never saved to our servers. We only store minimal metadata (sender names, subject lines, and short previews) to power triage and prioritization. When you archive, trash, or de-clutter emails, those actions happen directly through the Gmail API — your email data stays in your Gmail account. You can disconnect any account at any time and all associated metadata will be removed.
+                Clearbox <strong>never reads, stores, or retains the content of your emails</strong>. Full email bodies are fetched directly from Gmail in real time and are never saved to our servers. We only store minimal metadata (sender names, subject lines, and short previews) to power triage and prioritization. When you archive, trash, or de-clutter emails, those actions happen directly through the Gmail API — your email data stays in your Gmail account. You can disconnect any account at any time and all associated metadata will be removed.
               </div>
             </div>
           </div>
@@ -1816,6 +1854,205 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
 }
 
 // ============ INBOX TAB ============
+
+// ============ INLINE PREVIEW (for split view) ============
+
+function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
+  messageId: string;
+  accountEmail?: string;
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
+  showToast: (title: string, subtitle?: string) => void;
+}) {
+  const [email, setEmail] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [replyOpen, setReplyOpen] = useState(false);
+
+  const iframeRef = useCallback((node: HTMLIFrameElement | null) => {
+    if (node && (email?.bodyHtml || email?.body)) {
+      const doc = node.contentDocument;
+      if (doc) {
+        const content = email.bodyHtml || email.body || '';
+        const isHtml = /<[a-z][\s\S]*>/i.test(content);
+        const displayContent = isHtml ? content : content.replace(/\n/g, '<br>');
+        doc.open();
+        doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+          body { font-family: -apple-system, system-ui, sans-serif; font-size: 14px; line-height: 1.6; color: #1e293b; padding: 16px; margin: 0; word-wrap: break-word; }
+          a { color: #2563eb; } img { max-width: 100%; height: auto; }
+          blockquote { border-left: 3px solid #e2e8f0; margin: 8px 0; padding-left: 12px; color: #64748b; }
+        </style></head><body>${displayContent}</body></html>`);
+        doc.close();
+        setTimeout(() => {
+          if (node.contentDocument?.body) {
+            node.style.height = Math.max(200, node.contentDocument.body.scrollHeight + 30) + 'px';
+          }
+        }, 100);
+      }
+    }
+  }, [email]);
+
+  useEffect(() => {
+    setLoading(true);
+    setReplyOpen(false);
+    const savedAccount = _currentAccount;
+    if (accountEmail && accountEmail !== _currentAccount) setCurrentAccount(accountEmail);
+    gmailGet('message', { id: messageId, format: 'full' }).then(res => {
+      if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
+      if (res.success) {
+        setEmail(res.data);
+        // Mark as read
+        onAction('markRead', [messageId], undefined, accountEmail || _currentAccount);
+      }
+      setLoading(false);
+    });
+  }, [messageId, accountEmail]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-full" style={{ color: 'var(--muted)' }}>
+      <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+    </div>
+  );
+
+  if (!email) return <div className="p-6 text-sm" style={{ color: 'var(--muted)' }}>Could not load email</div>;
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+        <h2 className="font-semibold text-sm mb-1">{email.subject}</h2>
+        <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--muted)' }}>
+          <span className="font-medium" style={{ color: 'var(--text)' }}>{email.sender}</span>
+          <span>&lt;{email.senderEmail}&gt;</span>
+          <span className="ml-auto">{new Date(email.date).toLocaleString()}</span>
+        </div>
+        {email.to && <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>To: {email.to}</div>}
+      </div>
+
+      {/* Action bar */}
+      <div className="px-4 py-2 border-b flex gap-1.5 flex-wrap" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
+        <button onClick={() => setReplyOpen(!replyOpen)} className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
+          {replyOpen ? 'Cancel' : 'Reply'}
+        </button>
+        <button onClick={() => { onAction('archive', [messageId], undefined, accountEmail || _currentAccount); showToast('Archived'); }}
+          className="px-3 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
+        <button onClick={() => { onAction('star', [messageId], undefined, accountEmail || _currentAccount); showToast('Starred'); }}
+          className="px-3 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
+        <button onClick={() => { onAction('trash', [messageId], undefined, accountEmail || _currentAccount); showToast('Trashed'); }}
+          className="px-3 py-1.5 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+      </div>
+
+      {/* Reply composer */}
+      {replyOpen && (
+        <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+          <ReplyComposer
+            to={email.senderEmail}
+            subject={email.subject}
+            threadId={email.threadId}
+            messageId={email.id}
+            showToast={showToast}
+            accountEmail={accountEmail}
+            onSent={() => { setReplyOpen(false); showToast('Reply sent'); }}
+            onCancel={() => setReplyOpen(false)}
+          />
+        </div>
+      )}
+
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto">
+        <iframe
+          ref={iframeRef}
+          className="w-full border-0"
+          style={{ minHeight: 200 }}
+          sandbox="allow-same-origin"
+          title="Email content"
+        />
+      </div>
+    </div>
+  );
+}
+
+// ============ SPLIT VIEW ============
+
+function SplitView({ messages, loading, onAction, onRefresh, showToast, animatingOut, accountEmail, onSnooze }: {
+  messages: GmailMessage[];
+  loading: boolean;
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
+  onRefresh: () => void;
+  showToast: (title: string, subtitle?: string) => void;
+  animatingOut: Record<string, 'trash' | 'delete' | 'archive'>;
+  accountEmail?: string;
+  onSnooze?: (messageId: string, hours: number, label: string, accountEmail?: string) => void;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedAccount, setSelectedAccount] = useState<string | undefined>(undefined);
+
+  const selectedMsg = messages.find(m => m.id === selectedId);
+
+  return (
+    <div className="flex gap-0 rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)', height: 'calc(100vh - 220px)', minHeight: 400 }}>
+      {/* Left panel: message list */}
+      <div className="w-2/5 min-w-[280px] border-r overflow-y-auto" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
+        <div className="sticky top-0 z-10 px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
+          <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>{messages.length} messages</span>
+          <button onClick={onRefresh} disabled={loading} className="text-xs px-2 py-1 rounded border" style={{ borderColor: 'var(--border)' }}>
+            {loading ? '...' : 'Refresh'}
+          </button>
+        </div>
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            onClick={() => { setSelectedId(msg.id); setSelectedAccount((msg as unknown as Record<string, unknown>).accountEmail as string); }}
+            className="px-3 py-2.5 border-b cursor-pointer transition-colors"
+            style={{
+              borderColor: 'var(--border)',
+              background: selectedId === msg.id ? '#eff6ff' : (animatingOut[msg.id] ? '#fee2e2' : 'var(--card)'),
+              opacity: animatingOut[msg.id] ? 0.5 : 1,
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                style={{ background: msg.isUnread ? 'var(--accent)' : '#94a3b8' }}>
+                {msg.sender?.[0]?.toUpperCase() || '?'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-xs font-semibold truncate" style={{ fontWeight: msg.isUnread ? 700 : 500 }}>{msg.sender}</span>
+                  <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--muted)' }}>
+                    {new Date(msg.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </span>
+                </div>
+                <div className="text-xs truncate" style={{ color: msg.isUnread ? 'var(--text)' : 'var(--muted)', fontWeight: msg.isUnread ? 600 : 400 }}>{msg.subject}</div>
+                <div className="text-[11px] truncate" style={{ color: 'var(--muted)' }}>{msg.snippet?.slice(0, 80)}</div>
+              </div>
+            </div>
+          </div>
+        ))}
+        {messages.length === 0 && !loading && (
+          <div className="text-center py-12 text-sm" style={{ color: 'var(--muted)' }}>No messages</div>
+        )}
+      </div>
+
+      {/* Right panel: inline email preview */}
+      <div className="flex-1 overflow-y-auto" style={{ background: 'var(--card)' }}>
+        {selectedId ? (
+          <InlinePreview
+            messageId={selectedId}
+            accountEmail={selectedAccount}
+            onAction={onAction}
+            showToast={showToast}
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full" style={{ color: 'var(--muted)' }}>
+            <div className="text-center">
+              <div className="text-4xl mb-3 opacity-30">📧</div>
+              <p className="text-sm">Select an email to preview</p>
+              <p className="text-xs mt-1">Click any message on the left</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast, animatingOut, onPreview }: {
   messages: GmailMessage[]; loading: boolean; actionLoading: string | null;
@@ -3212,8 +3449,48 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
   const [awaitingReply, setAwaitingReply] = useState<GmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedConvo, setExpandedConvo] = useState<string | null>(null);
+  const [cacheAge, setCacheAge] = useState<string | null>(null);
 
-  useEffect(() => { loadFollowUps(); }, []);
+  useEffect(() => { loadFromCacheThenLive(); }, []);
+
+  // Try to load from pre-computed cache first (instant), then refresh live in background
+  async function loadFromCacheThenLive() {
+    setLoading(true);
+    try {
+      const cacheRes = await apiGet('follow-ups');
+      if (cacheRes.success && cacheRes.data?.items?.length > 0) {
+        // Cache hit! Use cached data for instant load
+        const items = cacheRes.data.items as { message_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; account_email: string; type: string }[];
+        const starred = items.filter(i => i.type === 'starred').map(i => ({
+          id: i.message_id, threadId: i.thread_id, sender: i.sender, senderEmail: i.sender_email,
+          subject: i.subject, snippet: i.snippet, date: i.date, accountEmail: i.account_email,
+          body: '', bodyHtml: '', to: '', cc: '', labelIds: [], isUnread: false,
+        } as GmailMessage));
+        const awaiting = items.filter(i => i.type === 'awaiting').map(i => ({
+          id: i.message_id, threadId: i.thread_id, sender: i.sender, senderEmail: i.sender_email,
+          subject: i.subject, snippet: i.snippet, date: i.date, accountEmail: i.account_email,
+          body: '', bodyHtml: '', to: '', cc: '', labelIds: [], isUnread: false,
+        } as GmailMessage));
+        starred.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        awaiting.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setStarredSent(starred);
+        setAwaitingReply(awaiting);
+        reportCount?.(starred.length + awaiting.length);
+        setLoading(false);
+
+        // Show cache age
+        if (cacheRes.data.computed_at) {
+          const age = Math.round((Date.now() - new Date(cacheRes.data.computed_at).getTime()) / (1000 * 60));
+          setCacheAge(age < 60 ? `${age}m ago` : `${Math.round(age / 60)}h ago`);
+        }
+        return; // Use cache, skip live fetch
+      }
+    } catch (e) {
+      console.error('Cache load failed, falling back to live:', e);
+    }
+    // No cache or cache failed — fall back to live fetch
+    await loadFollowUps();
+  }
 
   // Check if a sent message has gotten a reply by looking at the actual thread
   async function checkThreadForReply(msg: GmailMessage, myEmail: string): Promise<boolean> {
@@ -3361,7 +3638,8 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
             {awaitingReply.length} awaiting reply
           </span>
         )}
-        <button onClick={loadFollowUps} className="ml-auto px-3 py-1 text-xs rounded-full border font-medium" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Refresh</button>
+        {cacheAge && <span className="text-xs" style={{ color: 'var(--muted)' }}>Updated {cacheAge}</span>}
+        <button onClick={loadFollowUps} className="ml-auto px-3 py-1 text-xs rounded-full border font-medium" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Refresh Live</button>
       </div>
 
       {/* Flagged for follow-up (starred sent) */}

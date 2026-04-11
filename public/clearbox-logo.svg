@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Main gradient: deep blue to teal -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#0891B2"/>
+    </linearGradient>
+    <!-- Glass/clear effect gradient -->
+    <linearGradient id="glass" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.05"/>
+    </linearGradient>
+    <!-- Subtle inner shadow -->
+    <linearGradient id="boxFace" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.04"/>
+    </linearGradient>
+    <!-- Checkmark glow -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="16" y="16" width="480" height="480" rx="96" ry="96" fill="url(#bg)"/>
+
+  <!-- Subtle shine on top-left -->
+  <rect x="16" y="16" width="480" height="480" rx="96" ry="96" fill="url(#glass)"/>
+
+  <!-- 3D Box outline (isometric-style clear box) -->
+  <!-- Front face -->
+  <path d="M 140 200 L 256 145 L 372 200 L 372 340 L 256 395 L 140 340 Z"
+        fill="url(#boxFace)" stroke="#ffffff" stroke-width="5" stroke-linejoin="round"/>
+  <!-- Top face -->
+  <path d="M 140 200 L 256 145 L 372 200 L 256 255 Z"
+        fill="rgba(255,255,255,0.12)" stroke="#ffffff" stroke-width="5" stroke-linejoin="round"/>
+  <!-- Right face divider -->
+  <line x1="256" y1="255" x2="256" y2="395" stroke="#ffffff" stroke-width="4" opacity="0.5"/>
+  <!-- Left face divider -->
+  <line x1="256" y1="255" x2="140" y2="200" stroke="#ffffff" stroke-width="0" opacity="0"/>
+
+  <!-- Inner box line for depth (mid-shelf) -->
+  <path d="M 160 270 L 256 225 L 352 270"
+        fill="none" stroke="#ffffff" stroke-width="3" opacity="0.3" stroke-linejoin="round"/>
+
+  <!-- Checkmark inside the box -->
+  <polyline points="210,310 245,345 305,275"
+            fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"
+            filter="url(#glow)" opacity="0.95"/>
+
+  <!-- Small envelope hint at top of box -->
+  <g transform="translate(256, 170)" opacity="0.6">
+    <rect x="-22" y="-12" width="44" height="28" rx="3" fill="none" stroke="#ffffff" stroke-width="2.5"/>
+    <polyline points="-22,-12 0,6 22,-12" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+  </g>
+</svg>

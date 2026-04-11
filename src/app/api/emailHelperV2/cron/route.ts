@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { getValidGmailToken } from '@/lib/auth';
 import { getGmailClient } from '@/lib/gmail';
-import { scanSentMail } from '@/lib/triage';
+import { scanSentMail, computeFollowUps } from '@/lib/triage';
 import { TABLES } from '@/lib/tables';
 
 /**
@@ -41,18 +41,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ message: 'No active accounts', scanned: 0 });
     }
 
-    const results: { account: string; sendersFound: number; totalReplies: number; error?: string }[] = [];
+    const results: { account: string; sendersFound: number; totalReplies: number; followUp?: { starred: number; awaiting: number }; error?: string }[] = [];
 
     // Process each account sequentially to avoid rate limits
     for (const account of accounts) {
       try {
         const accessToken = await getValidGmailToken(account.user_id, account.email);
         const gmail = getGmailClient(accessToken);
-        const result = await scanSentMail(gmail, account.user_id, account.email);
+
+        // Scan sent mail for sender priorities
+        const scanResult = await scanSentMail(gmail, account.user_id, account.email);
+
+        // Pre-compute follow-up cache
+        const followUpResult = await computeFollowUps(gmail, account.user_id, account.email);
+
         results.push({
           account: account.email,
-          sendersFound: result.sendersFound,
-          totalReplies: result.totalReplies,
+          sendersFound: scanResult.sendersFound,
+          totalReplies: scanResult.totalReplies,
+          followUp: followUpResult,
         });
       } catch (err) {
         results.push({
