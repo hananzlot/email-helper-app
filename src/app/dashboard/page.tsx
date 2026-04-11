@@ -264,7 +264,8 @@ export default function Dashboard() {
         const total = data.total_unread;
         const reply = data.categories.reply_needed.length;
         const important = data.categories.important_notifications.length;
-        showToast(`Triage complete`, `${total} emails: ${reply} need replies, ${important} important`);
+        const low = data.categories.low_priority.length;
+        showToast(`Triage complete`, `${total} emails: ${reply + important} priority, ${low} cleanup`);
         setTriageVersion(v => v + 1);
         setActiveTab('reply-queue');
       } else {
@@ -297,7 +298,7 @@ export default function Dashboard() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'inbox', label: 'Inbox' },
-    { id: 'reply-queue', label: 'Reply Queue' },
+    { id: 'reply-queue', label: 'Inbox (Triage)' },
     { id: 'cleanup', label: 'Cleanup' },
     { id: 'priorities', label: 'My Priorities' },
     { id: 'accounts', label: 'Accounts' },
@@ -660,12 +661,12 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
     low: { border: 'var(--low)', bg: 'var(--low-bg)', label: 'Low Priority' },
   };
 
-  if (loading) return <div className="text-center py-16" style={{ color: 'var(--muted)' }}>Loading reply queue...</div>;
+  if (loading) return <div className="text-center py-16" style={{ color: 'var(--muted)' }}>Loading triaged inbox...</div>;
 
   if (queue.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
-      <p className="text-lg mb-2">No emails in queue</p>
-      <p className="text-sm">Click <strong>Triage Inbox</strong> above to scan and prioritize your unread emails.</p>
+      <p className="text-lg mb-2">No priority emails in triage</p>
+      <p className="text-sm">Click <strong>Triage Inbox</strong> above to scan and prioritize your unread emails. Only high-priority senders (Tier A/B) and emails needing replies appear here.</p>
     </div>
   );
 
@@ -680,7 +681,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
         <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
           <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: 'var(--accent)' }} />
         </div>
-        <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{doneCount} of {total} replies completed</p>
+        <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{doneCount} of {total} triaged</p>
       </div>
 
       {/* Active items grouped by priority */}
@@ -793,10 +794,51 @@ function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction
   const [sortBy, setSortBy] = useState<'count' | 'name'>('count');
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
+  const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
+  const [tiersLoaded, setTiersLoaded] = useState(false);
 
-  // Group all messages by sender email
+  // Load sender priorities to know who is noise vs signal
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiGet('senders');
+        if (res.success && res.data) {
+          const tiers: Record<string, string> = {};
+          for (const s of res.data) {
+            tiers[s.sender_email.toLowerCase()] = s.tier;
+          }
+          setSenderTiers(tiers);
+        }
+      } catch (e) { console.error('Failed to load sender tiers for cleanup:', e); }
+      setTiersLoaded(true);
+    })();
+  }, []);
+
+  // Noise detection helpers
+  const noReplyPatterns = ['noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster'];
+  const automatedPatterns = ['notification', 'newsletter', 'digest', 'updates@', 'info@', 'support@', 'hello@', 'team@', 'news@', 'marketing@', 'promo'];
+
+  function isNoiseSender(email: string): boolean {
+    const lower = email.toLowerCase();
+    const tier = senderTiers[lower];
+    // Signal senders (Tier A/B) go to Reply Queue, not here
+    if (tier === 'A' || tier === 'B') return false;
+    // Tier C/D = low priority = cleanup
+    if (tier === 'C' || tier === 'D') return true;
+    // No-reply / automated senders = always noise
+    if (noReplyPatterns.some(p => lower.includes(p))) return true;
+    if (automatedPatterns.some(p => lower.includes(p))) return true;
+    // Unknown senders (not in priority list at all) = cleanup
+    if (!tier) return true;
+    return false;
+  }
+
+  // Filter messages to only noise senders
+  const cleanupMessages = tiersLoaded ? messages.filter(m => isNoiseSender(m.senderEmail)) : [];
+
+  // Group filtered messages by sender email
   const senderGroups: Record<string, { name: string; email: string; messages: GmailMessage[] }> = {};
-  for (const msg of messages) {
+  for (const msg of cleanupMessages) {
     const key = msg.senderEmail.toLowerCase();
     if (!senderGroups[key]) {
       senderGroups[key] = { name: msg.sender, email: msg.senderEmail, messages: [] };
@@ -865,10 +907,12 @@ function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction
   const selectedIds = getSelectedIds();
   const selectedCount = selectedIds.length;
 
-  if (messages.length === 0) return (
+  if (!tiersLoaded) return <div className="text-center py-16" style={{ color: 'var(--muted)' }}>Loading cleanup data...</div>;
+
+  if (cleanupMessages.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
-      <p className="text-lg mb-2">Inbox looks clean</p>
-      <p className="text-sm">No messages in inbox.</p>
+      <p className="text-lg mb-2">No low-priority emails to clean up</p>
+      <p className="text-sm">Only showing noise senders (Tier C/D, unknown, automated). Your important senders are in the Reply Queue.</p>
     </div>
   );
 
@@ -884,7 +928,7 @@ function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction
           </button>
           <div>
             <p className="text-sm font-semibold">{groups.length} senders</p>
-            <p className="text-xs" style={{ color: 'var(--muted)' }}>{messages.length} total messages</p>
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>{cleanupMessages.length} low-priority messages</p>
           </div>
         </div>
         <div className="flex gap-2 items-center">
