@@ -72,16 +72,22 @@ export async function PUT(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { sender_email, tier } = body;
+    const { sender_email, tier, display_name } = body;
     if (!sender_email || !tier) return apiError('Missing sender_email or tier');
     if (!['A', 'B', 'C', 'D'].includes(tier)) return apiError('Tier must be A, B, C, or D');
 
     const admin = createSupabaseAdmin();
+    // Upsert so it works for both known and unknown senders
     const { data, error } = await admin
       .from(TABLES.SENDER_PRIORITIES)
-      .update({ tier, updated_at: new Date().toISOString() })
-      .eq('user_id', userId)
-      .eq('sender_email', sender_email)
+      .upsert({
+        user_id: userId,
+        sender_email,
+        tier,
+        display_name: display_name || sender_email,
+        reply_count: 0,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,sender_email' })
       .select()
       .single();
 

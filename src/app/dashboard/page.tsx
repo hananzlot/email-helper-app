@@ -365,7 +365,7 @@ export default function Dashboard() {
           onAction={handleAction} onRefresh={loadInbox} showToast={showToast} animatingOut={animatingOut} />
       )}
       {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} />}
-      {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} />}
+      {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} />}
       {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
       {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} />}
 
@@ -624,6 +624,22 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
     }
   }
 
+  // Downgrade a sender to lower tier (moves them to Cleanup)
+  async function downgradeSender(email: string, name: string, queueId: string) {
+    try {
+      const res = await apiPut('senders', { sender_email: email, tier: 'D', display_name: name || email });
+      if (res.success) {
+        // Remove from queue view since they're now low-priority
+        setQueue(prev => prev.filter(q => q.id !== queueId));
+        showToast(`Downgraded to Tier D`, `${name || email} will now appear in Cleanup`);
+      } else {
+        showToast('Failed to downgrade', res.error);
+      }
+    } catch (e) {
+      showToast('Failed to downgrade', String(e));
+    }
+  }
+
   function snoozeItem(id: string, hours: number, label: string) {
     const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
     updateStatus(id, 'snoozed', until);
@@ -720,6 +736,9 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
                   <button onClick={() => queueAction('trash', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                   <button onClick={() => setConfirmDelete(q.id + '::' + q.message_id + '::' + q.account_email)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
+                  <button onClick={() => downgradeSender(q.sender_email, q.sender, q.id)}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg" style={{ background: '#e0e7ff', color: '#3730a3', border: '1px solid #a5b4fc' }}>
+                    ↓ Cleanup</button>
                 </div>
                 {replyingTo === q.id && (
                   <div className="mt-3">
@@ -790,7 +809,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; }) {
+function CleanupTab({ messages, onAction, showToast }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'count' | 'name'>('count');
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
@@ -814,6 +833,21 @@ function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction
       setTiersLoaded(true);
     })();
   }, []);
+
+  // Promote a sender to a higher tier (moves them out of Cleanup into Triage)
+  async function promoteSender(email: string, name: string, newTier: string) {
+    try {
+      const res = await apiPut('senders', { sender_email: email, tier: newTier, display_name: name || email });
+      if (res.success) {
+        setSenderTiers(prev => ({ ...prev, [email.toLowerCase()]: newTier }));
+        showToast(`Promoted to Tier ${newTier}`, `${name || email} will now appear in Inbox (Triage)`);
+      } else {
+        showToast('Failed to promote', res.error);
+      }
+    } catch (e) {
+      showToast('Failed to promote', String(e));
+    }
+  }
 
   // Noise detection helpers
   const noReplyPatterns = ['noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster'];
@@ -994,6 +1028,10 @@ function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction
                   <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{group.email}</div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
+                  <button onClick={() => promoteSender(group.email, group.name, 'B')}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fbbf24' }}>
+                    ↑ Priority
+                  </button>
                   <button onClick={() => onAction('archive', allIds)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
                     Archive
