@@ -52,6 +52,53 @@ export async function GET(request: NextRequest) {
 }
 
 /**
+ * POST /api/emailHelperV2/queue
+ * Create a new queue item (e.g. when snoozing from a tab that doesn't have a queue entry)
+ * Body: { message_id, account_email, status, snoozed_until?, sender?, sender_email?, subject?, summary?, ... }
+ */
+export async function POST(request: NextRequest) {
+  const { userId } = getRequestContext(request);
+  if (!userId) return apiError('Not authenticated', 401);
+
+  try {
+    const body = await request.json();
+    const { message_id, account_email, status, snoozed_until, sender, sender_email, subject, summary, thread_id, tier, priority, priority_score, gmail_url } = body;
+
+    if (!message_id || !status) return apiError('Missing message_id or status');
+
+    const admin = createSupabaseAdmin();
+    const item: Record<string, unknown> = {
+      user_id: userId,
+      message_id,
+      account_email: account_email || '',
+      status,
+      sender: sender || '',
+      sender_email: sender_email || '',
+      subject: subject || '',
+      summary: summary || '',
+      thread_id: thread_id || null,
+      tier: tier || null,
+      priority: priority || 'normal',
+      priority_score: priority_score || 5,
+      gmail_url: gmail_url || null,
+      received: new Date().toISOString(),
+    };
+    if (snoozed_until) item.snoozed_until = snoozed_until;
+
+    const { data, error } = await admin
+      .from(TABLES.REPLY_QUEUE)
+      .upsert(item, { onConflict: 'user_id,message_id' })
+      .select()
+      .single();
+
+    if (error) return apiError(error.message, 500);
+    return apiSuccess(data);
+  } catch (err) {
+    return apiError(`Failed: ${err}`, 500);
+  }
+}
+
+/**
  * PUT /api/emailHelperV2/queue
  * Update a queue item's status (done, snoozed, later, active)
  * Body: { id: string, status: string, snoozed_until?: string }

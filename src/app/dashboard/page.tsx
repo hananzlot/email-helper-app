@@ -97,12 +97,13 @@ function decodeHtmlEntities(text: string): string {
   return text.replace(/&(?:#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match) => entities[match] || match);
 }
 
-function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToast }: {
+function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToast, onSnooze }: {
   messageId: string;
   accountEmail?: string;
   onClose: () => void;
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
+  onSnooze?: (messageId: string, hours: number, label: string, accountEmail?: string) => void;
 }) {
   const [email, setEmail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -316,6 +317,9 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
               style={{ borderColor: 'var(--border)', background: clickedBtn === 'star' ? '#fef3c7' : undefined, color: clickedBtn === 'star' ? '#92400e' : undefined }}>
               {clickedBtn === 'star' ? 'Starred!' : 'Star'}
             </button>
+            {onSnooze && (
+              <SnoozeDropdown onSnooze={(hours, label) => { onSnooze(messageId, hours, label, accountEmail || _currentAccount); showToast('Snoozed', `Will reappear ${label}`); setTimeout(onClose, 300); }} />
+            )}
             <button onClick={() => flashAction('trash', () => { onAction('trash', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 300); })}
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
               style={{ borderColor: 'var(--border)', color: clickedBtn === 'trash' ? '#fff' : '#ef4444', background: clickedBtn === 'trash' ? '#ef4444' : undefined }}>
@@ -728,6 +732,19 @@ export default function Dashboard() {
     }
   }
 
+  // Snooze any message — creates/updates a reply queue entry with snoozed status
+  async function snoozeFromPreview(messageId: string, hours: number, label: string, accountEmail?: string) {
+    const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+    // Try to update existing queue entry by message_id
+    const res = await apiPut('queue', { message_id: messageId, status: 'snoozed', snoozed_until: until });
+    if (!res.success) {
+      // No existing queue entry — create one via upsert
+      // We need basic info about the message; use what we have
+      await apiPost('queue', { message_id: messageId, account_email: accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until });
+    }
+    setTriageVersion(v => v + 1); // reload snoozed tab
+  }
+
   async function runTriage() {
     setTriageLoading(true);
     const accts = (unified && accounts.length > 1) ? accounts : [{ email: _currentAccount }];
@@ -976,7 +993,7 @@ export default function Dashboard() {
       </div>
 
       {/* Email Preview Modal */}
-      {previewMessageId && <EmailPreviewModal messageId={previewMessageId} accountEmail={previewAccount} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} />}
+      {previewMessageId && <EmailPreviewModal messageId={previewMessageId} accountEmail={previewAccount} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} onSnooze={snoozeFromPreview} />}
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl text-white text-sm font-medium shadow-lg z-50 text-center"
@@ -1712,6 +1729,13 @@ function CleanupTab({ messages, onAction, showToast, onPreview, reportCount }: {
                       }
                     }}
                   />
+                  <SnoozeDropdown onSnooze={(hours, label) => {
+                    const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+                    for (const m of group.messages) {
+                      apiPost('queue', { message_id: m.id, account_email: m.accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: group.name, sender_email: group.email, subject: m.subject });
+                    }
+                    showToast('Snoozed', `${group.messages.length} message${group.messages.length > 1 ? 's' : ''} will reappear ${label}`);
+                  }} />
                   <button onClick={() => onAction('archive', allIds)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
                     Archive
@@ -1740,10 +1764,11 @@ function CleanupTab({ messages, onAction, showToast, onPreview, reportCount }: {
                             <div className="truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet)}</div>
                           </div>
                         </div>
-                        <div className="flex gap-1 flex-shrink-0">
+                        <div className="flex gap-1 flex-shrink-0 items-center">
                           <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
-                          <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-0.5 rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
-                          <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-0.5 rounded border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                          <button onClick={() => onAction('markRead', [msg.id])} className="px-2 py-0.5 rounded border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Read</button>
+                          <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-0.5 rounded border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                          <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-0.5 rounded border text-[10px] text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                         </div>
                       </div>
                     );
@@ -2247,11 +2272,21 @@ function SnoozedTab({ onAction, showToast, onPreview, reloadKey, reportCount }: 
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex gap-2 flex-shrink-0 items-center">
                   <button onClick={() => onPreview(q.message_id, q.account_email)}
                     className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Preview</button>
                   <button onClick={() => reactivate(q.id)}
                     className="px-2 py-1 text-xs rounded-lg border font-medium" style={{ borderColor: '#8b5cf6', color: '#7c3aed' }}>Wake Up</button>
+                  <SnoozeDropdown onSnooze={(hours, label) => {
+                    const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+                    apiPut('queue', { id: q.id, status: 'snoozed', snoozed_until: until });
+                    setSnoozedItems(prev => prev.map(item => item.id === q.id ? { ...item, snoozed_until: until } : item));
+                    showToast('Re-snoozed', `Will reappear ${label}`);
+                  }} />
+                  <button onClick={() => { onAction('archive', [q.message_id], undefined, q.account_email); dismiss(q.id, q.message_id, q.account_email); }}
+                    className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                  <button onClick={() => { onAction('trash', [q.message_id], undefined, q.account_email); dismiss(q.id, q.message_id, q.account_email); }}
+                    className="px-2 py-1 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                   <button onClick={() => dismiss(q.id, q.message_id, q.account_email)}
                     className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Dismiss</button>
                 </div>
@@ -2281,12 +2316,28 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
 
   useEffect(() => { loadFollowUps(); }, []);
 
-  function isAwaitingReply(msg: GmailMessage): boolean {
-    const sentDate = new Date(msg.date);
-    const hoursSince = (Date.now() - sentDate.getTime()) / (1000 * 60 * 60);
-    if (hoursSince < 24) return false;
-    if (hoursSince > 48) return true;
-    return !msg.subject?.startsWith('Re:');
+  // Check if a sent message has gotten a reply by looking at the actual thread
+  async function checkThreadForReply(msg: GmailMessage, myEmail: string): Promise<boolean> {
+    try {
+      const threadRes = await gmailGet('thread', { id: msg.threadId });
+      if (!threadRes.success || !threadRes.data?.messages) return false;
+      const sentDate = new Date(msg.date);
+      // Look for any message in the thread that is:
+      // 1. After our sent message
+      // 2. NOT from us (i.e., it's a reply from the recipient)
+      for (const threadMsg of threadRes.data.messages) {
+        const headers = threadMsg.payload?.headers || [];
+        const from = (headers.find((h: any) => h.name?.toLowerCase() === 'from')?.value || '').toLowerCase();
+        const msgDate = new Date(headers.find((h: any) => h.name?.toLowerCase() === 'date')?.value || 0);
+        // Skip our own messages
+        if (from.includes(myEmail.toLowerCase())) continue;
+        // If this message is after our sent message, they replied
+        if (msgDate > sentDate) return true;
+      }
+      return false;
+    } catch {
+      return false; // On error, assume no reply (show as awaiting)
+    }
   }
 
   async function loadFollowUps() {
@@ -2296,19 +2347,39 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
       const allAwaiting: GmailMessage[] = [];
 
       const loadForAccount = async (acctEmail?: string) => {
-        // Load starred sent messages
+        const myEmail = acctEmail || _currentAccount;
+
+        // Load starred sent messages (user-flagged)
         const starredRes = await gmailGet('search', { q: 'in:sent is:starred', max: '30' });
         if (starredRes.success && starredRes.data?.messages) {
           for (const msg of starredRes.data.messages) {
-            allStarred.push({ ...msg, accountEmail: acctEmail || _currentAccount });
+            allStarred.push({ ...msg, accountEmail: myEmail });
           }
         }
-        // Load recent sent messages to detect awaiting reply
+
+        // Load recent sent messages to detect actual awaiting replies
         const sentRes = await gmailGet('search', { q: 'in:sent newer_than:7d', max: '30' });
         if (sentRes.success && sentRes.data?.messages) {
-          for (const msg of sentRes.data.messages) {
-            if (isAwaitingReply(msg) && !allStarred.find(s => s.id === msg.id)) {
-              allAwaiting.push({ ...msg, accountEmail: acctEmail || _currentAccount });
+          // Only check messages older than 24h (too soon otherwise)
+          const candidates = sentRes.data.messages.filter((msg: GmailMessage) => {
+            const hoursSince = (Date.now() - new Date(msg.date).getTime()) / (1000 * 60 * 60);
+            return hoursSince >= 24;
+          });
+
+          // Check threads in parallel (batches of 5 to avoid rate limits)
+          for (let i = 0; i < candidates.length; i += 5) {
+            const batch = candidates.slice(i, i + 5);
+            const results = await Promise.all(
+              batch.map(async (msg: GmailMessage) => {
+                // Skip if already in starred list
+                if (allStarred.find(s => s.id === msg.id)) return null;
+                const hasReply = await checkThreadForReply(msg, myEmail);
+                if (!hasReply) return { ...msg, accountEmail: myEmail };
+                return null;
+              })
+            );
+            for (const r of results) {
+              if (r) allAwaiting.push(r);
             }
           }
         }
@@ -2430,14 +2501,29 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
                           <div className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>via {latest.accountEmail}</div>
                         )}
                       </div>
-                      <div className="flex gap-2 flex-shrink-0">
-                        <button onClick={(e) => { e.stopPropagation(); unstarMessage(latest.id, latest.accountEmail); }}
-                          className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: '#fbbf24', color: '#92400e' }}>
-                          Dismiss
-                        </button>
+                      <div className="flex gap-2 flex-shrink-0 items-center">
                         <button onClick={(e) => { e.stopPropagation(); onPreview(latest.id, latest.accountEmail); }}
                           className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
                           Preview
+                        </button>
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <SnoozeDropdown onSnooze={(hours, label) => {
+                            const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+                            apiPost('queue', { message_id: latest.id, account_email: latest.accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: convo.recipients.join(', '), subject: convo.subject });
+                            showToast('Snoozed', `Will reappear ${label}`);
+                          }} />
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); onAction('archive', [latest.id], undefined, latest.accountEmail); showToast('Archived'); }}
+                          className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                          Archive
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); onAction('trash', [latest.id], undefined, latest.accountEmail); showToast('Trashed'); }}
+                          className="px-2 py-1 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
+                          Trash
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); unstarMessage(latest.id, latest.accountEmail); }}
+                          className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: '#fbbf24', color: '#92400e' }}>
+                          Dismiss
                         </button>
                       </div>
                     </div>
@@ -2500,10 +2586,27 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
                         <div className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>via {latest.accountEmail}</div>
                       )}
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); onPreview(latest.id, latest.accountEmail); }}
-                      className="px-2 py-1 text-xs rounded-lg border flex-shrink-0" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                      Preview
-                    </button>
+                    <div className="flex gap-2 flex-shrink-0 items-center">
+                      <button onClick={(e) => { e.stopPropagation(); onPreview(latest.id, latest.accountEmail); }}
+                        className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                        Preview
+                      </button>
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <SnoozeDropdown onSnooze={(hours, label) => {
+                          const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+                          apiPost('queue', { message_id: latest.id, account_email: latest.accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: convo.recipients.join(', '), subject: convo.subject });
+                          showToast('Snoozed', `Will reappear ${label}`);
+                        }} />
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); onAction('archive', [latest.id], undefined, latest.accountEmail); showToast('Archived'); }}
+                        className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                        Archive
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); onAction('trash', [latest.id], undefined, latest.accountEmail); showToast('Trashed'); }}
+                        className="px-2 py-1 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
+                        Trash
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
