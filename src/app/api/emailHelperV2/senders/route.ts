@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { getRequestContext, apiSuccess, apiError } from '@/lib/api-helpers';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { TABLES } from '@/lib/tables';
+import { encryptFields, decryptFields, ENCRYPTED_FIELDS } from '@/lib/crypto';
 
 /**
  * GET /api/emailHelperV2/senders
@@ -19,7 +20,11 @@ export async function GET(request: NextRequest) {
     .order('reply_count', { ascending: false });
 
   if (error) return apiError(error.message, 500);
-  return apiSuccess(data || []);
+  // Decrypt display_name for each sender
+  const decrypted = (data || []).map((s: Record<string, unknown>) =>
+    decryptFields(s, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId)
+  );
+  return apiSuccess(decrypted);
 }
 
 /**
@@ -35,15 +40,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const senders = body.senders || [];
 
-    const upserts = senders.map((s: Record<string, unknown>) => ({
-      user_id: userId,
-      sender_email: s.sender_email,
-      display_name: s.display_name,
-      reply_count: s.reply_count || 0,
-      last_reply: s.last_reply || null,
-      tier: s.tier || 'D',
-      accounts_seen: s.accounts_seen || [],
-    }));
+    const upserts = senders.map((s: Record<string, unknown>) => {
+      const item = {
+        user_id: userId,
+        sender_email: s.sender_email as string,
+        display_name: (s.display_name || '') as string,
+        reply_count: (s.reply_count || 0) as number,
+        last_reply: (s.last_reply || null) as string | null,
+        tier: (s.tier || 'D') as string,
+        accounts_seen: (s.accounts_seen || []) as string[],
+      };
+      return encryptFields(item, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
+    });
 
     const admin = createSupabaseAdmin();
     // Batch in chunks of 100
@@ -139,17 +147,19 @@ export async function PUT(request: NextRequest) {
     if (!sender_email || !tier) return apiError('Missing sender_email or tier');
     if (!['A', 'B', 'C', 'D'].includes(tier)) return apiError('Tier must be A, B, C, or D');
 
-    // Upsert so it works for both known and unknown senders
+    // Upsert so it works for both known and unknown senders (encrypt display_name)
+    const upsertItem = encryptFields({
+      user_id: userId,
+      sender_email,
+      tier,
+      display_name: display_name || sender_email,
+      reply_count: 0,
+      updated_at: new Date().toISOString(),
+    }, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
+
     const { data, error } = await admin
       .from(TABLES.SENDER_PRIORITIES)
-      .upsert({
-        user_id: userId,
-        sender_email,
-        tier,
-        display_name: display_name || sender_email,
-        reply_count: 0,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id,sender_email' })
+      .upsert(upsertItem, { onConflict: 'user_id,sender_email' })
       .select()
       .single();
 

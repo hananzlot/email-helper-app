@@ -2,6 +2,7 @@ import { gmail_v1 } from 'googleapis';
 import * as gmail from './gmail';
 import { createSupabaseAdmin } from './supabase-server';
 import { TABLES } from './tables';
+import { encryptFields, decryptFields, encryptJson, ENCRYPTED_FIELDS } from './crypto';
 import type { GmailMessage, TriagedEmail, TriageResult, Priority, SenderTier } from '@/types';
 
 // ============ TRIAGE ENGINE ============
@@ -56,7 +57,9 @@ export async function runTriage(
 
   const senders: Record<string, SenderData> = {};
   (sendersRes.data || []).forEach((s: SenderData) => {
-    senders[s.sender_email.toLowerCase()] = s;
+    // Decrypt display_name (sender_email is not encrypted, used as lookup key)
+    const decrypted = decryptFields(s as unknown as Record<string, unknown>, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId) as unknown as SenderData;
+    senders[decrypted.sender_email.toLowerCase()] = decrypted;
   });
 
   const rules: RuleData[] = rulesRes.data || [];
@@ -123,14 +126,14 @@ export async function runTriage(
     },
   };
 
-  // Store in Supabase (upsert by user + account)
+  // Store in Supabase (upsert by user + account) — encrypt the data blob
   await admin.from(TABLES.TRIAGE_RESULTS).upsert(
     {
       user_id: userId,
       account_email: accountEmail,
       triaged_at: result.triaged_at,
       total_unread: result.total_unread,
-      data: result,
+      data: encryptJson(result, userId), // Encrypted string stored in JSONB as JSON string
     },
     { onConflict: 'user_id,account_email' }
   );
@@ -176,22 +179,26 @@ export async function runTriage(
   });
 
   if (signalEmails.length > 0) {
-    const queueItems = signalEmails.map((e) => ({
-      user_id: userId,
-      message_id: e.id,
-      thread_id: e.threadId,
-      account_email: accountEmail,
-      sender: e.sender,
-      sender_email: e.senderEmail,
-      subject: e.subject,
-      summary: e.summary,
-      tier: e.tier,
-      priority: e.priority,
-      priority_score: e.priorityScore,
-      received: new Date(e.received).toISOString(),
-      gmail_url: e.gmailUrl,
-      status: 'active',
-    }));
+    const queueItems = signalEmails.map((e) => {
+      const item = {
+        user_id: userId,
+        message_id: e.id,
+        thread_id: e.threadId,
+        account_email: accountEmail,
+        sender: e.sender,
+        sender_email: e.senderEmail,
+        subject: e.subject,
+        summary: e.summary,
+        tier: e.tier,
+        priority: e.priority,
+        priority_score: e.priorityScore,
+        received: new Date(e.received).toISOString(),
+        gmail_url: e.gmailUrl,
+        status: 'active',
+      };
+      // Encrypt sensitive fields before storing
+      return encryptFields(item, [...ENCRYPTED_FIELDS.REPLY_QUEUE], userId);
+    });
 
     // Batch upsert in chunks of 25 to avoid payload limits
     for (let i = 0; i < queueItems.length; i += 25) {
@@ -456,14 +463,14 @@ export async function scanSentMail(
     C: Math.ceil(total * 0.6),   // Next 30%
   };
 
-  // Upsert sender priorities
+  // Upsert sender priorities (encrypt display_name)
   const upserts = entries.map(([email, data], idx) => {
     let tier: SenderTier = 'D';
     if (idx < tierThresholds.A) tier = 'A';
     else if (idx < tierThresholds.B) tier = 'B';
     else if (idx < tierThresholds.C) tier = 'C';
 
-    return {
+    const item = {
       user_id: userId,
       sender_email: email,
       display_name: data.name,
@@ -472,6 +479,7 @@ export async function scanSentMail(
       tier,
       accounts_seen: [accountEmail],
     };
+    return encryptFields(item, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
   });
 
   if (upserts.length > 0) {

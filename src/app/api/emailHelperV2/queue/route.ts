@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { getRequestContext, apiSuccess, apiError } from '@/lib/api-helpers';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { TABLES } from '@/lib/tables';
+import { encryptFields, decryptFields, ENCRYPTED_FIELDS } from '@/lib/crypto';
 
 /**
  * GET /api/emailHelperV2/queue
@@ -36,11 +37,14 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Enrich queue items with reply_count and sort: within same priority, higher reply_count first
-  const enriched = (queueResult.data || []).map((item: Record<string, unknown>) => ({
-    ...item,
-    reply_count: replyCountMap[item.sender_email as string] || 0,
-  }));
+  // Decrypt sensitive fields and enrich with reply_count
+  const enriched = (queueResult.data || []).map((item: Record<string, unknown>) => {
+    const decrypted = decryptFields(item, [...ENCRYPTED_FIELDS.REPLY_QUEUE], userId);
+    return {
+      ...decrypted,
+      reply_count: replyCountMap[item.sender_email as string] || 0,
+    };
+  });
 
   // Sort by priority_score desc, then reply_count desc as tiebreaker
   enriched.sort((a: Record<string, unknown>, b: Record<string, unknown>) => {
@@ -85,9 +89,12 @@ export async function POST(request: NextRequest) {
     };
     if (snoozed_until) item.snoozed_until = snoozed_until;
 
+    // Encrypt sensitive fields before storing
+    const encryptedItem = encryptFields(item, [...ENCRYPTED_FIELDS.REPLY_QUEUE], userId);
+
     const { data, error } = await admin
       .from(TABLES.REPLY_QUEUE)
-      .upsert(item, { onConflict: 'user_id,message_id' })
+      .upsert(encryptedItem, { onConflict: 'user_id,message_id' })
       .select()
       .single();
 

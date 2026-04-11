@@ -1,6 +1,7 @@
 import { createSupabaseServerClient, createSupabaseAdmin } from './supabase-server';
 import { getOAuth2Client, GMAIL_SCOPES } from './gmail';
 import { TABLES } from './tables';
+import { encrypt, decrypt } from './crypto';
 
 /**
  * Generate the Google OAuth URL that requests Gmail permissions.
@@ -97,7 +98,8 @@ export async function storeGmailTokens(
 ) {
   const admin = createSupabaseAdmin();
 
-  // If no new refresh_token provided, preserve the existing one
+  // If no new refresh_token provided, preserve the existing one (already encrypted in DB)
+  let encryptedRefreshToken: string | null = null;
   if (!refreshToken) {
     const { data: existing } = await admin
       .from(TABLES.GMAIL_ACCOUNTS)
@@ -105,10 +107,15 @@ export async function storeGmailTokens(
       .eq('user_id', userId)
       .eq('email', email)
       .single();
-    if (existing?.refresh_token) {
-      refreshToken = existing.refresh_token;
-    }
+    // Keep the already-encrypted value as-is (don't double-encrypt)
+    encryptedRefreshToken = existing?.refresh_token || null;
+  } else {
+    // New refresh token — encrypt it
+    encryptedRefreshToken = encrypt(refreshToken, userId);
   }
+
+  // Encrypt access token before storing
+  const encryptedAccessToken = encrypt(accessToken, userId);
 
   const { data, error } = await admin
     .from(TABLES.GMAIL_ACCOUNTS)
@@ -116,8 +123,8 @@ export async function storeGmailTokens(
       {
         user_id: userId,
         email,
-        access_token: accessToken,
-        refresh_token: refreshToken,
+        access_token: encryptedAccessToken,
+        refresh_token: encryptedRefreshToken,
         token_expires_at: expiresAt?.toISOString(),
         status: 'connected',
         updated_at: new Date().toISOString(),
@@ -144,6 +151,12 @@ export async function getGmailTokens(userId: string, email: string) {
     .single();
 
   if (error) return null;
+
+  // Decrypt tokens (gracefully handles unencrypted legacy data)
+  if (data) {
+    data.access_token = decrypt(data.access_token, userId);
+    data.refresh_token = decrypt(data.refresh_token, userId);
+  }
   return data;
 }
 

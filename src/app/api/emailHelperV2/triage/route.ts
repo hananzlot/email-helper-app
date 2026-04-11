@@ -3,6 +3,7 @@ import { getGmailFromRequest, getRequestContext, apiSuccess, apiError } from '@/
 import { runTriage, scanSentMail } from '@/lib/triage';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { TABLES } from '@/lib/tables';
+import { decryptJson } from '@/lib/crypto';
 
 /**
  * POST /api/emailHelperV2/triage
@@ -59,6 +60,11 @@ export async function GET(request: NextRequest) {
 
   if (error || !data) {
     return apiSuccess({ exists: false, message: 'No triage results yet. Run a triage first.' });
+  }
+
+  // Decrypt the data field (may be encrypted JSON string or legacy JSONB object)
+  if (data.data && typeof data.data === 'string') {
+    data.data = decryptJson(data.data, userId);
   }
 
   return apiSuccess(data);
