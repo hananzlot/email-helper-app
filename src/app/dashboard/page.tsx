@@ -1098,7 +1098,6 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
   // Filter out low-priority items — those belong in Cleanup, not here
   const signalQueue = queue.filter(q => q.priority !== 'low');
   const active = signalQueue.filter(q => q.status === 'active');
-  const done = signalQueue.filter(q => q.status === 'done');
   const snoozed = signalQueue.filter(q => q.status === 'snoozed');
 
   const priorityColors: Record<string, { border: string; bg: string; label: string }> = {
@@ -1116,20 +1115,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
     </div>
   );
 
-  const total = signalQueue.length;
-  const doneCount = done.length;
-  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
-
   return (
     <div>
-      {/* Progress */}
-      <div className="mb-4">
-        <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
-          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: 'var(--accent)' }} />
-        </div>
-        <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{doneCount} of {total} triaged</p>
-      </div>
-
       {/* Active items grouped by priority — low priority goes to Cleanup tab */}
       {['urgent', 'important', 'normal'].map(priority => {
         const items = active.filter(q => q.priority === priority);
@@ -1177,9 +1164,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
                     Preview</button>
                   <button onClick={() => setReplyingTo(replyingTo === q.id ? null : q.id)}
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
-                  <button onClick={() => updateStatus(q.id, 'done')} className="px-3 py-1.5 text-xs font-medium rounded-lg" style={{ background: '#dcfce7', color: '#166534' }}>Done</button>
                   <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(q.id, hours, label)} />
-                  <button onClick={() => updateStatus(q.id, 'later')} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Later</button>
                   <button onClick={() => queueAction('archive', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
                   <button onClick={() => queueAction('markRead', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Mark Read</button>
                   <button onClick={() => queueAction('trash', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
@@ -1194,7 +1179,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
                       threadId={q.thread_id}
                       messageId={q.message_id}
                       showToast={showToast}
-                      onSent={() => { setReplyingTo(null); updateStatus(q.id, 'done'); }}
+                      onSent={() => { setReplyingTo(null); queueAction('archive', q.message_id, q.id, q.account_email); }}
                       onCancel={() => setReplyingTo(null)}
                     />
                   </div>
@@ -1204,19 +1189,6 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
           </div>
         );
       })}
-
-      {/* Completed */}
-      {done.length > 0 && (
-        <div className="mt-6">
-          <p className="text-xs font-semibold uppercase tracking-wide mb-2 pb-2 border-b" style={{ color: 'var(--muted)', borderColor: 'var(--border)' }}>Completed ({done.length})</p>
-          {done.map(q => (
-            <div key={q.id} className="p-3 rounded-lg border mb-1 flex items-center justify-between" style={{ opacity: 0.5, borderColor: 'var(--border)' }}>
-              <span className="text-sm">{q.sender}: {q.subject}</span>
-              <button onClick={() => updateStatus(q.id, 'active')} className="text-xs px-2 py-1 rounded border" style={{ borderColor: 'var(--border)' }}>Reactivate</button>
-            </div>
-          ))}
-        </div>
-      )}
 
       {snoozed.length > 0 && (
         <div className="mt-4">
