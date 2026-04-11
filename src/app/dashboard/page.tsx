@@ -1250,8 +1250,8 @@ export default function Dashboard() {
                 <strong>{profile.emailAddress}</strong>
               </div>
             ) : null}
-            {/* Layout toggle (hidden on mobile) */}
-            {!isMobile && <button
+            {/* Layout toggle — only visible on Inbox tab, hidden on mobile */}
+            {!isMobile && activeTab === 'inbox' && <button
               onClick={() => setLayoutMode(layoutMode === 'cards' ? 'split' : 'cards')}
               className="w-9 h-9 rounded-lg border flex items-center justify-center transition-all hover:shadow-sm"
               title={layoutMode === 'cards' ? 'Switch to split view' : 'Switch to card view'}
