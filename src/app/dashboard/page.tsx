@@ -649,10 +649,49 @@ export default function Dashboard() {
       return;
     }
     setSearchLoading(true);
+    const q = query.toLowerCase();
+
+    // Step 1: Instant results from in-memory messages (already loaded)
+    const localResults = messages.filter(m =>
+      m.sender?.toLowerCase().includes(q) ||
+      m.senderEmail?.toLowerCase().includes(q) ||
+      m.subject?.toLowerCase().includes(q) ||
+      m.snippet?.toLowerCase().includes(q)
+    );
+    if (localResults.length > 0) {
+      setSearchResults(localResults.slice(0, 50));
+    }
+
+    // Step 2: Search Supabase cache for messages not in memory
     try {
-      const allResults: GmailMessage[] = [];
-      // Gmail search query: search in sender and subject
+      const cacheRes = await apiGet('inbox-cache');
+      if (cacheRes.success && cacheRes.data?.messages?.length > 0) {
+        const localIds = new Set(localResults.map(m => m.id));
+        const cacheMatches = cacheRes.data.messages
+          .filter((m: { sender: string; sender_email: string; subject: string; snippet: string }) =>
+            m.sender?.toLowerCase().includes(q) ||
+            m.sender_email?.toLowerCase().includes(q) ||
+            m.subject?.toLowerCase().includes(q) ||
+            m.snippet?.toLowerCase().includes(q)
+          )
+          .filter((m: { gmail_id: string }) => !localIds.has(m.gmail_id))
+          .map((m: { gmail_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; is_unread: boolean; label_ids: string[]; account_email: string }) => ({
+            id: m.gmail_id, threadId: m.thread_id, sender: m.sender, senderEmail: m.sender_email,
+            subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.is_unread,
+            labelIds: m.label_ids, accountEmail: m.account_email, body: '', bodyHtml: '', to: '', cc: '',
+          } as GmailMessage));
+        if (cacheMatches.length > 0) {
+          const merged = [...localResults, ...cacheMatches].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setSearchResults(merged.slice(0, 100));
+        }
+      }
+    } catch {}
+
+    // Step 3: Also search Gmail API for messages not in cache (e.g. archived, older)
+    try {
       const gmailQuery = `{from:${query} subject:${query}}`;
+      const existingIds = new Set(localResults.map(m => m.id));
+      const gmailResults: GmailMessage[] = [];
 
       if (unified && accounts.length > 1) {
         const savedAccount = _currentAccount;
@@ -662,7 +701,10 @@ export default function Dashboard() {
             const res = await gmailGet('search', { q: gmailQuery, max: '20' });
             if (res.success && res.data?.messages) {
               for (const msg of res.data.messages) {
-                allResults.push({ ...msg, accountEmail: acct.email });
+                if (!existingIds.has(msg.id)) {
+                  gmailResults.push({ ...msg, accountEmail: acct.email });
+                  existingIds.add(msg.id);
+                }
               }
             }
           } catch (e) { console.error(`Search failed for ${acct.email}:`, e); }
@@ -672,16 +714,22 @@ export default function Dashboard() {
         const res = await gmailGet('search', { q: gmailQuery, max: '30' });
         if (res.success && res.data?.messages) {
           for (const msg of res.data.messages) {
-            allResults.push({ ...msg, accountEmail: _currentAccount });
+            if (!existingIds.has(msg.id)) {
+              gmailResults.push({ ...msg, accountEmail: _currentAccount });
+              existingIds.add(msg.id);
+            }
           }
         }
       }
 
-      // Sort by date descending
-      allResults.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setSearchResults(allResults);
+      if (gmailResults.length > 0) {
+        setSearchResults(prev => {
+          const merged = [...prev, ...gmailResults].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          return merged.slice(0, 100);
+        });
+      }
     } catch (err) {
-      console.error('Search error:', err);
+      console.error('Gmail search error:', err);
     } finally {
       setSearchLoading(false);
     }
@@ -1831,6 +1879,22 @@ export default function Dashboard() {
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
                 AES-256 encrypted
               </div>
+              {loadingProgress && (
+                <>
+                  <div className="w-px h-2.5" style={{ background: '#cbd5e1' }} />
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-3 h-3 border-[1.5px] border-t-transparent rounded-full animate-spin" style={{ borderColor: '#22c55e', borderTopColor: 'transparent' }} />
+                    <span className="text-[10px] font-medium" style={{ color: '#15803d' }}>
+                      {loadingProgress.loaded.toLocaleString()}{loadingProgress.total ? `/${loadingProgress.total.toLocaleString()}` : ''} emails
+                    </span>
+                    {loadingProgress.total && loadingProgress.total > 0 && (
+                      <div className="w-16 h-1 rounded-full overflow-hidden" style={{ background: '#dcfce7' }}>
+                        <div className="h-full rounded-full transition-all duration-500" style={{ background: '#22c55e', width: `${Math.min(100, (loadingProgress.loaded / loadingProgress.total) * 100)}%` }} />
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -2047,26 +2111,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Loading progress banner — shown while paginating through large inboxes */}
-      {loadingProgress && (
-        <div className="px-4 py-3 rounded-xl mb-4" style={{ background: '#f0fdf4', border: '1px solid #86efac' }}>
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: '#22c55e', borderTopColor: 'transparent' }} />
-              <span className="text-sm font-medium" style={{ color: '#166534' }}>{loadingProgress.phase}</span>
-            </div>
-            <span className="text-xs font-semibold" style={{ color: '#15803d' }}>
-              {loadingProgress.loaded.toLocaleString()}{loadingProgress.total ? ` / ${loadingProgress.total.toLocaleString()}` : ''} emails
-            </span>
-          </div>
-          {loadingProgress.total && loadingProgress.total > 0 && (
-            <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: '#dcfce7' }}>
-              <div className="h-full rounded-full transition-all duration-500" style={{ background: '#22c55e', width: `${Math.min(100, (loadingProgress.loaded / loadingProgress.total) * 100)}%` }} />
-            </div>
-          )}
-          <p className="text-[10px] mt-1" style={{ color: '#166534' }}>You can start working while emails continue loading in the background</p>
-        </div>
-      )}
+      {/* Loading progress ��� intentionally removed from here, shown inline in header */}
 
       {/* Tab content — fixed width container prevents layout shift between tabs */}
       <div className="w-full" style={{ minHeight: '60vh' }}>
