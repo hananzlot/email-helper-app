@@ -794,6 +794,69 @@ export default function Dashboard() {
     reportTabCount('inbox', unread);
   }, [messages, reportTabCount]);
 
+  // Load all tab counts upfront (not just when each tab is visited)
+  const loadAllTabCounts = useCallback(async () => {
+    try {
+      // Fetch queue data for Triage + Snoozed counts
+      const queueRes = await apiGet('queue');
+      if (queueRes.success) {
+        const items = queueRes.data || [];
+        const activeSignal = items.filter((q: any) => q.status === 'active' && q.priority !== 'low').length;
+        const snoozed = items.filter((q: any) => q.status === 'snoozed').length;
+        reportTabCount('reply-queue', activeSignal);
+        reportTabCount('snoozed', snoozed);
+      }
+
+      // Fetch sender tiers for Cleanup count (from current messages)
+      const sendersRes = await apiGet('senders');
+      if (sendersRes.success && sendersRes.data) {
+        const tiers: Record<string, string> = {};
+        for (const s of sendersRes.data) tiers[s.sender_email.toLowerCase()] = s.tier;
+        // Count noise emails from messages
+        const noReply = ['noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster'];
+        const auto = ['notification', 'newsletter', 'digest', 'updates@', 'info@', 'support@', 'hello@', 'team@', 'news@', 'marketing@', 'promo'];
+        const cleanupCount = messages.filter(m => {
+          const lower = m.senderEmail.toLowerCase();
+          const tier = tiers[lower];
+          if (tier === 'A' || tier === 'B' || tier === 'C') return false;
+          if (tier === 'D') return true;
+          if (noReply.some(p => lower.includes(p))) return true;
+          if (auto.some(p => lower.includes(p))) return true;
+          if (!tier) return true;
+          return false;
+        }).length;
+        reportTabCount('cleanup', cleanupCount);
+        reportTabCount('priorities', sendersRes.data.length);
+      }
+
+      // Fetch follow-up count (starred sent + awaiting reply)
+      const starredRes = await gmailGet('search', { q: 'in:sent is:starred', max: '50' });
+      const sentRes = await gmailGet('search', { q: 'in:sent newer_than:7d', max: '30' });
+      let followUpCount = 0;
+      if (starredRes.success) followUpCount += (starredRes.data?.messages || []).length;
+      if (sentRes.success) {
+        const sentMsgs = sentRes.data?.messages || [];
+        const awaitingCount = sentMsgs.filter((msg: any) => {
+          const hoursSince = (Date.now() - new Date(msg.date).getTime()) / (1000 * 60 * 60);
+          if (hoursSince < 24) return false;
+          if (hoursSince > 48) return true;
+          return !msg.subject?.startsWith('Re:');
+        }).length;
+        followUpCount += awaitingCount;
+      }
+      reportTabCount('follow-up', followUpCount);
+    } catch (e) {
+      console.error('Failed to load tab counts:', e);
+    }
+  }, [messages, reportTabCount]);
+
+  // Load tab counts on initial page load and whenever messages change
+  useEffect(() => {
+    if (account && messages.length > 0) {
+      loadAllTabCounts();
+    }
+  }, [account, messages.length, loadAllTabCounts]);
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'reply-queue', label: 'Triage' },
     { id: 'follow-up', label: 'Follow Up' },
