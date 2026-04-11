@@ -13,4 +13,6 @@ export const TABLES = {
   CLEANUP_REPORTS: 'emailHelperV2_cleanup_reports',
   FOLLOW_UP_CACHE: 'emailHelperV2_follow_up_cache',
   ACTION_HISTORY: 'emailHelperV2_action_history',
+  INBOX_CACHE: 'emailHelperV2_inbox_cache',
+  INBOX_SYNC: 'emailHelperV2_inbox_sync',
 } as const;
