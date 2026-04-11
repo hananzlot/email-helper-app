@@ -950,15 +950,47 @@ export default function Dashboard() {
         saveToCacheBackground(account, freshMsgs);
 
         if (cacheHit && cachedMsgCount > 200) {
-          // Large cache exists — merge newest 200 from Gmail with cache (don't re-paginate)
+          // Large cache exists — merge newest from Gmail with cache, then resume pagination
+          const cachedIds = new Set<string>();
           setMessages(prev => {
-            const existingIds = new Set(prev.map(m => m.id));
-            const newMsgs = freshMsgs.filter((m: GmailMessage) => !existingIds.has(m.id));
-            if (newMsgs.length === 0) return prev; // No new emails
+            prev.forEach(m => cachedIds.add(m.id));
+            freshMsgs.forEach((m: GmailMessage) => cachedIds.add(m.id));
+            const newMsgs = freshMsgs.filter((m: GmailMessage) => !cachedIds.has(m.id) || !prev.some(p => p.id === m.id));
+            // Always save fresh first page to cache
+            if (newMsgs.length === 0) return prev;
             return [...newMsgs, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           });
-          setLoadingProgress(null);
           setLoading(false);
+
+          // Resume pagination if cache didn't cover the full inbox
+          const MAX_MESSAGES = 20000;
+          const totalToLoad = Math.min(exactInboxTotal || cachedMsgCount, MAX_MESSAGES);
+          if (cachedMsgCount < totalToLoad && inboxRes.data.nextPageToken) {
+            setLoadingProgress({ loaded: cachedMsgCount, total: totalToLoad, phase: `Resuming... ${cachedMsgCount.toLocaleString()} cached, loading more...` });
+            let nextToken = inboxRes.data.nextPageToken;
+            let totalLoaded = cachedMsgCount;
+            // Paginate through Gmail, skipping pages we already have in cache
+            while (nextToken && totalLoaded < MAX_MESSAGES) {
+              const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+              if (!pageRes.success || !pageRes.data?.messages?.length) break;
+              const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
+              // Filter out messages already in cache
+              const newPageMsgs = pageMsgs.filter((m: GmailMessage) => !cachedIds.has(m.id));
+              if (newPageMsgs.length > 0) {
+                setMessages(prev => [...prev, ...newPageMsgs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+                saveToCacheBackground(account, newPageMsgs);
+                newPageMsgs.forEach((m: GmailMessage) => cachedIds.add(m.id));
+              }
+              totalLoaded += pageMsgs.length; // Count all, not just new (for progress)
+              nextToken = pageRes.data.nextPageToken;
+              const displayTotal = Math.max(totalToLoad, totalLoaded);
+              const minutesLeft = nextToken ? Math.max(1, Math.ceil((displayTotal - totalLoaded) / 200 * 0.5)) : 0;
+              setLoadingProgress({ loaded: totalLoaded, total: displayTotal, phase: nextToken ? `Loading emails... ~${minutesLeft} min remaining` : `Loaded ${totalLoaded.toLocaleString()} emails` });
+            }
+            setLoadingProgress(null);
+          } else {
+            setLoadingProgress(null);
+          }
         } else {
           // No cache or small cache — full pagination
           setMessages(freshMsgs);
@@ -1065,16 +1097,48 @@ export default function Dashboard() {
       }));
 
       if (unifiedCacheHit && unifiedCacheCount > 200) {
-        // Large cache — merge newest from Gmail, don't re-paginate
+        // Large cache — merge newest from Gmail, then resume pagination for uncached
+        const cachedIds = new Set<string>();
         setMessages(prev => {
-          const existingIds = new Set(prev.map(m => m.id));
-          const newMsgs = freshMessages.filter(m => !existingIds.has(m.id));
+          prev.forEach(m => cachedIds.add(m.id));
+          freshMessages.forEach(m => cachedIds.add(m.id));
+          const newMsgs = freshMessages.filter(m => !prev.some(p => p.id === m.id));
           if (newMsgs.length === 0) return prev;
           return [...newMsgs, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         });
         setCurrentAccount(savedAccount);
         setLoading(false);
-        setLoadingProgress(null);
+
+        // Resume pagination for accounts that have more uncached messages
+        if (accountTokens.length > 0) {
+          setLoadingProgress({ loaded: unifiedCacheCount, total: null, phase: `Resuming... ${unifiedCacheCount.toLocaleString()} cached, loading more...` });
+          const MAX_PER_ACCOUNT = 20000;
+          let grandTotal = unifiedCacheCount;
+          for (const at of accountTokens) {
+            let nextToken = at.nextPageToken;
+            let loaded = 0;
+            while (nextToken && loaded < MAX_PER_ACCOUNT) {
+              setCurrentAccount(at.email);
+              const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+              if (!pageRes.success || !pageRes.data?.messages?.length) break;
+              const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: at.email }));
+              const newPageMsgs = pageMsgs.filter((m: GmailMessage) => !cachedIds.has(m.id));
+              if (newPageMsgs.length > 0) {
+                setMessages(prev => [...prev, ...newPageMsgs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+                saveToCacheBackground(at.email, newPageMsgs);
+                newPageMsgs.forEach((m: GmailMessage) => cachedIds.add(m.id));
+              }
+              loaded += pageMsgs.length;
+              grandTotal += pageMsgs.length;
+              nextToken = pageRes.data.nextPageToken;
+              setLoadingProgress({ loaded: grandTotal, total: null, phase: `Loading emails... ${grandTotal.toLocaleString()} loaded` });
+            }
+          }
+          setCurrentAccount(savedAccount);
+          setLoadingProgress(null);
+        } else {
+          setLoadingProgress(null);
+        }
       } else {
         // No cache — full pagination
         freshMessages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
