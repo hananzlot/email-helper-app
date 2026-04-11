@@ -1153,7 +1153,7 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast 
       </div>
 
       <div className="text-center mt-4">
-        <a href="/" className="text-sm underline" style={{ color: 'var(--muted)' }}>Sign out</a>
+        <a href="/api/emailHelperV2/auth/logout" className="text-sm underline" style={{ color: 'var(--muted)' }}>Sign out of all accounts</a>
       </div>
     </div>
   );
