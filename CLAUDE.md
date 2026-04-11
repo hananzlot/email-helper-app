@@ -9,8 +9,13 @@
 ## Architecture
 - **Next.js App Router** with TypeScript, deployed on Netlify
 - **Supabase** backend (auth, sender priorities, reply queue, triage results, notification rules)
+  - Env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+  - Dashboard: check `.env.local` for the project URL (format: `https://<project-id>.supabase.co`)
 - **Gmail API** via `googleapis` — full CRUD, thread fetching, reply detection
+  - Env vars: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+  - OAuth callback: `https://emaihelper.netlify.app/api/emailHelperV2/auth/callback`
 - **Multi-account support** with unified view merging all connected Gmail accounts
+- **Encryption**: `ENCRYPTION_KEY` env var for token encryption at rest
 
 ## Key Files
 - `src/app/dashboard/page.tsx` — Main UI (all tabs, components, state)
