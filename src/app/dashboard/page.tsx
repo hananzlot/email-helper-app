@@ -185,15 +185,17 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
       <div className="relative z-10 bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
-        {/* Modal header — subject + date/time side by side */}
+        {/* Modal header — subject + date/time */}
         <div className="flex items-start justify-between gap-3 p-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="min-w-0 flex-1">
-            <h3 className="text-lg font-bold truncate">{email?.subject || 'Loading...'}</h3>
-            {email?.date && (
-              <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
-                {new Date(email.date).toLocaleString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              <h3 className="text-lg font-bold truncate">{email?.subject || 'Loading...'}</h3>
+              {email?.date && (() => {
+                const d = new Date(email.date);
+                const formatted = isNaN(d.getTime()) ? email.date : d.toLocaleString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+                return <span className="text-xs flex-shrink-0 whitespace-nowrap px-2 py-0.5 rounded-full" style={{ background: '#f1f5f9', color: '#475569' }}>{formatted}</span>;
+              })()}
+            </div>
           </div>
           <button onClick={onClose} className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-lg hover:bg-gray-100" style={{ color: 'var(--muted)' }}>&times;</button>
         </div>
