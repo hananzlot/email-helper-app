@@ -1,5 +1,5 @@
 import { google, gmail_v1 } from 'googleapis';
-import type { GmailMessage, GmailDraft, GmailLabel, GmailAction } from '@/types';
+import type { GmailMessage, GmailAttachment, GmailDraft, GmailLabel, GmailAction } from '@/types';
 
 // ============ AUTH ============
 
@@ -75,8 +75,12 @@ export async function getMessage(
 
   // Extract body for full format
   let body = '';
+  let bodyHtml = '';
+  let attachments: GmailAttachment[] = [];
   if (format === 'full' && msg.payload) {
-    body = extractBody(msg.payload);
+    body = extractBody(msg.payload, 'text/plain') || extractBody(msg.payload, 'text/html');
+    bodyHtml = extractBody(msg.payload, 'text/html') || body;
+    attachments = extractAttachments(msg.payload, msg.id!);
   }
 
   const fromHeader = getHeader('From');
@@ -90,40 +94,71 @@ export async function getMessage(
     subject: getHeader('Subject'),
     snippet: msg.snippet || '',
     body,
+    bodyHtml,
+    to: getHeader('To'),
+    cc: getHeader('Cc'),
     date: getHeader('Date'),
     labelIds: msg.labelIds || [],
     isUnread: (msg.labelIds || []).includes('UNREAD'),
+    attachments,
   };
 }
 
-function extractBody(payload: gmail_v1.Schema$MessagePart): string {
-  // Try to get text/plain first, then text/html
-  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+function extractBody(payload: gmail_v1.Schema$MessagePart, preferMime?: string): string {
+  const target = preferMime || 'text/html';
+  const fallback = target === 'text/html' ? 'text/plain' : 'text/html';
+
+  // Direct match
+  if (payload.mimeType === target && payload.body?.data) {
     return Buffer.from(payload.body.data, 'base64').toString('utf-8');
   }
-  if (payload.mimeType === 'text/html' && payload.body?.data) {
+  if (!preferMime && payload.mimeType === fallback && payload.body?.data) {
     return Buffer.from(payload.body.data, 'base64').toString('utf-8');
   }
+
   if (payload.parts) {
-    // Prefer plain text
+    // First pass: exact match
     for (const part of payload.parts) {
-      if (part.mimeType === 'text/plain' && part.body?.data) {
+      if (part.mimeType === target && part.body?.data) {
         return Buffer.from(part.body.data, 'base64').toString('utf-8');
       }
     }
-    // Fall back to HTML
-    for (const part of payload.parts) {
-      if (part.mimeType === 'text/html' && part.body?.data) {
-        return Buffer.from(part.body.data, 'base64').toString('utf-8');
+    // Second pass: fallback
+    if (!preferMime) {
+      for (const part of payload.parts) {
+        if (part.mimeType === fallback && part.body?.data) {
+          return Buffer.from(part.body.data, 'base64').toString('utf-8');
+        }
       }
     }
     // Recurse into multipart
     for (const part of payload.parts) {
-      const result = extractBody(part);
+      const result = extractBody(part, preferMime);
       if (result) return result;
     }
   }
   return '';
+}
+
+function extractAttachments(payload: gmail_v1.Schema$MessagePart, messageId: string): GmailAttachment[] {
+  const attachments: GmailAttachment[] = [];
+
+  function walk(part: gmail_v1.Schema$MessagePart) {
+    if (part.filename && part.filename.length > 0 && part.body?.attachmentId) {
+      attachments.push({
+        filename: part.filename,
+        mimeType: part.mimeType || 'application/octet-stream',
+        size: part.body.size || 0,
+        attachmentId: part.body.attachmentId,
+      });
+    }
+    if (part.parts) {
+      for (const child of part.parts) walk(child);
+    }
+  }
+
+  walk(payload);
+  return attachments;
 }
 
 export async function getThread(gmail: gmail_v1.Gmail, threadId: string) {

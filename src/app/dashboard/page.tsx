@@ -90,6 +90,224 @@ function ConfirmModal({ title, message, confirmLabel, confirmColor, onConfirm, o
   );
 }
 
+// ============ EMAIL PREVIEW MODAL ============
+
+function decodeHtmlEntities(text: string): string {
+  const entities: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#x27;': "'", '&apos;': "'", '&#x2F;': '/', '&nbsp;': ' ' };
+  return text.replace(/&(?:#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match) => entities[match] || match);
+}
+
+function EmailPreviewModal({ messageId, onClose }: { messageId: string; onClose: () => void }) {
+  const [email, setEmail] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const iframeRef = useCallback((node: HTMLIFrameElement | null) => {
+    if (node && email?.bodyHtml) {
+      const doc = node.contentDocument;
+      if (doc) {
+        doc.open();
+        doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #1a1a1a; margin: 0; padding: 16px; word-wrap: break-word; overflow-wrap: break-word; }
+          img { max-width: 100%; height: auto; }
+          a { color: #2563eb; }
+          table { max-width: 100%; }
+          pre, code { white-space: pre-wrap; word-wrap: break-word; }
+          blockquote { border-left: 3px solid #d1d5db; margin: 8px 0; padding-left: 12px; color: #6b7280; }
+        </style></head><body>${email.bodyHtml}</body></html>`);
+        doc.close();
+        const resize = () => {
+          if (node.contentDocument?.body) {
+            node.style.height = Math.min(window.innerHeight * 0.55, Math.max(150, node.contentDocument.body.scrollHeight + 32)) + 'px';
+          }
+        };
+        setTimeout(resize, 100);
+        setTimeout(resize, 500);
+        node.contentWindow?.addEventListener('load', resize);
+      }
+    }
+  }, [email?.bodyHtml]);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const res = await gmailGet('message', { id: messageId, format: 'full' });
+        if (res.success) setEmail(res.data);
+        else setError(res.error || 'Failed to load email');
+      } catch (e) { setError(String(e)); }
+      finally { setLoading(false); }
+    })();
+  }, [messageId]);
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const attachmentIcon = (mime: string) => {
+    if (mime.startsWith('image/')) return '🖼';
+    if (mime.includes('pdf')) return '📄';
+    if (mime.includes('spreadsheet') || mime.includes('excel') || mime.includes('csv')) return '📊';
+    if (mime.includes('document') || mime.includes('word')) return '📝';
+    if (mime.includes('zip') || mime.includes('compressed')) return '📦';
+    return '📎';
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative z-10 bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+        {/* Modal header */}
+        <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <h3 className="text-lg font-bold truncate pr-4">{email?.subject || 'Loading...'}</h3>
+          <button onClick={onClose} className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-lg hover:bg-gray-100" style={{ color: 'var(--muted)' }}>&times;</button>
+        </div>
+
+        {/* Modal body */}
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="text-center py-16" style={{ color: 'var(--muted)' }}>Loading email...</div>
+          ) : error ? (
+            <div className="text-center py-8 text-red-600">{error}</div>
+          ) : email ? (
+            <>
+              {/* Header details */}
+              <div className="px-5 pt-4 pb-3 flex flex-col gap-1.5" style={{ background: '#f8fafc' }}>
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0" style={{ background: 'var(--accent)' }}>
+                    {(email.sender || '?')[0]?.toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-semibold text-sm">{email.sender}</div>
+                    <div className="text-xs" style={{ color: 'var(--muted)' }}>&lt;{email.senderEmail}&gt;</div>
+                  </div>
+                  <div className="ml-auto text-xs text-right flex-shrink-0" style={{ color: 'var(--muted)' }}>
+                    {new Date(email.date).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                  </div>
+                </div>
+                {email.to && <div className="text-xs pl-12" style={{ color: 'var(--muted)' }}><span className="font-semibold">To:</span> {email.to}</div>}
+                {email.cc && <div className="text-xs pl-12" style={{ color: 'var(--muted)' }}><span className="font-semibold">Cc:</span> {email.cc}</div>}
+              </div>
+
+              {/* Attachments */}
+              {email.attachments && email.attachments.length > 0 && (
+                <div className="px-5 py-3 border-b" style={{ borderColor: 'var(--border)', background: '#fffbeb' }}>
+                  <div className="text-xs font-semibold mb-2" style={{ color: '#92400e' }}>
+                    {email.attachments.length} Attachment{email.attachments.length > 1 ? 's' : ''}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {email.attachments.map((att: any, i: number) => (
+                      <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs" style={{ background: 'white', borderColor: '#fbbf24' }}>
+                        <span className="text-base">{attachmentIcon(att.mimeType)}</span>
+                        <div>
+                          <div className="font-medium truncate" style={{ maxWidth: 180 }}>{att.filename}</div>
+                          <div style={{ color: 'var(--muted)' }}>{formatSize(att.size)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Email body */}
+              <div className="p-5">
+                {email.bodyHtml ? (
+                  <iframe
+                    ref={iframeRef}
+                    sandbox="allow-same-origin"
+                    className="w-full border rounded-lg"
+                    style={{ borderColor: 'var(--border)', background: 'white', minHeight: 150 }}
+                    title="Email content"
+                  />
+                ) : email.body ? (
+                  <pre className="text-sm overflow-auto" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', lineHeight: 1.6 }}>
+                    {email.body}
+                  </pre>
+                ) : (
+                  <div className="text-sm text-center py-8" style={{ color: 'var(--muted)' }}>No body content</div>
+                )}
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ TIER DROPDOWN ============
+
+function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
+  currentTier: string;
+  senderEmail: string;
+  senderName: string;
+  onTierChanged: (newTier: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const tiers = [
+    { value: 'A', label: 'Tier A', desc: 'Top priority', bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' },
+    { value: 'B', label: 'Tier B', desc: 'Important', bg: '#fef3c7', color: '#92400e', border: '#fbbf24' },
+    { value: 'C', label: 'Tier C', desc: 'Low priority', bg: '#e0f2fe', color: '#075985', border: '#7dd3fc' },
+    { value: 'D', label: 'Tier D', desc: 'Noise', bg: '#f1f5f9', color: '#475569', border: '#cbd5e1' },
+  ];
+
+  const current = tiers.find(t => t.value === currentTier) || { value: currentTier || '?', label: currentTier ? `Tier ${currentTier}` : 'No tier', bg: '#f3f4f6', color: '#6b7280', border: '#d1d5db' };
+
+  async function changeTier(newTier: string) {
+    setOpen(false);
+    if (newTier === currentTier) return;
+    try {
+      const res = await apiPut('senders', { sender_email: senderEmail, tier: newTier, display_name: senderName || senderEmail });
+      if (res.success) {
+        onTierChanged(newTier);
+      }
+    } catch (e) {
+      console.error('Failed to change tier:', e);
+    }
+  }
+
+  return (
+    <div className="relative inline-block">
+      <button onClick={() => setOpen(!open)}
+        className="text-[10px] font-bold px-2 py-0.5 rounded-full cursor-pointer hover:opacity-80 transition-opacity"
+        style={{ background: current.bg, color: current.color, border: `1px solid ${current.border}` }}>
+        {current.label} ▾
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1 min-w-[160px]"
+            style={{ background: 'white', borderColor: 'var(--border)' }}>
+            {tiers.map((t) => (
+              <button key={t.value} onClick={() => changeTier(t.value)}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 transition-colors flex items-center gap-2"
+                style={{ fontWeight: t.value === currentTier ? 700 : 400 }}>
+                <span className="w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center flex-shrink-0"
+                  style={{ background: t.bg, color: t.color }}>{t.value}</span>
+                <div>
+                  <div className="font-medium">{t.label}</div>
+                  <div style={{ color: 'var(--muted)' }}>{t.desc}</div>
+                </div>
+                {t.value === currentTier && <span className="ml-auto">✓</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ============ MAIN DASHBOARD ============
 
 type Tab = 'inbox' | 'reply-queue' | 'cleanup' | 'priorities' | 'accounts';
@@ -116,6 +334,8 @@ export default function Dashboard() {
   const [userId, setUserId] = useState<string>('');
   // Track which messages are animating out and their animation type
   const [animatingOut, setAnimatingOut] = useState<Record<string, 'trash' | 'delete' | 'archive'>>({});
+  // Email preview modal — shared across all tabs
+  const [previewMessageId, setPreviewMessageId] = useState<string | null>(null);
 
   // Load account from URL params first, then cookies
   useEffect(() => {
@@ -362,12 +582,15 @@ export default function Dashboard() {
 
       {activeTab === 'inbox' && (
         <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
-          onAction={handleAction} onRefresh={loadInbox} showToast={showToast} animatingOut={animatingOut} />
+          onAction={handleAction} onRefresh={loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={setPreviewMessageId} />
       )}
-      {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} />}
-      {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} />}
+      {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={setPreviewMessageId} />}
+      {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={setPreviewMessageId} />}
       {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
       {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} />}
+
+      {/* Email Preview Modal */}
+      {previewMessageId && <EmailPreviewModal messageId={previewMessageId} onClose={() => setPreviewMessageId(null)} />}
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl text-white text-sm font-medium shadow-lg z-50 text-center"
@@ -441,15 +664,15 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
 
 // ============ INBOX TAB ============
 
-function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast, animatingOut }: {
+function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast, animatingOut, onPreview }: {
   messages: GmailMessage[]; loading: boolean; actionLoading: string | null;
   onAction: (action: string, ids: string[], label?: string) => void; onRefresh: () => void;
   showToast: (title: string, subtitle?: string) => void;
   animatingOut: Record<string, 'trash' | 'delete' | 'archive'>;
+  onPreview: (messageId: string) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ ids: string[]; count: number } | null>(null);
   const toggleSelect = (id: string) => setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectAll = () => setSelected(selected.size === messages.length ? new Set() : new Set(messages.map(m => m.id)));
@@ -486,7 +709,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
               style={{ background: selected.has(msg.id) ? '#eff6ff' : 'var(--card)', borderColor: selected.has(msg.id) ? 'var(--accent)' : 'var(--border)', opacity: actionLoading === msg.id ? 0.5 : 1 }}>
               <div className="flex items-start gap-3 p-4">
                 <input type="checkbox" checked={selected.has(msg.id)} onChange={() => toggleSelect(msg.id)} className="mt-1 rounded" />
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedId(expandedId === msg.id ? null : msg.id)}>
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onPreview(msg.id)}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-sm truncate">{msg.sender}</span>
                     <div className="flex items-center gap-2">
@@ -495,12 +718,12 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                     </div>
                   </div>
                   <div className="text-sm font-medium truncate">{msg.subject}</div>
-                  <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>{msg.snippet}</div>
+                  <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet)}</div>
                 </div>
               </div>
               {/* Action bar */}
               <div className="flex gap-1 px-4 pb-3 flex-wrap">
-                <button onClick={() => { setReplyingTo(replyingTo === msg.id ? null : msg.id); setExpandedId(msg.id); }}
+                <button onClick={() => { setReplyingTo(replyingTo === msg.id ? null : msg.id); }}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
                 <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
                 <button onClick={() => onAction(msg.isUnread ? 'markRead' : 'markUnread', [msg.id])}
@@ -595,10 +818,11 @@ function SnoozeDropdown({ onSnooze }: { onSnooze: (hours: number, label: string)
 
 // ============ REPLY QUEUE TAB ============
 
-function ReplyQueueTab({ onAction, showToast, reloadKey }: {
+function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
   reloadKey: number;
+  onPreview: (messageId: string) => void;
 }) {
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -718,14 +942,27 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold text-sm">{q.sender}</span>
-                      {q.tier && q.tier !== 'N/A' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: q.tier === 'A' ? '#fee2e2' : q.tier === 'B' ? '#fef3c7' : '#e0f2fe', color: q.tier === 'A' ? '#991b1b' : q.tier === 'B' ? '#92400e' : '#075985' }}>Tier {q.tier}</span>}
+                      <TierDropdown currentTier={q.tier || ''} senderEmail={q.sender_email} senderName={q.sender}
+                        onTierChanged={(newTier) => {
+                          // If downgraded to C/D, remove from queue view
+                          if (newTier === 'C' || newTier === 'D') {
+                            setQueue(prev => prev.filter(item => item.id !== q.id));
+                            showToast(`Moved to Cleanup`, `${q.sender} is now Tier ${newTier}`);
+                          } else {
+                            setQueue(prev => prev.map(item => item.id === q.id ? { ...item, tier: newTier } : item));
+                            showToast(`Updated to Tier ${newTier}`, q.sender);
+                          }
+                        }} />
                     </div>
-                    <div className="text-sm font-medium mt-0.5">{q.subject}</div>
-                    <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{q.summary}</div>
+                    <div className="text-sm font-medium mt-0.5 cursor-pointer hover:underline" onClick={() => onPreview(q.message_id)}>{q.subject}</div>
+                    <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(q.summary || '')}</div>
                     <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{q.account_email} &middot; Score: {q.priority_score}/10</div>
                   </div>
                 </div>
                 <div className="flex gap-2 mt-3 flex-wrap">
+                  <button onClick={() => onPreview(q.message_id)}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg" style={{ background: '#f1f5f9', color: '#334155' }}>
+                    Preview</button>
                   <button onClick={() => setReplyingTo(replyingTo === q.id ? null : q.id)}
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
                   <button onClick={() => updateStatus(q.id, 'done')} className="px-3 py-1.5 text-xs font-medium rounded-lg" style={{ background: '#dcfce7', color: '#166534' }}>Done</button>
@@ -736,9 +973,6 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
                   <button onClick={() => queueAction('trash', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                   <button onClick={() => setConfirmDelete(q.id + '::' + q.message_id + '::' + q.account_email)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
-                  <button onClick={() => downgradeSender(q.sender_email, q.sender, q.id)}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg" style={{ background: '#e0e7ff', color: '#3730a3', border: '1px solid #a5b4fc' }}>
-                    ↓ Cleanup</button>
                 </div>
                 {replyingTo === q.id && (
                   <div className="mt-3">
@@ -809,7 +1043,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ messages, onAction, showToast }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; }) {
+function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string) => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'count' | 'name'>('count');
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
@@ -1027,11 +1261,20 @@ function CleanupTab({ messages, onAction, showToast }: { messages: GmailMessage[
                   <div className="font-semibold text-sm truncate">{group.name}</div>
                   <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{group.email}</div>
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
-                  <button onClick={() => promoteSender(group.email, group.name, 'B')}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fbbf24' }}>
-                    ↑ Priority
-                  </button>
+                <div className="flex gap-2 flex-shrink-0 items-center">
+                  <TierDropdown
+                    currentTier={senderTiers[group.email.toLowerCase()] || ''}
+                    senderEmail={group.email}
+                    senderName={group.name}
+                    onTierChanged={(newTier) => {
+                      setSenderTiers(prev => ({ ...prev, [group.email.toLowerCase()]: newTier }));
+                      if (newTier === 'A' || newTier === 'B') {
+                        showToast(`Promoted to Tier ${newTier}`, `${group.name} will appear in Inbox (Triage)`);
+                      } else {
+                        showToast(`Updated to Tier ${newTier}`, group.name);
+                      }
+                    }}
+                  />
                   <button onClick={() => onAction('archive', allIds)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
                     Archive
@@ -1055,9 +1298,9 @@ function CleanupTab({ messages, onAction, showToast }: { messages: GmailMessage[
                         <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
                           <input type="checkbox" checked={isMsgSelected} onChange={() => toggleMessage(msg.id)}
                             disabled={isGroupSelected} className="rounded flex-shrink-0" style={{ accentColor: 'var(--accent)' }} />
-                          <div className="min-w-0">
-                            <div className="font-medium truncate">{msg.subject}</div>
-                            <div className="truncate" style={{ color: 'var(--muted)' }}>{msg.snippet}</div>
+                          <div className="min-w-0 cursor-pointer" onClick={() => onPreview(msg.id)}>
+                            <div className="font-medium truncate hover:underline">{msg.subject}</div>
+                            <div className="truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet)}</div>
                           </div>
                         </div>
                         <div className="flex gap-1 flex-shrink-0">
