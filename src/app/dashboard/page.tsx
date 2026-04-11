@@ -791,6 +791,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
 function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'count' | 'name'>('count');
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
+  const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
 
   // Group all messages by sender email
   const senderGroups: Record<string, { name: string; email: string; messages: GmailMessage[] }> = {};
@@ -809,6 +811,60 @@ function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction
     groups.sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  function toggleGroup(email: string) {
+    setSelectedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(email)) {
+        next.delete(email);
+        // Also deselect individual messages from this sender
+        const group = senderGroups[email.toLowerCase()];
+        if (group) {
+          setSelectedMessages(prev2 => {
+            const next2 = new Set(prev2);
+            group.messages.forEach(m => next2.delete(m.id));
+            return next2;
+          });
+        }
+      } else {
+        next.add(email);
+      }
+      return next;
+    });
+  }
+
+  function toggleMessage(id: string) {
+    setSelectedMessages(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllGroups() {
+    if (selectedGroups.size === groups.length) {
+      setSelectedGroups(new Set());
+      setSelectedMessages(new Set());
+    } else {
+      setSelectedGroups(new Set(groups.map(g => g.email)));
+    }
+  }
+
+  // Collect all selected message IDs (from selected groups + individually selected messages)
+  function getSelectedIds(): string[] {
+    const ids = new Set<string>();
+    // Add all messages from selected groups
+    for (const email of selectedGroups) {
+      const group = senderGroups[email.toLowerCase()];
+      if (group) group.messages.forEach(m => ids.add(m.id));
+    }
+    // Add individually selected messages
+    for (const id of selectedMessages) ids.add(id);
+    return Array.from(ids);
+  }
+
+  const selectedIds = getSelectedIds();
+  const selectedCount = selectedIds.length;
+
   if (messages.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
       <p className="text-lg mb-2">Inbox looks clean</p>
@@ -820,9 +876,16 @@ function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <div>
-          <p className="text-sm font-semibold">{groups.length} senders</p>
-          <p className="text-xs" style={{ color: 'var(--muted)' }}>{messages.length} total messages</p>
+        <div className="flex items-center gap-3">
+          <button onClick={selectAllGroups}
+            className="px-3 py-1.5 text-xs rounded-lg border font-medium"
+            style={{ borderColor: 'var(--border)', background: selectedGroups.size === groups.length ? 'var(--accent)' : 'transparent', color: selectedGroups.size === groups.length ? 'white' : 'var(--muted)' }}>
+            {selectedGroups.size === groups.length ? 'Deselect All' : 'Select All'}
+          </button>
+          <div>
+            <p className="text-sm font-semibold">{groups.length} senders</p>
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>{messages.length} total messages</p>
+          </div>
         </div>
         <div className="flex gap-2 items-center">
           <span className="text-xs" style={{ color: 'var(--muted)' }}>Sort:</span>
@@ -839,52 +902,89 @@ function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedCount > 0 && (
+        <div className="mb-4 p-3 rounded-xl flex items-center justify-between gap-3" style={{ background: '#eff6ff', border: '2px solid var(--accent)' }}>
+          <span className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>
+            {selectedCount} message{selectedCount > 1 ? 's' : ''} selected
+            {selectedGroups.size > 0 && ` (${selectedGroups.size} sender${selectedGroups.size > 1 ? 's' : ''})`}
+          </span>
+          <div className="flex gap-2">
+            <button onClick={() => { onAction('markRead', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); }}
+              className="px-4 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', background: 'white' }}>
+              Mark Read
+            </button>
+            <button onClick={() => { onAction('archive', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); }}
+              className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
+              Archive All
+            </button>
+            <button onClick={() => { onAction('trash', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); }}
+              className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--urgent)' }}>
+              Trash All
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Sender list */}
       <div className="flex flex-col gap-2">
         {groups.map(group => {
           const isExpanded = expandedSender === group.email;
+          const isGroupSelected = selectedGroups.has(group.email);
           const allIds = group.messages.map(m => m.id);
           return (
-            <div key={group.email} className="rounded-xl border overflow-hidden" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
+            <div key={group.email} className="rounded-xl border overflow-hidden transition-all"
+              style={{ background: isGroupSelected ? '#eff6ff' : 'var(--card)', borderColor: isGroupSelected ? 'var(--accent)' : 'var(--border)' }}>
               {/* Sender row */}
-              <div className="flex items-center gap-3 p-4 cursor-pointer" onClick={() => setExpandedSender(isExpanded ? null : group.email)}>
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+              <div className="flex items-center gap-3 p-4">
+                <input type="checkbox" checked={isGroupSelected} onChange={() => toggleGroup(group.email)}
+                  className="rounded flex-shrink-0" style={{ accentColor: 'var(--accent)' }} />
+                <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 cursor-pointer"
+                  onClick={() => setExpandedSender(isExpanded ? null : group.email)}
                   style={{ background: group.messages.length >= 5 ? 'var(--urgent)' : group.messages.length >= 3 ? 'var(--important)' : 'var(--accent)' }}>
                   {group.messages.length}
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedSender(isExpanded ? null : group.email)}>
                   <div className="font-semibold text-sm truncate">{group.name}</div>
                   <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{group.email}</div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
-                  <button onClick={(e) => { e.stopPropagation(); onAction('archive', allIds); }}
+                  <button onClick={() => onAction('archive', allIds)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
-                    Archive All
+                    Archive
                   </button>
-                  <button onClick={(e) => { e.stopPropagation(); onAction('trash', allIds); }}
+                  <button onClick={() => onAction('trash', allIds)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
-                    Trash All
+                    Trash
                   </button>
-                  <span className="text-xs self-center" style={{ color: 'var(--muted)' }}>{isExpanded ? '▲' : '▼'}</span>
+                  <span className="text-xs self-center cursor-pointer" onClick={() => setExpandedSender(isExpanded ? null : group.email)}
+                    style={{ color: 'var(--muted)' }}>{isExpanded ? '▲' : '▼'}</span>
                 </div>
               </div>
 
               {/* Expanded messages */}
               {isExpanded && (
                 <div className="border-t px-4 pb-3" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
-                  {group.messages.map(msg => (
-                    <div key={msg.id} className="flex items-center justify-between py-2 text-xs border-b" style={{ borderColor: 'var(--border)' }}>
-                      <div className="flex-1 min-w-0 mr-2">
-                        <div className="font-medium truncate">{msg.subject}</div>
-                        <div className="truncate" style={{ color: 'var(--muted)' }}>{msg.snippet}</div>
+                  {group.messages.map(msg => {
+                    const isMsgSelected = isGroupSelected || selectedMessages.has(msg.id);
+                    return (
+                      <div key={msg.id} className="flex items-center justify-between py-2 text-xs border-b" style={{ borderColor: 'var(--border)', background: isMsgSelected ? '#dbeafe' : 'transparent' }}>
+                        <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
+                          <input type="checkbox" checked={isMsgSelected} onChange={() => toggleMessage(msg.id)}
+                            disabled={isGroupSelected} className="rounded flex-shrink-0" style={{ accentColor: 'var(--accent)' }} />
+                          <div className="min-w-0">
+                            <div className="font-medium truncate">{msg.subject}</div>
+                            <div className="truncate" style={{ color: 'var(--muted)' }}>{msg.snippet}</div>
+                          </div>
+                        </div>
+                        <div className="flex gap-1 flex-shrink-0">
+                          <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleDateString()}</span>
+                          <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-0.5 rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                          <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-0.5 rounded border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                        </div>
                       </div>
-                      <div className="flex gap-1 flex-shrink-0">
-                        <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleDateString()}</span>
-                        <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-0.5 rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
-                        <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-0.5 rounded border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
