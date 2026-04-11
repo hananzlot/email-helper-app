@@ -121,6 +121,10 @@ create table public."emailHelperV2_reply_queue" (
   updated_at timestamptz default now()
 );
 
+-- Unique constraint needed for triage upsert
+alter table public."emailHelperV2_reply_queue"
+  add constraint "ehv2_reply_queue_user_message_unique" unique (user_id, message_id);
+
 alter table public."emailHelperV2_reply_queue" enable row level security;
 create policy "ehv2_reply_queue_all" on public."emailHelperV2_reply_queue"
   for all using (auth.uid() = user_id);
