@@ -81,6 +81,14 @@ export async function getMessage(
     body = extractBody(msg.payload, 'text/plain') || extractBody(msg.payload, 'text/html');
     bodyHtml = extractBody(msg.payload, 'text/html') || body;
     attachments = extractAttachments(msg.payload, msg.id!);
+
+    // Resolve inline CID images — replace cid: references with data: URLs
+    const inlineImages = extractInlineImages(msg.payload);
+    for (const [cid, dataUrl] of Object.entries(inlineImages)) {
+      // CID can appear as "cid:abc" or "cid:abc@domain"
+      const cidPattern = new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
+      bodyHtml = bodyHtml.replace(cidPattern, dataUrl);
+    }
   }
 
   const fromHeader = getHeader('From');
@@ -159,6 +167,34 @@ function extractAttachments(payload: gmail_v1.Schema$MessagePart, messageId: str
 
   walk(payload);
   return attachments;
+}
+
+/**
+ * Extract inline images (Content-Disposition: inline with Content-ID)
+ * and return a map of CID → data:URL so we can replace cid: references in the HTML body.
+ */
+function extractInlineImages(payload: gmail_v1.Schema$MessagePart): Record<string, string> {
+  const images: Record<string, string> = {};
+
+  function walk(part: gmail_v1.Schema$MessagePart) {
+    const contentId = part.headers?.find(h => h.name?.toLowerCase() === 'content-id')?.value;
+    const mimeType = part.mimeType || '';
+
+    if (contentId && mimeType.startsWith('image/') && part.body?.data) {
+      // Content-ID is usually <abc@domain> — strip angle brackets
+      const cid = contentId.replace(/^<|>$/g, '');
+      // Gmail returns base64url — convert to standard base64 for data URL
+      const base64 = part.body.data.replace(/-/g, '+').replace(/_/g, '/');
+      images[cid] = `data:${mimeType};base64,${base64}`;
+    }
+
+    if (part.parts) {
+      for (const child of part.parts) walk(child);
+    }
+  }
+
+  walk(payload);
+  return images;
 }
 
 /**

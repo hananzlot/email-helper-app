@@ -1993,8 +1993,6 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
       if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
       if (res.success) {
         setEmail(res.data);
-        // Mark as read
-        onAction('markRead', [messageId], undefined, accountEmail || _currentAccount);
       }
       setLoading(false);
     });
