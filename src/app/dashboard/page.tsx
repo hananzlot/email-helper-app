@@ -2899,7 +2899,7 @@ function QuickReplyDropdown({ templates, onSend, senderEmail, senderName, cc, su
                   value={preview.editedBody}
                   onChange={(e) => setPreview({ ...preview, editedBody: e.target.value })}
                   className="w-full text-xs p-2 rounded border resize-none focus:outline-none focus:ring-1"
-                  style={{ borderColor: 'var(--border)', minHeight: '80px', focusRingColor: 'var(--accent)' }}
+                  style={{ borderColor: 'var(--border)', minHeight: '80px' }}
                   rows={4}
                 />
 
