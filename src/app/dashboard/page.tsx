@@ -741,6 +741,12 @@ export default function Dashboard() {
     setPreviewAccount(acctEmail);
   }
 
+  // Force open the full dialog modal (used on double-click)
+  function openDialogPreview(messageId: string, acctEmail?: string) {
+    setPreviewMessageId(messageId);
+    setPreviewAccount(acctEmail);
+  }
+
   // Clear split preview when switching tabs
   useEffect(() => { setSplitPreviewId(null); setSplitPreviewAccount(undefined); }, [activeTab]);
 
@@ -1576,13 +1582,13 @@ export default function Dashboard() {
               )}
               {activeTab === 'inbox' && (
                 <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
-                  onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} />
+                  onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} onDialogPreview={openDialogPreview} />
               )}
-              {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} />}
-              {activeTab === 'follow-up' && <FollowUpTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
-              {activeTab === 'snoozed' && <SnoozedTab onAction={handleAction} showToast={showToast} onPreview={openPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
-              {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
-              {activeTab === 'sent' && <SentMailTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} />}
+              {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} />}
+              {activeTab === 'follow-up' && <FollowUpTab accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
+              {activeTab === 'snoozed' && <SnoozedTab onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
+              {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
+              {activeTab === 'sent' && <SentMailTab accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
               {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
             </>
@@ -2220,12 +2226,13 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   );
 }
 
-function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast, animatingOut, onPreview }: {
+function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast, animatingOut, onPreview, onDialogPreview }: {
   messages: GmailMessage[]; loading: boolean; actionLoading: string | null;
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; onRefresh: () => void;
   showToast: (title: string, subtitle?: string) => void;
   animatingOut: Record<string, 'trash' | 'delete' | 'archive'>;
   onPreview: (messageId: string, accountEmail?: string) => void;
+  onDialogPreview?: (messageId: string, accountEmail?: string) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -2268,7 +2275,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
               style={{ background: selected.has(msg.id) ? '#eff6ff' : 'var(--card)', borderColor: selected.has(msg.id) ? 'var(--accent)' : 'var(--border)', opacity: actionLoading === msg.id ? 0.5 : 1 }}>
               <div className="flex items-start gap-3 p-4">
                 <input type="checkbox" checked={selected.has(msg.id)} onChange={() => toggleSelect(msg.id)} className="mt-1 rounded" />
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onPreview(msg.id, msg.accountEmail)}>
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onPreview(msg.id, msg.accountEmail)} onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-sm truncate">{msg.sender}</span>
                     <div className="flex items-center gap-2">
@@ -2424,11 +2431,12 @@ function QuickReplyDropdown({ templates, onSend }: {
 
 // ============ REPLY QUEUE TAB ============
 
-function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount, quickReplyTemplates }: {
+function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPreview, reportCount, quickReplyTemplates }: {
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
   reloadKey: number;
   onPreview: (messageId: string, accountEmail?: string) => void;
+  onDialogPreview?: (messageId: string, accountEmail?: string) => void;
   reportCount?: (count: number) => void;
   quickReplyTemplates: { id: string; label: string; body: string }[];
 }) {
@@ -2673,7 +2681,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount,
                           }
                         }} />
                     </div>
-                    <div className="cursor-pointer" onClick={() => onPreview(q.message_id, q.account_email)}>
+                    <div className="cursor-pointer" onClick={() => onPreview(q.message_id, q.account_email)} onDoubleClick={() => onDialogPreview?.(q.message_id, q.account_email)}>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-sm font-medium hover:underline">{q.subject}</span>
                         {q.received && (
@@ -2691,9 +2699,6 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount,
                   </div>
                 </div>
                 <div className="flex gap-2 mt-3 flex-wrap">
-                  <button onClick={() => onPreview(q.message_id, q.account_email)}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg" style={{ background: '#f1f5f9', color: '#334155' }}>
-                    Preview</button>
                   <button onClick={() => setReplyingTo(replyingTo === q.id ? null : q.id)}
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
                   {quickReplyTemplates.length > 0 && (
@@ -2765,7 +2770,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount,
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ messages, onAction, showToast, onPreview, reportCount }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; }) {
+function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview, reportCount }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name'>('tier');
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
@@ -3063,7 +3068,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview, reportCount }: {
                         <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
                           <input type="checkbox" checked={isMsgSelected} onChange={() => toggleMessage(msg.id)}
                             disabled={isGroupSelected} className="rounded flex-shrink-0" style={{ accentColor: 'var(--accent)' }} />
-                          <div className="min-w-0 cursor-pointer" onClick={() => onPreview(msg.id, msg.accountEmail)}>
+                          <div className="min-w-0 cursor-pointer" onClick={() => onPreview(msg.id, msg.accountEmail)} onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)}>
                             <div className="font-medium truncate hover:underline">{msg.subject}</div>
                             <div className="truncate" style={{ color: 'var(--muted)' }}>{cleanSnippet(msg.snippet || '')}</div>
                           </div>
@@ -3121,10 +3126,11 @@ interface ConversationGroup {
   totalSent: number;
 }
 
-function SentMailTab({ accounts, unified, onPreview, showToast }: {
+function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast }: {
   accounts: ConnectedAccount[];
   unified: boolean;
   onPreview: (messageId: string, accountEmail?: string) => void;
+  onDialogPreview?: (messageId: string, accountEmail?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
 }) {
   const [sentMessages, setSentMessages] = useState<GmailMessage[]>([]);
@@ -3308,7 +3314,7 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
                   borderLeftColor: convo.hasAwaiting ? '#f59e0b' : 'var(--border)',
                 }}>
                 {/* Conversation header — click to expand */}
-                <div className="p-4 cursor-pointer" onClick={() => setExpandedConvo(isExpanded ? null : convo.normalizedSubject)}>
+                <div className="p-4 cursor-pointer" onClick={() => setExpandedConvo(isExpanded ? null : convo.normalizedSubject)} onDoubleClick={() => onDialogPreview?.(latestMsg.id, latestMsg.accountEmail)}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -3349,10 +3355,6 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
                       {convo.totalSent > 1 && (
                         <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{isExpanded ? '▲' : '▼'}</span>
                       )}
-                      <button onClick={(e) => { e.stopPropagation(); onPreview(latestMsg.id, latestMsg.accountEmail); }}
-                        className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                        Preview
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -3361,7 +3363,8 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
                   <div className="border-t divide-y" style={{ borderColor: 'var(--border)' }}>
                     {convo.messages.map((msg, idx) => (
                       <div key={msg.id} className="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition-colors"
-                        onClick={() => onPreview(msg.id, msg.accountEmail)}>
+                        onClick={() => onPreview(msg.id, msg.accountEmail)}
+                        onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)}>
                         <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: 'var(--accent)' }}>
                           {idx + 1}
                         </div>
@@ -3427,7 +3430,8 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
                 <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
                   {group.messages.slice(0, 5).map((msg) => (
                     <div key={msg.id} className="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition-colors"
-                      onClick={() => onPreview(msg.id, msg.accountEmail)}>
+                      onClick={() => onPreview(msg.id, msg.accountEmail)}
+                      onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)}>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium truncate">{msg.subject || '(no subject)'}</span>
@@ -3459,10 +3463,11 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
 
 // ============ SNOOZED TAB ============
 
-function SnoozedTab({ onAction, showToast, onPreview, reloadKey, reportCount }: {
+function SnoozedTab({ onAction, showToast, onPreview, onDialogPreview, reloadKey, reportCount }: {
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
   onPreview: (messageId: string, accountEmail?: string) => void;
+  onDialogPreview?: (messageId: string, accountEmail?: string) => void;
   reloadKey: number;
   reportCount?: (count: number) => void;
 }) {
@@ -3558,7 +3563,7 @@ function SnoozedTab({ onAction, showToast, onPreview, reloadKey, reportCount }: 
                       </span>
                     )}
                   </div>
-                  <div className="text-sm font-medium mt-0.5 cursor-pointer hover:underline" onClick={() => onPreview(q.message_id, q.account_email)}>
+                  <div className="text-sm font-medium mt-0.5 cursor-pointer hover:underline" onClick={() => onPreview(q.message_id, q.account_email)} onDoubleClick={() => onDialogPreview?.(q.message_id, q.account_email)}>
                     {q.subject}
                   </div>
                   <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{cleanSnippet(q.summary || '')}</div>
@@ -3577,8 +3582,6 @@ function SnoozedTab({ onAction, showToast, onPreview, reloadKey, reportCount }: 
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0 items-center">
-                  <button onClick={() => onPreview(q.message_id, q.account_email)}
-                    className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Preview</button>
                   <button onClick={() => reactivate(q.id)}
                     className="px-2 py-1 text-xs rounded-lg border font-medium" style={{ borderColor: '#8b5cf6', color: '#7c3aed' }}>Wake Up</button>
                   <SnoozeDropdown onSnooze={(hours, label) => {
@@ -3605,10 +3608,11 @@ function SnoozedTab({ onAction, showToast, onPreview, reloadKey, reportCount }: 
 
 // ============ FOLLOW-UP TAB ============
 
-function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, reportCount }: {
+function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast, onAction, reportCount }: {
   accounts: ConnectedAccount[];
   unified: boolean;
   onPreview: (messageId: string, accountEmail?: string) => void;
+  onDialogPreview?: (messageId: string, accountEmail?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   reportCount?: (count: number) => void;
@@ -3843,10 +3847,6 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
                         )}
                       </div>
                       <div className="flex gap-2 flex-shrink-0 items-center">
-                        <button onClick={(e) => { e.stopPropagation(); onPreview(latest.id, latest.accountEmail); }}
-                          className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                          Preview
-                        </button>
                         <div onClick={(e) => e.stopPropagation()}>
                           <SnoozeDropdown onSnooze={(hours, label) => {
                             const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
@@ -3873,7 +3873,8 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
                     <div className="border-t divide-y" style={{ borderColor: '#fde68a' }}>
                       {convo.messages.map((msg, idx) => (
                         <div key={msg.id} className="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-amber-50"
-                          onClick={() => onPreview(msg.id, msg.accountEmail)}>
+                          onClick={() => onPreview(msg.id, msg.accountEmail)}
+                          onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)}>
                           <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: '#f59e0b' }}>
                             {idx + 1}
                           </div>
@@ -3907,6 +3908,7 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
               return (
                 <div key={`a-${convo.subject}`} className="p-4 rounded-xl border cursor-pointer hover:shadow-sm transition-shadow"
                   onClick={() => onPreview(latest.id, latest.accountEmail)}
+                  onDoubleClick={() => onDialogPreview?.(latest.id, latest.accountEmail)}
                   style={{ background: 'var(--card)', borderColor: 'var(--border)', borderLeftWidth: 3, borderLeftColor: urgencyColor }}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
@@ -3928,10 +3930,6 @@ function FollowUpTab({ accounts, unified, onPreview, showToast, onAction, report
                       )}
                     </div>
                     <div className="flex gap-2 flex-shrink-0 items-center">
-                      <button onClick={(e) => { e.stopPropagation(); onPreview(latest.id, latest.accountEmail); }}
-                        className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                        Preview
-                      </button>
                       <div onClick={(e) => e.stopPropagation()}>
                         <SnoozeDropdown onSnooze={(hours, label) => {
                           const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
