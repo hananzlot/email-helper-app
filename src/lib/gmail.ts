@@ -248,6 +248,18 @@ export async function listLabels(gmail: gmail_v1.Gmail): Promise<GmailLabel[]> {
   }));
 }
 
+/**
+ * Get exact message counts for a label (e.g. INBOX).
+ * Returns { messagesTotal, messagesUnread } — accurate, single API call.
+ */
+export async function getLabelInfo(gmail: gmail_v1.Gmail, labelId: string = 'INBOX') {
+  const res = await gmail.users.labels.get({ userId: 'me', id: labelId });
+  return {
+    messagesTotal: res.data.messagesTotal || 0,
+    messagesUnread: res.data.messagesUnread || 0,
+  };
+}
+
 // ============ MODIFY OPERATIONS ============
 
 export async function modifyMessage(

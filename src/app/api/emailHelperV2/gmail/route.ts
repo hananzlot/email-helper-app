@@ -69,6 +69,11 @@ export async function GET(request: NextRequest) {
       case 'labels':
         return apiSuccess(await gmail.listLabels(client));
 
+      case 'labelInfo': {
+        const labelId = request.nextUrl.searchParams.get('labelId') || 'INBOX';
+        return apiSuccess(await gmail.getLabelInfo(client, labelId));
+      }
+
       case 'drafts':
         return apiSuccess(await gmail.listDrafts(client, maxResults));
 

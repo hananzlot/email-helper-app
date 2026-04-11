@@ -926,8 +926,10 @@ export default function Dashboard() {
     // Step 2: Fetch from Gmail (full load or background refresh)
     setLoadingProgress(prev => prev || { loaded: 0, total: null, phase: 'Connecting to Gmail...' });
     try {
-      const [profileRes, inboxRes] = await Promise.all([
+      // Fetch profile, inbox label count (exact), and first page in parallel
+      const [profileRes, labelRes, inboxRes] = await Promise.all([
         gmailGet('profile'),
+        gmailGet('labelInfo', { labelId: 'INBOX' }),
         gmailGet('inbox', { q: 'in:inbox', max: '200' }),
       ]);
       if (!profileRes.success && (profileRes.error?.includes('Not authenticated') || profileRes.error?.includes('auth failed'))) {
@@ -937,11 +939,13 @@ export default function Dashboard() {
         return;
       }
       if (profileRes.success) setProfile(profileRes.data);
+      // Use exact inbox count from labels.get (not the inaccurate resultSizeEstimate)
+      const exactInboxTotal = labelRes.success ? labelRes.data.messagesTotal : 0;
       if (inboxRes.success && inboxRes.data?.messages) {
         const msgs = inboxRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
         setMessages(msgs);
-        const estimatedTotal = inboxRes.data.total || msgs.length;
-        setLoadingProgress({ loaded: msgs.length, total: estimatedTotal, phase: 'Loading emails...' });
+        const totalToLoad = exactInboxTotal || inboxRes.data.total || msgs.length;
+        setLoadingProgress({ loaded: msgs.length, total: totalToLoad, phase: `Loading ${totalToLoad.toLocaleString()} emails...` });
         // Save first page to cache
         saveToCacheBackground(account, msgs);
         // Background pagination: keep fetching remaining pages
@@ -949,9 +953,9 @@ export default function Dashboard() {
         let totalLoaded = msgs.length;
         const allMsgs = [...msgs];
         const MAX_MESSAGES = 20000;
-        if (nextToken && estimatedTotal > 200) {
+        if (nextToken && totalToLoad > 200) {
           setLoading(false); // Show first page immediately
-          setLoadingProgress({ loaded: totalLoaded, total: Math.min(estimatedTotal, MAX_MESSAGES), phase: `Loading ${Math.min(estimatedTotal, MAX_MESSAGES).toLocaleString()} emails...` });
+          setLoadingProgress({ loaded: totalLoaded, total: Math.min(totalToLoad, MAX_MESSAGES), phase: `Loading ${Math.min(totalToLoad, MAX_MESSAGES).toLocaleString()} emails...` });
         }
         while (nextToken && totalLoaded < MAX_MESSAGES) {
           const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
@@ -963,10 +967,9 @@ export default function Dashboard() {
           nextToken = pageRes.data.nextPageToken;
           // Save each page to cache as it loads
           saveToCacheBackground(account, pageMsgs);
-          // Gmail's resultSizeEstimate is often wrong — use the larger of estimate vs actual
-          const adjustedTotal = nextToken ? Math.max(estimatedTotal, totalLoaded + 200) : totalLoaded;
-          const minutesLeft = nextToken ? Math.max(1, Math.ceil((adjustedTotal - totalLoaded) / 200 * 0.5)) : 0;
-          setLoadingProgress({ loaded: totalLoaded, total: adjustedTotal, phase: nextToken ? `Loading emails... ~${minutesLeft} min remaining` : `Loaded ${totalLoaded.toLocaleString()} emails` });
+          const displayTotal = Math.max(totalToLoad, totalLoaded);
+          const minutesLeft = nextToken ? Math.max(1, Math.ceil((displayTotal - totalLoaded) / 200 * 0.5)) : 0;
+          setLoadingProgress({ loaded: totalLoaded, total: displayTotal, phase: nextToken ? `Loading emails... ~${minutesLeft} min remaining` : `Loaded ${totalLoaded.toLocaleString()} emails` });
         }
         setLoadingProgress(null);
       } else {
@@ -1036,20 +1039,22 @@ export default function Dashboard() {
       if (profileRes.success) setProfile(profileRes.data);
 
       const allMessages: GmailMessage[] = [];
-      const accountTokens: { email: string; nextPageToken?: string; estimatedTotal: number }[] = [];
-      let totalEstimate = 0;
+      const accountTokens: { email: string; nextPageToken?: string }[] = [];
+      let exactTotal = 0;
       await Promise.all(accounts.map(async (acct) => {
         setCurrentAccount(acct.email);
         try {
-          const res = await gmailGet('inbox', { q: 'in:inbox', max: '200' });
+          const [labelRes, res] = await Promise.all([
+            gmailGet('labelInfo', { labelId: 'INBOX' }),
+            gmailGet('inbox', { q: 'in:inbox', max: '200' }),
+          ]);
+          if (labelRes.success) exactTotal += labelRes.data.messagesTotal || 0;
           if (res.success && res.data?.messages) {
             const acctMsgs = res.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: acct.email }));
             allMessages.push(...acctMsgs);
             saveToCacheBackground(acct.email, acctMsgs);
-            const est = res.data.total || res.data.messages.length;
-            totalEstimate += est;
             if (res.data.nextPageToken) {
-              accountTokens.push({ email: acct.email, nextPageToken: res.data.nextPageToken, estimatedTotal: est });
+              accountTokens.push({ email: acct.email, nextPageToken: res.data.nextPageToken });
             }
           }
         } catch (e) {
@@ -1063,7 +1068,7 @@ export default function Dashboard() {
       setLoading(false);
 
       if (accountTokens.length > 0) {
-        setLoadingProgress({ loaded: allMessages.length, total: Math.min(totalEstimate, 20000 * accounts.length), phase: `Loading ${totalEstimate.toLocaleString()} emails across ${accounts.length} accounts...` });
+        setLoadingProgress({ loaded: allMessages.length, total: Math.min(exactTotal || allMessages.length, 20000 * accounts.length), phase: `Loading ${(exactTotal || allMessages.length).toLocaleString()} emails across ${accounts.length} accounts...` });
       } else {
         setLoadingProgress(null);
       }
@@ -1084,9 +1089,9 @@ export default function Dashboard() {
           loaded += pageMsgs.length;
           grandTotal += pageMsgs.length;
           nextToken = pageRes.data.nextPageToken;
-          const adjustedTotal = nextToken ? Math.max(totalEstimate, grandTotal + 200) : grandTotal;
-          const minutesLeft = nextToken ? Math.max(1, Math.ceil((adjustedTotal - grandTotal) / 200 * 0.5)) : 0;
-          setLoadingProgress({ loaded: grandTotal, total: adjustedTotal, phase: nextToken ? `Loading emails... ~${minutesLeft} min remaining` : `Loaded ${grandTotal.toLocaleString()} emails` });
+          const displayTotal = Math.max(exactTotal || 0, grandTotal);
+          const minutesLeft = nextToken ? Math.max(1, Math.ceil((displayTotal - grandTotal) / 200 * 0.5)) : 0;
+          setLoadingProgress({ loaded: grandTotal, total: displayTotal, phase: nextToken ? `Loading emails... ~${minutesLeft} min remaining` : `Loaded ${grandTotal.toLocaleString()} emails` });
         }
       }
       setCurrentAccount(savedAccount);
