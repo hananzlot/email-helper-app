@@ -592,14 +592,18 @@ export default function Dashboard() {
   }, [accounts]);
 
   // Initial load + triage on first load
+  // Re-runs when accounts populate so unified view loads all accounts
   useEffect(() => {
     if (!account) return;
     if (unified && accounts.length > 1) {
       loadUnifiedInbox(true);
+    } else if (unified && accounts.length <= 1) {
+      // Unified requested but accounts not yet loaded — load single for now
+      loadInbox(true);
     } else {
       loadInbox(true);
     }
-  }, [account, unified]);
+  }, [account, unified, accounts.length]);
 
   // Auto-refresh every 2 minutes with silent triage
   useEffect(() => {
