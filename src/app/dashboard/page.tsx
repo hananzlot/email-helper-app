@@ -303,6 +303,7 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
                     threadId={email.threadId}
                     messageId={email.id}
                     showToast={showToast}
+                    accountEmail={accountEmail}
                     onSent={() => { setReplyOpen(false); showToast('Reply sent', `To: ${email.senderEmail}`); }}
                     onCancel={() => setReplyOpen(false)}
                   />
@@ -494,10 +495,81 @@ export default function Dashboard() {
   // Email preview modal — shared across all tabs
   const [previewMessageId, setPreviewMessageId] = useState<string | null>(null);
   const [previewAccount, setPreviewAccount] = useState<string | undefined>(undefined);
+  // Global search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<GmailMessage[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   // Auth error state — show login prompt instead of auto-redirect loop
   const [authError, setAuthError] = useState(false);
   // Tab counts — each tab reports its count for display in tab bar
   const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
+
+  // Global search — searches Gmail via API across all accounts
+  async function performSearch(query: string) {
+    if (!query.trim()) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    try {
+      const allResults: GmailMessage[] = [];
+      // Gmail search query: search in sender and subject
+      const gmailQuery = `{from:${query} subject:${query}}`;
+
+      if (unified && accounts.length > 1) {
+        const savedAccount = _currentAccount;
+        for (const acct of accounts) {
+          setCurrentAccount(acct.email);
+          try {
+            const res = await gmailGet('search', { q: gmailQuery, max: '20' });
+            if (res.success && res.data?.messages) {
+              for (const msg of res.data.messages) {
+                allResults.push({ ...msg, accountEmail: acct.email });
+              }
+            }
+          } catch (e) { console.error(`Search failed for ${acct.email}:`, e); }
+        }
+        setCurrentAccount(savedAccount);
+      } else {
+        const res = await gmailGet('search', { q: gmailQuery, max: '30' });
+        if (res.success && res.data?.messages) {
+          for (const msg of res.data.messages) {
+            allResults.push({ ...msg, accountEmail: _currentAccount });
+          }
+        }
+      }
+
+      // Sort by date descending
+      allResults.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setSearchResults(allResults);
+    } catch (err) {
+      console.error('Search error:', err);
+    } finally {
+      setSearchLoading(false);
+    }
+  }
+
+  // Debounced search — triggers after 400ms of no typing
+  function handleSearchInput(value: string) {
+    setSearchQuery(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (!value.trim()) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    searchTimerRef.current = setTimeout(() => performSearch(value), 400);
+  }
+
+  function closeSearch() {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setSearchResults([]);
+  }
 
   function openPreview(messageId: string, acctEmail?: string) {
     setPreviewMessageId(messageId);
@@ -994,6 +1066,33 @@ export default function Dashboard() {
     }
   }, [account, messages.length, loadAllTabCounts]);
 
+  // Keyboard shortcuts: Cmd+K or / to focus search, Escape to close
+  useEffect(() => {
+    function handleKeydown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+        setTimeout(() => {
+          const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search"]');
+          input?.focus();
+        }, 50);
+      }
+      if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
+        e.preventDefault();
+        setSearchOpen(true);
+        setTimeout(() => {
+          const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search"]');
+          input?.focus();
+        }, 50);
+      }
+      if (e.key === 'Escape' && searchOpen) {
+        closeSearch();
+      }
+    }
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, [searchOpen]);
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'home', label: 'Home' },
     { id: 'reply-queue', label: 'Triage' },
@@ -1081,6 +1180,92 @@ export default function Dashboard() {
               </svg>
             </button>
           </div>
+        </div>
+
+        {/* Global Search Bar */}
+        <div className="relative mb-2">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#94a3b8' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => { handleSearchInput(e.target.value); if (!searchOpen) setSearchOpen(true); }}
+                onFocus={() => { if (searchQuery) setSearchOpen(true); }}
+                placeholder="Search emails by sender or subject..."
+                className="w-full pl-9 pr-8 py-2 text-sm rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-opacity-50"
+                style={{ borderColor: searchOpen ? 'var(--accent)' : 'var(--border)', background: 'white', ...(searchOpen ? { ringColor: 'var(--accent)' } : {}) }}
+              />
+              {searchQuery && (
+                <button onClick={closeSearch}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-xs hover:bg-gray-100"
+                  style={{ color: 'var(--muted)' }}>✕</button>
+              )}
+            </div>
+            {searchLoading && (
+              <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+            )}
+          </div>
+
+          {/* Search Results Dropdown */}
+          {searchOpen && searchQuery && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={closeSearch} />
+              <div className="absolute left-0 right-0 top-full mt-1 z-30 rounded-xl border shadow-2xl overflow-hidden"
+                style={{ background: 'white', borderColor: 'var(--border)', maxHeight: '60vh', overflowY: 'auto' }}>
+                {searchLoading && searchResults.length === 0 ? (
+                  <div className="p-6 text-center text-sm" style={{ color: 'var(--muted)' }}>
+                    Searching across {unified && accounts.length > 1 ? `${accounts.length} accounts` : 'your inbox'}...
+                  </div>
+                ) : searchResults.length === 0 ? (
+                  <div className="p-6 text-center text-sm" style={{ color: 'var(--muted)' }}>
+                    No results found for &quot;{searchQuery}&quot;
+                  </div>
+                ) : (
+                  <div>
+                    <div className="px-4 py-2 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--muted)', background: '#f8fafc', borderBottom: '1px solid var(--border)' }}>
+                      {searchResults.length} result{searchResults.length !== 1 ? 's' : ''}
+                      {searchLoading && ' (loading more...)'}
+                    </div>
+                    {searchResults.map((msg) => (
+                      <div key={`${msg.id}-${msg.accountEmail}`}
+                        className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                        style={{ borderBottom: '1px solid var(--border)' }}
+                        onClick={() => { openPreview(msg.id, msg.accountEmail); closeSearch(); }}>
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                          style={{ background: msg.isUnread ? 'var(--accent)' : '#94a3b8' }}>
+                          {(msg.sender || '?')[0]?.toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-sm truncate" style={{ fontWeight: msg.isUnread ? 700 : 500 }}>{msg.sender}</span>
+                            <span className="text-[10px] whitespace-nowrap flex-shrink-0" style={{ color: 'var(--muted)' }}>
+                              {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <div className="text-sm truncate" style={{ fontWeight: msg.isUnread ? 600 : 400 }}>{msg.subject}</div>
+                          <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{cleanSnippet(msg.snippet || '')}</div>
+                          {msg.accountEmail && accounts.length > 1 && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full mt-0.5 inline-block" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                              {msg.accountEmail}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-1 flex-shrink-0">
+                          <button onClick={(e) => { e.stopPropagation(); handleAction('archive', [msg.id], undefined, msg.accountEmail); setSearchResults(prev => prev.filter(r => r.id !== msg.id)); }}
+                            className="px-2 py-1 text-[10px] rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                          <button onClick={(e) => { e.stopPropagation(); handleAction('trash', [msg.id], undefined, msg.accountEmail); setSearchResults(prev => prev.filter(r => r.id !== msg.id)); }}
+                            className="px-2 py-1 text-[10px] rounded border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Tabs — pill style, responsive, with shadow separator */}
@@ -1444,8 +1629,17 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
                 <div>• <strong>Undo</strong> — after archiving or trashing, you get a 5-second window to undo. Go fast, undo if needed.</div>
                 <div>• <strong>Auto-Clean</strong> — in Priorities, enable &quot;Auto-Clean&quot; for high-tier senders whose update emails should be auto-archived during triage.</div>
                 <div>• <strong>Merge Senders</strong> — in Priorities, click &quot;Merge Senders&quot; to manually combine duplicate contacts, or use the auto-detected suggestions.</div>
+                <div>• <strong>Search</strong> — press <strong>⌘K</strong> (or <strong>/</strong>) to open global search. It searches all emails across all connected accounts by sender or subject.</div>
                 <div>• The <strong>Sent</strong> tab groups your outgoing mail into conversations — no more scrolling through duplicates.</div>
                 <div>• Triage runs automatically every 2 minutes. You can also trigger it manually from the button above.</div>
+              </div>
+            </div>
+
+            {/* Privacy & Data Policy */}
+            <div className="mt-2 p-4 rounded-xl" style={{ background: '#f0f9ff', border: '1px solid #bae6fd' }}>
+              <div className="font-semibold text-xs mb-2" style={{ color: '#0c4a6e' }}>🔒 Your Privacy</div>
+              <div className="text-xs leading-relaxed" style={{ color: '#0369a1' }}>
+                Email Helper <strong>never reads, stores, or retains the content of your emails</strong>. Full email bodies are fetched directly from Gmail in real time and are never saved to our servers. We only store minimal metadata (sender names, subject lines, and short previews) to power triage and prioritization. When you archive, trash, or de-clutter emails, those actions happen directly through the Gmail API — your email data stays in your Gmail account. You can disconnect any account at any time and all associated metadata will be removed.
               </div>
             </div>
           </div>
@@ -1459,9 +1653,10 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
 
 // ============ REPLY COMPOSER ============
 
-function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, showToast }: {
+function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, showToast, accountEmail }: {
   to: string; subject: string; threadId: string; messageId: string;
   onSent: () => void; onCancel: () => void; showToast: (title: string, subtitle?: string) => void;
+  accountEmail?: string;
 }) {
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
@@ -1469,6 +1664,11 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
   async function sendReply() {
     if (!body.trim()) return;
     setSending(true);
+    // Switch to the correct account for sending (the account the email was received on)
+    const savedAccount = _currentAccount;
+    if (accountEmail && accountEmail !== _currentAccount) {
+      setCurrentAccount(accountEmail);
+    }
     try {
       const res = await gmailPost('send', {
         to,
@@ -1478,7 +1678,7 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
         inReplyTo: messageId,
       });
       if (res.success) {
-        showToast('Reply sent', `To: ${to}`);
+        showToast('Reply sent', `To: ${to}${accountEmail ? ` (via ${accountEmail})` : ''}`);
         onSent();
       } else {
         showToast('Send failed', res.error);
@@ -1486,6 +1686,10 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
     } catch (err) {
       showToast('Send failed', String(err));
     } finally {
+      // Restore account
+      if (accountEmail && accountEmail !== savedAccount) {
+        setCurrentAccount(savedAccount);
+      }
       setSending(false);
     }
   }
@@ -1602,6 +1806,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                     threadId={msg.threadId}
                     messageId={msg.id}
                     showToast={showToast}
+                    accountEmail={(msg as unknown as Record<string, unknown>).accountEmail as string}
                     onSent={() => { setReplyingTo(null); onRefresh(); }}
                     onCancel={() => setReplyingTo(null)}
                   />
@@ -2026,6 +2231,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount,
                       threadId={q.thread_id}
                       messageId={q.message_id}
                       showToast={showToast}
+                      accountEmail={q.account_email}
                       onSent={() => { setReplyingTo(null); queueAction('archive', q.message_id, q.id, q.account_email); }}
                       onCancel={() => setReplyingTo(null)}
                     />
@@ -3757,6 +3963,9 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
   triageLoading: boolean;
   bgTaskLabel: string | null;
 }) {
+  const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
+
   async function setPrimary(email: string) {
     const res = await apiPut('accounts', { email, action: 'set_primary' });
     if (res.success) {
@@ -3764,6 +3973,19 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
       onRefresh();
     } else {
       showToast('Error', res.error);
+    }
+  }
+
+  async function disconnectAccount(email: string) {
+    setDisconnecting(true);
+    const res = await apiDelete('accounts', { email });
+    setDisconnecting(false);
+    if (res.success) {
+      showToast('Account disconnected', email);
+      setConfirmDisconnect(null);
+      onRefresh();
+    } else {
+      showToast('Error', res.error || 'Failed to disconnect');
     }
   }
 
@@ -3807,9 +4029,35 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
                       Set Primary
                     </button>
                   )}
+                  {accounts.length > 1 && (
+                    <button onClick={() => setConfirmDisconnect(a.email)}
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium text-red-600 border"
+                      style={{ borderColor: '#fca5a5' }}>
+                      Disconnect
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {/* Disconnect confirmation dialog */}
+        {confirmDisconnect && (
+          <div className="mt-4 p-4 rounded-lg border" style={{ background: '#fef2f2', borderColor: '#fca5a5' }}>
+            <p className="text-sm font-medium text-red-800 mb-2">Disconnect {confirmDisconnect}?</p>
+            <p className="text-xs text-red-700 mb-3">This will remove the account and all associated triage data and queue items. Your Gmail account itself will not be affected.</p>
+            <div className="flex gap-2">
+              <button onClick={() => disconnectAccount(confirmDisconnect)} disabled={disconnecting}
+                className="px-4 py-1.5 text-xs font-semibold rounded-lg text-white"
+                style={{ background: disconnecting ? 'var(--muted)' : '#dc2626' }}>
+                {disconnecting ? 'Disconnecting...' : 'Yes, Disconnect'}
+              </button>
+              <button onClick={() => setConfirmDisconnect(null)}
+                className="px-4 py-1.5 text-xs rounded-lg border"
+                style={{ borderColor: 'var(--border)' }}>
+                Cancel
+              </button>
+            </div>
           </div>
         )}
       </div>
