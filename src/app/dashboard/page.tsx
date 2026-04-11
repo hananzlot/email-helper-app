@@ -1861,12 +1861,38 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
+  const totalActionable = triageCount + followUpCount + snoozedCount + cleanupCount;
+  // Dynamic motivating message based on inbox state
+  const motivationMsg = totalActionable === 0
+    ? 'Inbox zero — you\'re on top of it.'
+    : triageCount === 0 && cleanupCount > 0
+    ? `Just ${cleanupCount} low-priority emails to clean up.`
+    : `${triageCount} email${triageCount !== 1 ? 's' : ''} need${triageCount === 1 ? 's' : ''} your attention.`;
+
   return (
     <div>
       {/* Daily briefing */}
-      <div className="mb-6">
+      <div className="mb-4">
         <h2 className="text-xl font-bold mb-1">{greeting}</h2>
-        <p className="text-sm" style={{ color: 'var(--muted)' }}>Here&apos;s your inbox at a glance.</p>
+        <p className="text-sm" style={{ color: 'var(--muted)' }}>{motivationMsg}</p>
+      </div>
+
+      {/* Trust strip — privacy & control at a glance */}
+      <div className="flex items-center gap-4 mb-5 py-2.5 px-4 rounded-lg" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+        <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: '#64748b' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Emails never stored
+        </div>
+        <div className="w-px h-3" style={{ background: '#cbd5e1' }} />
+        <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: '#64748b' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          Every action undoable
+        </div>
+        <div className="w-px h-3" style={{ background: '#cbd5e1' }} />
+        <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: '#64748b' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          {accounts.length} account{accounts.length !== 1 ? 's' : ''} connected
+        </div>
       </div>
 
       {/* Stats cards */}
