@@ -659,9 +659,22 @@ export default function Dashboard() {
   }
 
   function openPreview(messageId: string, acctEmail?: string) {
+    // In split mode on supported tabs, show in side panel instead of modal
+    if (layoutMode === 'split' && !isMobile && splitSupportedTabs.includes(activeTab)) {
+      setSplitPreviewId(messageId);
+      setSplitPreviewAccount(acctEmail);
+      return;
+    }
     setPreviewMessageId(messageId);
     setPreviewAccount(acctEmail);
   }
+
+  const splitSupportedTabs: Tab[] = ['inbox', 'reply-queue', 'follow-up', 'snoozed', 'cleanup', 'sent'];
+  const [splitPreviewId, setSplitPreviewId] = useState<string | null>(null);
+  const [splitPreviewAccount, setSplitPreviewAccount] = useState<string | undefined>(undefined);
+
+  // Clear split preview when switching tabs
+  useEffect(() => { setSplitPreviewId(null); setSplitPreviewAccount(undefined); }, [activeTab]);
 
   // Load account from URL params first, then cookies
   useEffect(() => {
@@ -1422,40 +1435,67 @@ export default function Dashboard() {
 
       {/* Tab content — fixed width container prevents layout shift between tabs */}
       <div className="w-full" style={{ minHeight: '60vh' }}>
-        {activeTab === 'home' && (
-          <HomeTab
-            tabCounts={tabCounts}
-            accounts={accounts}
-            onNavigate={setActiveTab}
-            onRunTriage={runTriage}
-            triageLoading={triageLoading}
-          />
-        )}
-        {activeTab === 'inbox' && layoutMode === 'split' && !isMobile ? (
-          <SplitView
-            messages={messages}
-            loading={loading}
-            onAction={handleAction}
-            onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox}
-            showToast={showToast}
-            animatingOut={animatingOut}
-            accountEmail={undefined}
-            onSnooze={snoozeFromPreview}
-          />
-        ) : activeTab === 'inbox' ? (
-          <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
-            onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} />
-        ) : null}
-        {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} />}
-        {activeTab === 'follow-up' && <FollowUpTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
-        {activeTab === 'snoozed' && <SnoozedTab onAction={handleAction} showToast={showToast} onPreview={openPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
-        {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
-        {activeTab === 'sent' && <SentMailTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} />}
-        {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
-        {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
+        {(() => {
+          const inSplitMode = layoutMode === 'split' && !isMobile && splitSupportedTabs.includes(activeTab);
+
+          // Render tab content
+          const tabContent = (
+            <>
+              {activeTab === 'home' && (
+                <HomeTab
+                  tabCounts={tabCounts}
+                  accounts={accounts}
+                  onNavigate={setActiveTab}
+                  onRunTriage={runTriage}
+                  triageLoading={triageLoading}
+                />
+              )}
+              {activeTab === 'inbox' && (
+                <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
+                  onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} />
+              )}
+              {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} />}
+              {activeTab === 'follow-up' && <FollowUpTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
+              {activeTab === 'snoozed' && <SnoozedTab onAction={handleAction} showToast={showToast} onPreview={openPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
+              {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
+              {activeTab === 'sent' && <SentMailTab accounts={accounts} unified={unified} onPreview={openPreview} showToast={showToast} />}
+              {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
+              {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
+            </>
+          );
+
+          if (!inSplitMode) return tabContent;
+
+          // Split mode: tab on left, inline preview on right
+          return (
+            <div className="flex gap-0 rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)', height: 'calc(100vh - 220px)', minHeight: 400 }}>
+              <div className="w-2/5 min-w-[320px] overflow-y-auto border-r" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
+                {tabContent}
+              </div>
+              <div className="flex-1 overflow-y-auto" style={{ background: 'var(--card)' }}>
+                {splitPreviewId ? (
+                  <InlinePreview
+                    messageId={splitPreviewId}
+                    accountEmail={splitPreviewAccount}
+                    onAction={handleAction}
+                    showToast={showToast}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full" style={{ color: 'var(--muted)' }}>
+                    <div className="text-center">
+                      <div className="text-4xl mb-3 opacity-30">📧</div>
+                      <p className="text-sm">Select an email to preview</p>
+                      <p className="text-xs mt-1">Click Preview on any item</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
-      {/* Email Preview Modal */}
+      {/* Email Preview Modal — only used in card mode */}
       {previewMessageId && <EmailPreviewModal messageId={previewMessageId} accountEmail={previewAccount} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} onSnooze={snoozeFromPreview} />}
 
       {toast && <UndoToast toast={toast} onDismiss={() => setToast(null)} />}
@@ -1965,90 +2005,6 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
           sandbox="allow-same-origin"
           title="Email content"
         />
-      </div>
-    </div>
-  );
-}
-
-// ============ SPLIT VIEW ============
-
-function SplitView({ messages, loading, onAction, onRefresh, showToast, animatingOut, accountEmail, onSnooze }: {
-  messages: GmailMessage[];
-  loading: boolean;
-  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
-  onRefresh: () => void;
-  showToast: (title: string, subtitle?: string) => void;
-  animatingOut: Record<string, 'trash' | 'delete' | 'archive'>;
-  accountEmail?: string;
-  onSnooze?: (messageId: string, hours: number, label: string, accountEmail?: string) => void;
-}) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedAccount, setSelectedAccount] = useState<string | undefined>(undefined);
-
-  const selectedMsg = messages.find(m => m.id === selectedId);
-
-  return (
-    <div className="flex gap-0 rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)', height: 'calc(100vh - 220px)', minHeight: 400 }}>
-      {/* Left panel: message list */}
-      <div className="w-2/5 min-w-[280px] border-r overflow-y-auto" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
-        <div className="sticky top-0 z-10 px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
-          <span className="text-xs font-semibold" style={{ color: 'var(--muted)' }}>{messages.length} messages</span>
-          <button onClick={onRefresh} disabled={loading} className="text-xs px-2 py-1 rounded border" style={{ borderColor: 'var(--border)' }}>
-            {loading ? '...' : 'Refresh'}
-          </button>
-        </div>
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            onClick={() => { setSelectedId(msg.id); setSelectedAccount((msg as unknown as Record<string, unknown>).accountEmail as string); }}
-            className="px-3 py-2.5 border-b cursor-pointer transition-colors"
-            style={{
-              borderColor: 'var(--border)',
-              background: selectedId === msg.id ? '#eff6ff' : (animatingOut[msg.id] ? '#fee2e2' : 'var(--card)'),
-              opacity: animatingOut[msg.id] ? 0.5 : 1,
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                style={{ background: msg.isUnread ? 'var(--accent)' : '#94a3b8' }}>
-                {msg.sender?.[0]?.toUpperCase() || '?'}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-xs font-semibold truncate" style={{ fontWeight: msg.isUnread ? 700 : 500 }}>{msg.sender}</span>
-                  <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--muted)' }}>
-                    {new Date(msg.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                  </span>
-                </div>
-                <div className="text-xs truncate" style={{ color: msg.isUnread ? 'var(--text)' : 'var(--muted)', fontWeight: msg.isUnread ? 600 : 400 }}>{msg.subject}</div>
-                <div className="text-[11px] truncate" style={{ color: 'var(--muted)' }}>{msg.snippet?.slice(0, 80)}</div>
-              </div>
-            </div>
-          </div>
-        ))}
-        {messages.length === 0 && !loading && (
-          <div className="text-center py-12 text-sm" style={{ color: 'var(--muted)' }}>No messages</div>
-        )}
-      </div>
-
-      {/* Right panel: inline email preview */}
-      <div className="flex-1 overflow-y-auto" style={{ background: 'var(--card)' }}>
-        {selectedId ? (
-          <InlinePreview
-            messageId={selectedId}
-            accountEmail={selectedAccount}
-            onAction={onAction}
-            showToast={showToast}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full" style={{ color: 'var(--muted)' }}>
-            <div className="text-center">
-              <div className="text-4xl mb-3 opacity-30">📧</div>
-              <p className="text-sm">Select an email to preview</p>
-              <p className="text-xs mt-1">Click any message on the left</p>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
