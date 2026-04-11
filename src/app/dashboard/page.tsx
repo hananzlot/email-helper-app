@@ -575,7 +575,10 @@ interface ConnectedAccount {
 }
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>('home');
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    if (typeof window !== 'undefined' && localStorage.getItem('email_helper_visited')) return 'reply-queue';
+    return 'home';
+  });
   const [layoutMode, setLayoutMode] = useState<'cards' | 'split'>('split');
   const [isMobile, setIsMobile] = useState(false);
 
@@ -1058,6 +1061,8 @@ export default function Dashboard() {
       hasLoadedRef.current = true;
       loadInbox(true, !isFirstLoad);
     }
+    // Mark user as returning so next login lands on Triage
+    if (isFirstLoad) localStorage.setItem('email_helper_visited', '1');
   }, [account, unified, accounts.length]);
 
   // Auto-refresh every 2 minutes with silent triage
