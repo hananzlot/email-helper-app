@@ -117,9 +117,13 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
     setTimeout(() => setClickedBtn(null), 600);
   }
   const iframeRef = useCallback((node: HTMLIFrameElement | null) => {
-    if (node && email?.bodyHtml) {
+    if (node && (email?.bodyHtml || email?.body)) {
       const doc = node.contentDocument;
       if (doc) {
+        // Detect if the content is actual HTML or plain text that was used as fallback
+        const content = email.bodyHtml || email.body || '';
+        const isHtml = /<[a-z][\s\S]*>/i.test(content);
+        const displayContent = isHtml ? content : content.replace(/\n/g, '<br>');
         doc.open();
         doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
           body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #1a1a1a; margin: 0; padding: 16px; word-wrap: break-word; overflow-wrap: break-word; }
@@ -128,7 +132,7 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
           table { max-width: 100%; }
           pre, code { white-space: pre-wrap; word-wrap: break-word; }
           blockquote { border-left: 3px solid #d1d5db; margin: 8px 0; padding-left: 12px; color: #6b7280; }
-        </style></head><body>${email.bodyHtml}</body></html>`);
+        </style></head><body>${displayContent}</body></html>`);
         doc.close();
         const resize = () => {
           if (node.contentDocument?.body) {
@@ -140,7 +144,7 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
         node.contentWindow?.addEventListener('load', resize);
       }
     }
-  }, [email?.bodyHtml]);
+  }, [email?.bodyHtml, email?.body]);
 
   useEffect(() => {
     (async () => {
@@ -252,7 +256,7 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
 
               {/* Email body */}
               <div className="p-5">
-                {email.bodyHtml ? (
+                {(email.bodyHtml || email.body) ? (
                   <iframe
                     ref={iframeRef}
                     sandbox="allow-same-origin"
@@ -260,10 +264,6 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
                     style={{ borderColor: 'var(--border)', background: 'white', minHeight: 150 }}
                     title="Email content"
                   />
-                ) : email.body ? (
-                  <pre className="text-sm overflow-auto" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', lineHeight: 1.6 }}>
-                    {email.body}
-                  </pre>
                 ) : (
                   <div className="text-sm text-center py-8" style={{ color: 'var(--muted)' }}>No body content</div>
                 )}
@@ -302,6 +302,15 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
               style={{ borderColor: 'var(--border)', background: clickedBtn === 'markRead' ? '#dbeafe' : undefined, color: clickedBtn === 'markRead' ? '#1e40af' : undefined }}>
               {clickedBtn === 'markRead' ? 'Marked read!' : (email.isUnread ? 'Mark Read' : 'Mark Unread')}
+            </button>
+            <button onClick={() => flashAction('followUp', async () => {
+              // Add INBOX label + mark unread so it appears in inbox as a reminder
+              onAction('addLabel', [messageId], 'INBOX', accountEmail || _currentAccount);
+              onAction('markUnread', [messageId], undefined, accountEmail || _currentAccount);
+            })}
+              className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
+              style={{ borderColor: 'var(--border)', background: clickedBtn === 'followUp' ? '#dbeafe' : undefined, color: clickedBtn === 'followUp' ? '#1e40af' : '#2563eb' }}>
+              {clickedBtn === 'followUp' ? 'Added to Inbox!' : 'Follow Up'}
             </button>
             <button onClick={() => flashAction('star', () => { onAction('star', [messageId], undefined, accountEmail || _currentAccount); })}
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
@@ -673,6 +682,7 @@ export default function Dashboard() {
           archive: 'Archived', trash: 'Trashed', delete: 'Deleted',
           markRead: 'Marked read', markUnread: 'Marked unread',
           star: 'Starred', unstar: 'Unstarred',
+          addLabel: 'Label added', removeLabel: 'Label removed',
         };
         showToast(actionLabels[action] || action, `${messageIds.length} message${messageIds.length > 1 ? 's' : ''}`);
         // Animate out for destructive actions
@@ -1656,6 +1666,26 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
 
 // ============ SENT MAIL TAB ============
 
+// Normalize subject: strip Re:/Fwd:/FW: prefixes for conversation grouping
+function normalizeSubject(subject: string): string {
+  return (subject || '(no subject)').replace(/^(re|fwd|fw)\s*:\s*/gi, '').replace(/^(re|fwd|fw)\s*:\s*/gi, '').trim() || '(no subject)';
+}
+
+// Extract clean email from "Name <email>" or just "email"
+function extractEmail(to: string): string {
+  const match = to.match(/<([^>]+)>/);
+  return (match ? match[1] : to).toLowerCase().trim();
+}
+
+interface ConversationGroup {
+  normalizedSubject: string;
+  messages: GmailMessage[];
+  recipients: { name: string; email: string }[];
+  mostRecent: GmailMessage;
+  hasAwaiting: boolean;
+  totalSent: number;
+}
+
 function SentMailTab({ accounts, unified, onPreview, showToast }: {
   accounts: ConnectedAccount[];
   unified: boolean;
@@ -1664,8 +1694,9 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
 }) {
   const [sentMessages, setSentMessages] = useState<GmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'chronological' | 'grouped'>('chronological');
+  const [viewMode, setViewMode] = useState<'conversations' | 'recipients'>('conversations');
   const [senderPriorities, setSenderPriorities] = useState<Record<string, number>>({});
+  const [expandedConvo, setExpandedConvo] = useState<string | null>(null);
 
   useEffect(() => { loadSentMail(); }, []);
 
@@ -1719,31 +1750,56 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
   function isAwaitingReply(msg: GmailMessage): boolean {
     const sentDate = new Date(msg.date);
     const hoursSince = (Date.now() - sentDate.getTime()) / (1000 * 60 * 60);
-    // Only flag if sent > 24h ago and it's a direct email (not a reply chain where we're the last)
     if (hoursSince < 24) return false;
-    // Simple heuristic: if subject starts with "Re:" we already replied to something,
-    // but it could still be awaiting response. Flag anything > 48h.
     if (hoursSince > 48) return true;
-    // Between 24-48h, only flag non-reply messages
     return !msg.subject?.startsWith('Re:');
   }
 
-  // Group by recipient
+  // Build conversation groups by normalized subject
+  const conversationMap: Record<string, ConversationGroup> = {};
+  for (const msg of sentMessages) {
+    const normSubj = normalizeSubject(msg.subject);
+    if (!conversationMap[normSubj]) {
+      conversationMap[normSubj] = {
+        normalizedSubject: normSubj,
+        messages: [],
+        recipients: [],
+        mostRecent: msg,
+        hasAwaiting: false,
+        totalSent: 0,
+      };
+    }
+    const group = conversationMap[normSubj];
+    group.messages.push(msg);
+    group.totalSent++;
+    if (isAwaitingReply(msg)) group.hasAwaiting = true;
+    // Track unique recipients
+    const toField = (msg as any).to || '';
+    const toEmail = extractEmail(toField);
+    const toName = toField.split('<')[0]?.replace(/"/g, '').trim() || toEmail;
+    if (toEmail && !group.recipients.find(r => r.email === toEmail)) {
+      group.recipients.push({ name: toName, email: toEmail });
+    }
+    // Keep most recent
+    if (new Date(msg.date) > new Date(group.mostRecent.date)) {
+      group.mostRecent = msg;
+    }
+  }
+  const conversations = Object.values(conversationMap).sort(
+    (a, b) => new Date(b.mostRecent.date).getTime() - new Date(a.mostRecent.date).getTime()
+  );
+
+  // Group by recipient for the "By Recipient" view
   const recipientGroups: Record<string, { name: string; email: string; messages: GmailMessage[] }> = {};
   for (const msg of sentMessages) {
-    // For sent mail, "sender" is us — we want to group by recipient (stored in "to" or we parse from snippet)
-    // The Gmail search returns messages where senderEmail is us. The "to" field isn't in the list view.
-    // We'll use senderEmail as a fallback key and group by thread subject prefix
-    const recipientKey = msg.senderEmail?.toLowerCase() || 'unknown';
-    // Actually for sent mail via search, the API returns the message metadata.
-    // Let's group by the first word of the subject to approximate recipient grouping
-    // Better: use the "to" header if available from the message
-    const toEmail = (msg as any).to?.toLowerCase() || recipientKey;
-    const toName = (msg as any).to?.split('<')[0]?.trim() || msg.sender || toEmail;
-    if (!recipientGroups[toEmail]) {
-      recipientGroups[toEmail] = { name: toName, email: toEmail, messages: [] };
+    const toField = (msg as any).to || '';
+    const toEmail = extractEmail(toField);
+    const toName = toField.split('<')[0]?.replace(/"/g, '').trim() || msg.sender || toEmail;
+    const key = toEmail || 'unknown';
+    if (!recipientGroups[key]) {
+      recipientGroups[key] = { name: toName, email: key, messages: [] };
     }
-    recipientGroups[toEmail].messages.push(msg);
+    recipientGroups[key].messages.push(msg);
   }
   const groups = Object.values(recipientGroups).sort((a, b) => b.messages.length - a.messages.length);
 
@@ -1762,12 +1818,19 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
 
   const awaitingCount = sentMessages.filter(isAwaitingReply).length;
 
+  // Get aggregate sent count for a list of recipient emails
+  function getSentCount(emails: string[]): number {
+    let total = 0;
+    for (const e of emails) total += senderPriorities[e.toLowerCase()] || 0;
+    return total;
+  }
+
   return (
     <div>
       {/* Header bar */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <p className="text-sm font-semibold">{sentMessages.length} sent messages</p>
+          <p className="text-sm font-semibold">{conversations.length} conversations ({sentMessages.length} messages)</p>
           {awaitingCount > 0 && (
             <span className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ background: '#fef3c7', color: '#92400e' }}>
               {awaitingCount} awaiting reply
@@ -1775,14 +1838,14 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
           )}
         </div>
         <div className="flex gap-2">
-          <button onClick={() => setViewMode('chronological')}
+          <button onClick={() => setViewMode('conversations')}
             className="px-3 py-1 text-xs rounded-full border font-medium"
-            style={{ background: viewMode === 'chronological' ? 'var(--accent)' : 'transparent', color: viewMode === 'chronological' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
-            Timeline
+            style={{ background: viewMode === 'conversations' ? 'var(--accent)' : 'transparent', color: viewMode === 'conversations' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
+            Conversations
           </button>
-          <button onClick={() => setViewMode('grouped')}
+          <button onClick={() => setViewMode('recipients')}
             className="px-3 py-1 text-xs rounded-full border font-medium"
-            style={{ background: viewMode === 'grouped' ? 'var(--accent)' : 'transparent', color: viewMode === 'grouped' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
+            style={{ background: viewMode === 'recipients' ? 'var(--accent)' : 'transparent', color: viewMode === 'recipients' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
             By Recipient
           </button>
           <button onClick={loadSentMail}
@@ -1793,52 +1856,99 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
         </div>
       </div>
 
-      {/* Chronological view */}
-      {viewMode === 'chronological' && (
+      {/* Conversations view — grouped by normalized subject */}
+      {viewMode === 'conversations' && (
         <div className="flex flex-col gap-2">
-          {sentMessages.map((msg) => {
-            const awaiting = isAwaitingReply(msg);
-            const replyCount = senderPriorities[(msg as any).to?.toLowerCase()?.replace(/.*</, '').replace(/>.*/, '')] || 0;
+          {conversations.map((convo) => {
+            const isExpanded = expandedConvo === convo.normalizedSubject;
+            const sentCount = getSentCount(convo.recipients.map(r => r.email));
+            const recipientList = convo.recipients.map(r => r.name || r.email).join(', ');
+            const latestMsg = convo.mostRecent;
             return (
-              <div key={msg.id} className="p-4 rounded-xl border cursor-pointer hover:shadow-sm transition-shadow"
-                onClick={() => onPreview(msg.id, msg.accountEmail)}
+              <div key={convo.normalizedSubject} className="rounded-xl border overflow-hidden transition-shadow hover:shadow-sm"
                 style={{
-                  background: awaiting ? '#fffbeb' : 'var(--card)',
-                  borderColor: awaiting ? '#fbbf24' : 'var(--border)',
-                  borderLeftWidth: awaiting ? 4 : 1,
-                  borderLeftColor: awaiting ? '#f59e0b' : 'var(--border)',
+                  background: convo.hasAwaiting ? '#fffbeb' : 'var(--card)',
+                  borderColor: convo.hasAwaiting ? '#fbbf24' : 'var(--border)',
+                  borderLeftWidth: convo.hasAwaiting ? 4 : 1,
+                  borderLeftColor: convo.hasAwaiting ? '#f59e0b' : 'var(--border)',
                 }}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-sm truncate">To: {(msg as any).to || msg.sender || 'Unknown'}</span>
-                      {awaiting && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap" style={{ background: '#fef3c7', color: '#92400e' }}>
-                          Awaiting reply
+                {/* Conversation header — click to expand */}
+                <div className="p-4 cursor-pointer" onClick={() => setExpandedConvo(isExpanded ? null : convo.normalizedSubject)}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">To: {recipientList}</span>
+                        {convo.recipients.length > 1 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#e0f2fe', color: '#075985' }}>
+                            {convo.recipients.length} recipients
+                          </span>
+                        )}
+                        {convo.hasAwaiting && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap" style={{ background: '#fef3c7', color: '#92400e' }}>
+                            Awaiting reply
+                          </span>
+                        )}
+                        {sentCount > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#ede9fe', color: '#6366f1' }}>
+                            {sentCount} emails sent
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-sm font-medium truncate">{convo.normalizedSubject}</span>
+                        {convo.totalSent > 1 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap flex-shrink-0" style={{ background: '#f0fdf4', color: '#166534' }}>
+                            {convo.totalSent} messages
+                          </span>
+                        )}
+                        <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                          {new Date(latestMsg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                         </span>
-                      )}
-                      {replyCount > 0 && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#ede9fe', color: '#6366f1' }}>
-                          {replyCount} exchanges
-                        </span>
+                      </div>
+                      <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(latestMsg.snippet || '')}</div>
+                      {latestMsg.accountEmail && accounts.length > 1 && (
+                        <div className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>via {latestMsg.accountEmail}</div>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-sm font-medium truncate">{msg.subject || '(no subject)'}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0" style={{ background: '#f1f5f9', color: '#64748b' }}>
-                        {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                      </span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {convo.totalSent > 1 && (
+                        <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{isExpanded ? '▲' : '▼'}</span>
+                      )}
+                      <button onClick={(e) => { e.stopPropagation(); onPreview(latestMsg.id, latestMsg.accountEmail); }}
+                        className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                        Preview
+                      </button>
                     </div>
-                    <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet || '')}</div>
-                    {msg.accountEmail && accounts.length > 1 && (
-                      <div className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>via {msg.accountEmail}</div>
-                    )}
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); onPreview(msg.id, msg.accountEmail); }}
-                    className="px-2 py-1 text-xs rounded-lg border flex-shrink-0" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                    Preview
-                  </button>
                 </div>
+                {/* Expanded messages within conversation */}
+                {isExpanded && convo.messages.length > 1 && (
+                  <div className="border-t divide-y" style={{ borderColor: 'var(--border)' }}>
+                    {convo.messages.map((msg, idx) => (
+                      <div key={msg.id} className="px-4 py-2.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition-colors"
+                        onClick={() => onPreview(msg.id, msg.accountEmail)}>
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0" style={{ background: 'var(--accent)' }}>
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-medium">To: {(msg as any).to || 'Unknown'}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                              {msg.subject?.startsWith('Fwd:') || msg.subject?.startsWith('FW:') ? 'Forwarded' : msg.subject?.startsWith('Re:') ? 'Reply' : 'New'}
+                            </span>
+                            {isAwaitingReply(msg) && (
+                              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#f59e0b' }} />
+                            )}
+                          </div>
+                          <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet || '')}</div>
+                        </div>
+                        <span className="text-[10px] whitespace-nowrap flex-shrink-0" style={{ color: 'var(--muted)' }}>
+                          {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1846,10 +1956,10 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
       )}
 
       {/* Grouped by recipient view */}
-      {viewMode === 'grouped' && (
+      {viewMode === 'recipients' && (
         <div className="flex flex-col gap-3">
           {groups.map((group) => {
-            const replyCount = senderPriorities[group.email.replace(/.*</, '').replace(/>.*/, '')] || 0;
+            const sentCount = senderPriorities[group.email.replace(/.*</, '').replace(/>.*/, '')] || 0;
             const hasAwaiting = group.messages.some(isAwaitingReply);
             return (
               <div key={group.email} className="rounded-xl border overflow-hidden" style={{ background: 'var(--card)', borderColor: hasAwaiting ? '#fbbf24' : 'var(--border)' }}>
@@ -1864,9 +1974,9 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
                         <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: '#e0f2fe', color: '#075985' }}>
                           {group.messages.length} sent
                         </span>
-                        {replyCount > 0 && (
+                        {sentCount > 0 && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: '#ede9fe', color: '#6366f1' }}>
-                            {replyCount} exchanges
+                            {sentCount} emails sent
                           </span>
                         )}
                         {hasAwaiting && (
@@ -1914,6 +2024,60 @@ function SentMailTab({ accounts, unified, onPreview, showToast }: {
 
 // ============ PRIORITIES TAB ============
 
+// Detect potential duplicate senders by name similarity
+function findSenderDuplicates(senders: any[]): { primary: any; secondary: any; reason: string }[] {
+  const suggestions: { primary: any; secondary: any; reason: string }[] = [];
+  const seen = new Set<string>();
+
+  // Group by normalized first name
+  const nameGroups: Record<string, any[]> = {};
+  for (const s of senders) {
+    const name = (s.display_name || '').toLowerCase().replace(/[^a-z\s]/g, '').trim();
+    const firstName = name.split(/\s+/)[0];
+    if (!firstName || firstName.length < 3) continue;
+    if (!nameGroups[firstName]) nameGroups[firstName] = [];
+    nameGroups[firstName].push(s);
+  }
+
+  // Check groups with 2+ senders for likely duplicates
+  for (const [, group] of Object.entries(nameGroups)) {
+    if (group.length < 2) continue;
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const a = group[i];
+        const b = group[j];
+        const key = [a.sender_email, b.sender_email].sort().join('|');
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        // Check if same domain or same last name
+        const aDomain = a.sender_email.split('@')[1]?.toLowerCase();
+        const bDomain = b.sender_email.split('@')[1]?.toLowerCase();
+        const aName = (a.display_name || '').toLowerCase().trim();
+        const bName = (b.display_name || '').toLowerCase().trim();
+        const aLast = aName.split(/\s+/).slice(1).join(' ');
+        const bLast = bName.split(/\s+/).slice(1).join(' ');
+
+        let reason = '';
+        if (aLast && bLast && aLast === bLast) {
+          reason = `Same name "${a.display_name}"`;
+        } else if (aDomain === bDomain && aName === bName) {
+          reason = `Same name, same domain`;
+        } else if (aLast && bLast && (aLast.includes(bLast) || bLast.includes(aLast))) {
+          reason = `Similar name "${a.display_name}" / "${b.display_name}"`;
+        }
+
+        if (reason) {
+          // Primary = the one with more replies
+          const [primary, secondary] = (a.reply_count || 0) >= (b.reply_count || 0) ? [a, b] : [b, a];
+          suggestions.push({ primary, secondary, reason });
+        }
+      }
+    }
+  }
+  return suggestions;
+}
+
 function PrioritiesTab({ onScanSent, scanning, showToast }: {
   onScanSent: () => void; scanning: boolean;
   showToast: (title: string, subtitle?: string) => void;
@@ -1929,6 +2093,8 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [senderEmails, setSenderEmails] = useState<any[]>([]);
   const [senderEmailsLoading, setSenderEmailsLoading] = useState(false);
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
+  const [merging, setMerging] = useState<string | null>(null);
 
   useEffect(() => { loadData(); }, []);
 
@@ -1998,6 +2164,22 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
     } else {
       showToast('Error', res.error);
     }
+  }
+
+  async function mergeSenders(primaryEmail: string, secondaryEmail: string) {
+    setMerging(`${primaryEmail}|${secondaryEmail}`);
+    try {
+      const res = await apiPut('senders', { action: 'merge', primary_email: primaryEmail, secondary_email: secondaryEmail });
+      if (res.success) {
+        showToast('Senders merged', `${secondaryEmail} → ${primaryEmail}`);
+        loadData();
+      } else {
+        showToast('Error', res.error);
+      }
+    } catch (e) {
+      showToast('Error', String(e));
+    }
+    setMerging(null);
   }
 
   async function adjustRule(id: string, delta: number) {
@@ -2084,6 +2266,56 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
           })}
         </div>
 
+        {/* Sender linking suggestions */}
+        {(() => {
+          const suggestions = findSenderDuplicates(senders).filter(s => {
+            const key = [s.primary.sender_email, s.secondary.sender_email].sort().join('|');
+            return !dismissedSuggestions.has(key);
+          });
+          if (suggestions.length === 0) return null;
+          return (
+            <div className="mb-4 rounded-xl border p-4" style={{ background: '#fefce8', borderColor: '#fbbf24' }}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm font-semibold" style={{ color: '#92400e' }}>Possible duplicate senders detected</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: '#fef3c7', color: '#92400e' }}>
+                  {suggestions.length} suggestion{suggestions.length > 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="flex flex-col gap-2">
+                {suggestions.slice(0, 5).map((s) => {
+                  const key = [s.primary.sender_email, s.secondary.sender_email].sort().join('|');
+                  const isMerging = merging === key;
+                  return (
+                    <div key={key} className="flex items-center justify-between p-3 rounded-lg border" style={{ background: 'white', borderColor: '#fde68a' }}>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs mb-1" style={{ color: '#92400e' }}>{s.reason}</div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="font-medium">{s.primary.display_name}</span>
+                          <span className="text-xs" style={{ color: 'var(--muted)' }}>{s.primary.sender_email} ({s.primary.reply_count})</span>
+                          <span style={{ color: 'var(--muted)' }}>&amp;</span>
+                          <span className="font-medium">{s.secondary.display_name}</span>
+                          <span className="text-xs" style={{ color: 'var(--muted)' }}>{s.secondary.sender_email} ({s.secondary.reply_count})</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0 ml-3">
+                        <button onClick={() => mergeSenders(s.primary.sender_email, s.secondary.sender_email)}
+                          disabled={!!isMerging}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg text-white" style={{ background: isMerging ? 'var(--muted)' : '#16a34a' }}>
+                          {isMerging ? 'Merging...' : 'Merge'}
+                        </button>
+                        <button onClick={() => setDismissedSuggestions(prev => new Set([...prev, key]))}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         {filteredSenders.length === 0 ? (
           <p className="text-sm py-8 text-center" style={{ color: 'var(--muted)' }}>
             {senders.length === 0 ? 'No sender data yet. Click "Scan Sent Mail" to learn who you reply to most.' : 'No senders in this tier.'}
@@ -2092,7 +2324,7 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
           <div style={{ maxHeight: 400, overflowY: 'auto' }}>
             <table className="w-full text-sm">
               <thead><tr className="text-xs uppercase" style={{ color: 'var(--muted)' }}>
-                <th className="text-left p-2">Sender</th><th className="p-2 text-center">Replies</th><th className="p-2">Tier</th><th className="p-2"></th>
+                <th className="text-left p-2">Sender</th><th className="p-2 text-center">Emails Sent</th><th className="p-2">Tier</th><th className="p-2"></th>
               </tr></thead>
               <tbody>
                 {filteredSenders.slice(0, 100).map((s: any) => {

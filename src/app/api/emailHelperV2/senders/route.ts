@@ -63,8 +63,9 @@ export async function POST(request: NextRequest) {
 
 /**
  * PUT /api/emailHelperV2/senders
- * Update a sender's tier
+ * Update a sender's tier, or merge two senders
  * Body: { sender_email: string, tier: 'A' | 'B' | 'C' | 'D' }
+ * OR:   { action: 'merge', primary_email: string, secondary_email: string }
  */
 export async function PUT(request: NextRequest) {
   const { userId } = getRequestContext(request);
@@ -72,11 +73,58 @@ export async function PUT(request: NextRequest) {
 
   try {
     const body = await request.json();
+    const admin = createSupabaseAdmin();
+
+    // Merge action: combine two senders into one
+    if (body.action === 'merge') {
+      const { primary_email, secondary_email } = body;
+      if (!primary_email || !secondary_email) return apiError('Missing primary_email or secondary_email');
+
+      // Fetch both senders
+      const [primaryRes, secondaryRes] = await Promise.all([
+        admin.from(TABLES.SENDER_PRIORITIES).select('*').eq('user_id', userId).eq('sender_email', primary_email).single(),
+        admin.from(TABLES.SENDER_PRIORITIES).select('*').eq('user_id', userId).eq('sender_email', secondary_email).single(),
+      ]);
+
+      if (!primaryRes.data && !secondaryRes.data) return apiError('Neither sender found');
+
+      const primary = primaryRes.data || secondaryRes.data;
+      const secondary = secondaryRes.data || primaryRes.data;
+
+      // Merge: add reply counts, keep higher tier, combine accounts_seen
+      const tierRank: Record<string, number> = { A: 4, B: 3, C: 2, D: 1 };
+      const bestTier = (tierRank[primary.tier] || 0) >= (tierRank[secondary.tier] || 0) ? primary.tier : secondary.tier;
+      const combinedCount = (primary.reply_count || 0) + (secondary.reply_count || 0);
+      const combinedAccounts = [...new Set([...(primary.accounts_seen || []), ...(secondary.accounts_seen || [])])];
+      const aliases = [...new Set([...(primary.aliases || []), secondary.sender_email])];
+
+      // Update primary with merged data
+      await admin.from(TABLES.SENDER_PRIORITIES)
+        .update({
+          reply_count: combinedCount,
+          tier: bestTier,
+          accounts_seen: combinedAccounts,
+          aliases: aliases,
+          display_name: primary.display_name || secondary.display_name,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId)
+        .eq('sender_email', primary.sender_email);
+
+      // Delete the secondary
+      await admin.from(TABLES.SENDER_PRIORITIES)
+        .delete()
+        .eq('user_id', userId)
+        .eq('sender_email', secondary.sender_email);
+
+      return apiSuccess({ merged: true, primary: primary.sender_email, removed: secondary.sender_email, combined_count: combinedCount });
+    }
+
+    // Regular tier update
     const { sender_email, tier, display_name } = body;
     if (!sender_email || !tier) return apiError('Missing sender_email or tier');
     if (!['A', 'B', 'C', 'D'].includes(tier)) return apiError('Tier must be A, B, C, or D');
 
-    const admin = createSupabaseAdmin();
     // Upsert so it works for both known and unknown senders
     const { data, error } = await admin
       .from(TABLES.SENDER_PRIORITIES)
