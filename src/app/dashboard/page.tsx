@@ -406,6 +406,8 @@ export default function Dashboard() {
   const [userId, setUserId] = useState<string>('');
   // Track which messages are animating out and their animation type
   const [animatingOut, setAnimatingOut] = useState<Record<string, 'trash' | 'delete' | 'archive'>>({});
+  // Unified view — shows all accounts merged (default)
+  const [unified, setUnified] = useState(true);
   // Email preview modal — shared across all tabs
   const [previewMessageId, setPreviewMessageId] = useState<string | null>(null);
   const [previewAccount, setPreviewAccount] = useState<string | undefined>(undefined);
@@ -456,20 +458,33 @@ export default function Dashboard() {
   }
 
   function switchAccount(newAccount: string) {
+    setUnified(false);
     setAccount(newAccount);
     setCurrentAccount(newAccount);
     document.cookie = `email_helper_account=${newAccount};path=/;max-age=${60*60*24*30};samesite=lax`;
     setMessages([]);
     setProfile(null);
     showToast('Switched account', newAccount);
-    // loadInbox will fire from the account useEffect
+  }
+
+  function switchToUnified() {
+    setUnified(true);
+    setMessages([]);
+    setProfile(null);
+    showToast('Unified view', 'Showing all accounts');
+    loadUnifiedInbox();
   }
 
   useEffect(() => {
     if (!account) return;
-    loadInbox();
-  }, [account]);
+    if (unified && accounts.length > 1) {
+      loadUnifiedInbox();
+    } else {
+      loadInbox();
+    }
+  }, [account, unified]);
 
+  // Load inbox for a single account
   const loadInbox = useCallback(async () => {
     setLoading(true);
     try {
@@ -477,16 +492,15 @@ export default function Dashboard() {
         gmailGet('profile'),
         gmailGet('inbox', { q: 'in:inbox', max: '50' }),
       ]);
-      // If not authenticated, redirect to login
       if (!profileRes.success && (profileRes.error?.includes('Not authenticated') || profileRes.error?.includes('auth failed'))) {
         window.location.href = '/api/emailHelperV2/auth/login';
         return;
       }
       if (profileRes.success) setProfile(profileRes.data);
       if (inboxRes.success && inboxRes.data?.messages) {
-        setMessages(inboxRes.data.messages);
+        const msgs = inboxRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
+        setMessages(msgs);
       } else {
-        console.error('Inbox load failed:', inboxRes);
         setMessages([]);
       }
     } catch (err) {
@@ -494,7 +508,50 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [account]);
+
+  // Load inbox from ALL accounts and merge
+  const loadUnifiedInbox = useCallback(async () => {
+    if (accounts.length === 0) return;
+    setLoading(true);
+    try {
+      // Fetch profile from primary/first account
+      const savedAccount = _currentAccount;
+      const primaryAcct = accounts.find(a => a.is_primary)?.email || accounts[0].email;
+      setCurrentAccount(primaryAcct);
+      const profileRes = await gmailGet('profile');
+      if (!profileRes.success && (profileRes.error?.includes('Not authenticated') || profileRes.error?.includes('auth failed'))) {
+        window.location.href = '/api/emailHelperV2/auth/login';
+        return;
+      }
+      if (profileRes.success) setProfile(profileRes.data);
+
+      // Fetch inbox from each account in parallel
+      const allMessages: GmailMessage[] = [];
+      await Promise.all(accounts.map(async (acct) => {
+        setCurrentAccount(acct.email);
+        try {
+          const res = await gmailGet('inbox', { q: 'in:inbox', max: '30' });
+          if (res.success && res.data?.messages) {
+            for (const msg of res.data.messages) {
+              allMessages.push({ ...msg, accountEmail: acct.email });
+            }
+          }
+        } catch (e) {
+          console.error(`Failed to load inbox for ${acct.email}:`, e);
+        }
+      }));
+
+      // Sort merged messages by date (newest first)
+      allMessages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setMessages(allMessages);
+      setCurrentAccount(savedAccount);
+    } catch (err) {
+      console.error('Failed to load unified inbox:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [accounts]);
 
   function showToast(title: string, subtitle?: string) {
     setToast({ title, subtitle });
@@ -611,14 +668,18 @@ export default function Dashboard() {
           <p className="text-sm" style={{ color: 'var(--muted)' }}>Inbox Command Center</p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Account Switcher */}
+          {/* Account Switcher with Unified toggle */}
           {accounts.length > 1 ? (
             <select
-              value={account}
-              onChange={(e) => switchAccount(e.target.value)}
+              value={unified ? '__unified__' : account}
+              onChange={(e) => {
+                if (e.target.value === '__unified__') switchToUnified();
+                else switchAccount(e.target.value);
+              }}
               className="text-sm px-3 py-2 rounded-lg border font-medium appearance-none cursor-pointer"
-              style={{ background: 'var(--normal-bg)', borderColor: 'var(--border)', color: '#065f46' }}
+              style={{ background: unified ? '#ede9fe' : 'var(--normal-bg)', borderColor: unified ? '#8b5cf6' : 'var(--border)', color: unified ? '#5b21b6' : '#065f46' }}
             >
+              <option value="__unified__">All Accounts (Unified)</option>
               {accounts.map((a) => (
                 <option key={a.email} value={a.email}>
                   {a.email}{a.is_primary ? ' ★' : ''}
@@ -660,10 +721,10 @@ export default function Dashboard() {
 
       {activeTab === 'inbox' && (
         <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
-          onAction={handleAction} onRefresh={loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={(id) => openPreview(id, account)} />
+          onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} />
       )}
       {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} />}
-      {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={(id) => openPreview(id, account)} />}
+      {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} />}
       {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
       {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} />}
 
@@ -744,10 +805,10 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
 
 function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast, animatingOut, onPreview }: {
   messages: GmailMessage[]; loading: boolean; actionLoading: string | null;
-  onAction: (action: string, ids: string[], label?: string) => void; onRefresh: () => void;
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; onRefresh: () => void;
   showToast: (title: string, subtitle?: string) => void;
   animatingOut: Record<string, 'trash' | 'delete' | 'archive'>;
-  onPreview: (messageId: string) => void;
+  onPreview: (messageId: string, accountEmail?: string) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -787,7 +848,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
               style={{ background: selected.has(msg.id) ? '#eff6ff' : 'var(--card)', borderColor: selected.has(msg.id) ? 'var(--accent)' : 'var(--border)', opacity: actionLoading === msg.id ? 0.5 : 1 }}>
               <div className="flex items-start gap-3 p-4">
                 <input type="checkbox" checked={selected.has(msg.id)} onChange={() => toggleSelect(msg.id)} className="mt-1 rounded" />
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onPreview(msg.id)}>
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onPreview(msg.id, msg.accountEmail)}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-sm truncate">{msg.sender}</span>
                     <div className="flex items-center gap-2">
@@ -796,7 +857,10 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                     </div>
                   </div>
                   <div className="text-sm font-medium truncate">{msg.subject}</div>
-                  <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet)}</div>
+                  <div className="text-xs truncate mt-0.5" style={{ color: 'var(--muted)' }}>
+                    {msg.accountEmail && <span className="inline-block mr-1 px-1.5 py-0 rounded text-[9px] font-medium" style={{ background: '#f3f4f6', color: '#6b7280' }}>{msg.accountEmail.split('@')[0]}</span>}
+                    {decodeHtmlEntities(msg.snippet)}
+                  </div>
                 </div>
               </div>
               {/* Action bar */}
@@ -1121,7 +1185,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string) => void; }) {
+function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'count' | 'name'>('count');
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
@@ -1376,7 +1440,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview }: { messages: Gm
                         <div className="flex items-center gap-2 flex-1 min-w-0 mr-2">
                           <input type="checkbox" checked={isMsgSelected} onChange={() => toggleMessage(msg.id)}
                             disabled={isGroupSelected} className="rounded flex-shrink-0" style={{ accentColor: 'var(--accent)' }} />
-                          <div className="min-w-0 cursor-pointer" onClick={() => onPreview(msg.id)}>
+                          <div className="min-w-0 cursor-pointer" onClick={() => onPreview(msg.id, msg.accountEmail)}>
                             <div className="font-medium truncate hover:underline">{msg.subject}</div>
                             <div className="truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet)}</div>
                           </div>

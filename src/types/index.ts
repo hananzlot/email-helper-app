@@ -47,6 +47,7 @@ export interface GmailMessage {
   to?: string;
   cc?: string;
   attachments?: GmailAttachment[];
+  accountEmail?: string; // Which account this message belongs to (for unified view)
 }
 
 export interface GmailDraft {
