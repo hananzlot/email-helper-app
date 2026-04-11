@@ -97,10 +97,11 @@ function decodeHtmlEntities(text: string): string {
   return text.replace(/&(?:#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match) => entities[match] || match);
 }
 
-function EmailPreviewModal({ messageId, onClose, onAction, showToast }: {
+function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToast }: {
   messageId: string;
+  accountEmail?: string;
   onClose: () => void;
-  onAction: (action: string, ids: string[], label?: string) => void;
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
 }) {
   const [email, setEmail] = useState<any>(null);
@@ -138,14 +139,25 @@ function EmailPreviewModal({ messageId, onClose, onAction, showToast }: {
     (async () => {
       setLoading(true);
       setError('');
+      // Temporarily switch to the correct account if needed
+      const savedAccount = _currentAccount;
+      if (accountEmail && accountEmail !== _currentAccount) {
+        setCurrentAccount(accountEmail);
+      }
       try {
         const res = await gmailGet('message', { id: messageId, format: 'full' });
         if (res.success) setEmail(res.data);
         else setError(res.error || 'Failed to load email');
       } catch (e) { setError(String(e)); }
-      finally { setLoading(false); }
+      finally {
+        // Restore original account
+        if (accountEmail && accountEmail !== savedAccount) {
+          setCurrentAccount(savedAccount);
+        }
+        setLoading(false);
+      }
     })();
-  }, [messageId]);
+  }, [messageId, accountEmail]);
 
   // Close on Escape
   useEffect(() => {
@@ -268,15 +280,15 @@ function EmailPreviewModal({ messageId, onClose, onAction, showToast }: {
               className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
               {replyOpen ? 'Cancel Reply' : 'Reply'}
             </button>
-            <button onClick={() => { onAction('archive', [messageId]); onClose(); }}
+            <button onClick={() => { onAction('archive', [messageId], undefined, accountEmail); onClose(); }}
               className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
-            <button onClick={() => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId]); }}
+            <button onClick={() => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId], undefined, accountEmail); }}
               className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
               {email.isUnread ? 'Mark Read' : 'Mark Unread'}
             </button>
-            <button onClick={() => { onAction('star', [messageId]); }}
+            <button onClick={() => { onAction('star', [messageId], undefined, accountEmail); }}
               className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
-            <button onClick={() => { onAction('trash', [messageId]); onClose(); }}
+            <button onClick={() => { onAction('trash', [messageId], undefined, accountEmail); onClose(); }}
               className="px-3 py-2 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
             <button onClick={() => setConfirmDelete(true)}
               className="px-3 py-2 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
@@ -294,7 +306,7 @@ function EmailPreviewModal({ messageId, onClose, onAction, showToast }: {
               message="This will permanently delete this message from Gmail. This cannot be undone."
               confirmLabel="Delete Forever"
               confirmColor="#dc2626"
-              onConfirm={() => { onAction('delete', [messageId]); setConfirmDelete(false); onClose(); }}
+              onConfirm={() => { onAction('delete', [messageId], undefined, accountEmail); setConfirmDelete(false); onClose(); }}
               onCancel={() => setConfirmDelete(false)}
             />
           </div>
@@ -396,6 +408,12 @@ export default function Dashboard() {
   const [animatingOut, setAnimatingOut] = useState<Record<string, 'trash' | 'delete' | 'archive'>>({});
   // Email preview modal — shared across all tabs
   const [previewMessageId, setPreviewMessageId] = useState<string | null>(null);
+  const [previewAccount, setPreviewAccount] = useState<string | undefined>(undefined);
+
+  function openPreview(messageId: string, acctEmail?: string) {
+    setPreviewMessageId(messageId);
+    setPreviewAccount(acctEmail);
+  }
 
   // Load account from URL params first, then cookies
   useEffect(() => {
@@ -642,15 +660,15 @@ export default function Dashboard() {
 
       {activeTab === 'inbox' && (
         <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
-          onAction={handleAction} onRefresh={loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={setPreviewMessageId} />
+          onAction={handleAction} onRefresh={loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={(id) => openPreview(id, account)} />
       )}
-      {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={setPreviewMessageId} />}
-      {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={setPreviewMessageId} />}
+      {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} />}
+      {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={(id) => openPreview(id, account)} />}
       {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
       {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} />}
 
       {/* Email Preview Modal */}
-      {previewMessageId && <EmailPreviewModal messageId={previewMessageId} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} />}
+      {previewMessageId && <EmailPreviewModal messageId={previewMessageId} accountEmail={previewAccount} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} />}
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl text-white text-sm font-medium shadow-lg z-50 text-center"
@@ -882,7 +900,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
   reloadKey: number;
-  onPreview: (messageId: string) => void;
+  onPreview: (messageId: string, accountEmail?: string) => void;
 }) {
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1014,13 +1032,13 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
                           }
                         }} />
                     </div>
-                    <div className="text-sm font-medium mt-0.5 cursor-pointer hover:underline" onClick={() => onPreview(q.message_id)}>{q.subject}</div>
+                    <div className="text-sm font-medium mt-0.5 cursor-pointer hover:underline" onClick={() => onPreview(q.message_id, q.account_email)}>{q.subject}</div>
                     <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(q.summary || '')}</div>
                     <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>{q.account_email} &middot; Score: {q.priority_score}/10</div>
                   </div>
                 </div>
                 <div className="flex gap-2 mt-3 flex-wrap">
-                  <button onClick={() => onPreview(q.message_id)}
+                  <button onClick={() => onPreview(q.message_id, q.account_email)}
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg" style={{ background: '#f1f5f9', color: '#334155' }}>
                     Preview</button>
                   <button onClick={() => setReplyingTo(replyingTo === q.id ? null : q.id)}
