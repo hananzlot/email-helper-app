@@ -873,14 +873,14 @@ export default function Dashboard() {
     loadUnifiedInbox();
   }
 
-  // Load inbox for a single account, optionally run silent triage after
+  // Load inbox for a single account with background pagination up to 20k messages
   // silent=true skips the loading spinner (for background refreshes)
   const loadInbox = useCallback(async (silentTriage = false, silent = false) => {
     if (!silent) setLoading(true);
     try {
       const [profileRes, inboxRes] = await Promise.all([
         gmailGet('profile'),
-        gmailGet('inbox', { q: 'in:inbox', max: '50' }),
+        gmailGet('inbox', { q: 'in:inbox', max: '200' }),
       ]);
       if (!profileRes.success && (profileRes.error?.includes('Not authenticated') || profileRes.error?.includes('auth failed'))) {
         setAuthError(true);
@@ -891,6 +891,18 @@ export default function Dashboard() {
       if (inboxRes.success && inboxRes.data?.messages) {
         const msgs = inboxRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
         setMessages(msgs);
+        // Background pagination: keep fetching remaining pages
+        let nextToken = inboxRes.data.nextPageToken;
+        let totalLoaded = msgs.length;
+        const MAX_MESSAGES = 20000;
+        while (nextToken && totalLoaded < MAX_MESSAGES) {
+          const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+          if (!pageRes.success || !pageRes.data?.messages?.length) break;
+          const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
+          setMessages(prev => [...prev, ...pageMsgs]);
+          totalLoaded += pageMsgs.length;
+          nextToken = pageRes.data.nextPageToken;
+        }
       } else {
         setMessages([]);
       }
@@ -927,15 +939,19 @@ export default function Dashboard() {
       }
       if (profileRes.success) setProfile(profileRes.data);
 
-      // Fetch inbox from each account in parallel
+      // Fetch first page from each account in parallel, then paginate in background
       const allMessages: GmailMessage[] = [];
+      const accountTokens: { email: string; nextPageToken?: string }[] = [];
       await Promise.all(accounts.map(async (acct) => {
         setCurrentAccount(acct.email);
         try {
-          const res = await gmailGet('inbox', { q: 'in:inbox', max: '30' });
+          const res = await gmailGet('inbox', { q: 'in:inbox', max: '200' });
           if (res.success && res.data?.messages) {
             for (const msg of res.data.messages) {
               allMessages.push({ ...msg, accountEmail: acct.email });
+            }
+            if (res.data.nextPageToken) {
+              accountTokens.push({ email: acct.email, nextPageToken: res.data.nextPageToken });
             }
           }
         } catch (e) {
@@ -945,6 +961,23 @@ export default function Dashboard() {
 
       allMessages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setMessages(allMessages);
+      setCurrentAccount(savedAccount);
+
+      // Background pagination for accounts with more messages
+      const MAX_PER_ACCOUNT = 20000;
+      for (const at of accountTokens) {
+        let nextToken = at.nextPageToken;
+        let loaded = allMessages.filter(m => m.accountEmail === at.email).length;
+        while (nextToken && loaded < MAX_PER_ACCOUNT) {
+          setCurrentAccount(at.email);
+          const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+          if (!pageRes.success || !pageRes.data?.messages?.length) break;
+          const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: at.email }));
+          setMessages(prev => [...prev, ...pageMsgs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+          loaded += pageMsgs.length;
+          nextToken = pageRes.data.nextPageToken;
+        }
+      }
       setCurrentAccount(savedAccount);
     } catch (err) {
       console.error('Failed to load unified inbox:', err);
