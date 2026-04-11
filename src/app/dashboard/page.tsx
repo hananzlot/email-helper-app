@@ -658,6 +658,10 @@ export default function Dashboard() {
     setSearchResults([]);
   }
 
+  const splitSupportedTabs: Tab[] = ['inbox', 'reply-queue', 'follow-up', 'snoozed', 'cleanup', 'sent'];
+  const [splitPreviewId, setSplitPreviewId] = useState<string | null>(null);
+  const [splitPreviewAccount, setSplitPreviewAccount] = useState<string | undefined>(undefined);
+
   function openPreview(messageId: string, acctEmail?: string) {
     // In split mode on supported tabs, show in side panel instead of modal
     if (layoutMode === 'split' && !isMobile && splitSupportedTabs.includes(activeTab)) {
@@ -668,10 +672,6 @@ export default function Dashboard() {
     setPreviewMessageId(messageId);
     setPreviewAccount(acctEmail);
   }
-
-  const splitSupportedTabs: Tab[] = ['inbox', 'reply-queue', 'follow-up', 'snoozed', 'cleanup', 'sent'];
-  const [splitPreviewId, setSplitPreviewId] = useState<string | null>(null);
-  const [splitPreviewAccount, setSplitPreviewAccount] = useState<string | undefined>(undefined);
 
   // Clear split preview when switching tabs
   useEffect(() => { setSplitPreviewId(null); setSplitPreviewAccount(undefined); }, [activeTab]);
@@ -2463,18 +2463,20 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, reportCount,
                           }
                         }} />
                     </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-sm font-medium cursor-pointer hover:underline" onClick={() => onPreview(q.message_id, q.account_email)}>{q.subject}</span>
-                      {q.received && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#f1f5f9', color: '#64748b' }}>
-                          {new Date(q.received).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{cleanSnippet(q.summary || '')}</div>
-                    <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
-                      {q.account_email} &middot; Score: {q.priority_score}/10
-                      {q.reply_count > 0 && <> &middot; <span style={{ color: '#6366f1' }}>{q.reply_count} replies sent</span></>}
+                    <div className="cursor-pointer" onClick={() => onPreview(q.message_id, q.account_email)}>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-sm font-medium hover:underline">{q.subject}</span>
+                        {q.received && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#f1f5f9', color: '#64748b' }}>
+                            {new Date(q.received).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>{cleanSnippet(q.summary || '')}</div>
+                      <div className="text-xs mt-1" style={{ color: 'var(--muted)' }}>
+                        {q.account_email} &middot; Score: {q.priority_score}/10
+                        {q.reply_count > 0 && <> &middot; <span style={{ color: '#6366f1' }}>{q.reply_count} replies sent</span></>}
+                      </div>
                     </div>
                   </div>
                 </div>
