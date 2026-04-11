@@ -425,6 +425,7 @@ export default function Dashboard() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ title: string; subtitle?: string } | null>(null);
   const [triageLoading, setTriageLoading] = useState(false);
+  const [bgTaskLabel, setBgTaskLabel] = useState<string | null>(null);
   const [triageVersion, setTriageVersion] = useState(0);
   const [userId, setUserId] = useState<string>('');
   // Track which messages are animating out and their animation type
@@ -676,43 +677,56 @@ export default function Dashboard() {
 
   async function runTriage() {
     setTriageLoading(true);
-    showToast('Triaging inbox...', 'Scoring emails by sender priority and notification rules');
+    const accts = (unified && accounts.length > 1) ? accounts : [{ email: _currentAccount }];
+    setBgTaskLabel(`Triaging ${accts.length} account${accts.length > 1 ? 's' : ''}...`);
     try {
-      const res = await apiPost('triage', { action: 'triage' });
-      if (res.success) {
-        const data = res.data;
-        const total = data.total_unread;
-        const reply = data.categories.reply_needed.length;
-        const important = data.categories.important_notifications.length;
-        const low = data.categories.low_priority.length;
-        showToast(`Triage complete`, `${total} emails: ${reply + important} priority, ${low} cleanup`);
-        setTriageVersion(v => v + 1);
-        setActiveTab('reply-queue');
-      } else {
-        showToast('Triage failed', res.error);
+      const savedAccount = _currentAccount;
+      let totalEmails = 0, totalPriority = 0, totalCleanup = 0;
+      for (let i = 0; i < accts.length; i++) {
+        setBgTaskLabel(`Triaging account ${i + 1}/${accts.length}...`);
+        setCurrentAccount(accts[i].email);
+        const res = await apiPost('triage', { action: 'triage' });
+        if (res.success) {
+          const data = res.data;
+          totalEmails += data.total_unread;
+          totalPriority += data.categories.reply_needed.length + data.categories.important_notifications.length;
+          totalCleanup += data.categories.low_priority.length;
+        }
       }
+      setCurrentAccount(savedAccount);
+      showToast(`Triage complete`, `${totalEmails} emails: ${totalPriority} priority, ${totalCleanup} cleanup`);
+      setTriageVersion(v => v + 1);
     } catch (err) {
       showToast('Triage failed', String(err));
     } finally {
       setTriageLoading(false);
+      setBgTaskLabel(null);
     }
   }
 
   async function scanSentMail() {
     setTriageLoading(true);
-    showToast('Scanning sent mail...', 'Learning who you reply to most');
+    const accts = (unified && accounts.length > 1) ? accounts : [{ email: _currentAccount }];
+    setBgTaskLabel(`Scanning sent mail (${accts.length} account${accts.length > 1 ? 's' : ''})...`);
     try {
-      const res = await apiPost('triage', { action: 'scan_sent' });
-      if (res.success) {
-        showToast('Scan complete', `Found ${res.data.sendersFound} senders, ${res.data.totalReplies} replies`);
-        setActiveTab('priorities');
-      } else {
-        showToast('Scan failed', res.error);
+      const savedAccount = _currentAccount;
+      let totalSenders = 0, totalReplies = 0;
+      for (let i = 0; i < accts.length; i++) {
+        setBgTaskLabel(`Scanning sent mail ${i + 1}/${accts.length}...`);
+        setCurrentAccount(accts[i].email);
+        const res = await apiPost('triage', { action: 'scan_sent' });
+        if (res.success) {
+          totalSenders += res.data.sendersFound;
+          totalReplies += res.data.totalReplies;
+        }
       }
+      setCurrentAccount(savedAccount);
+      showToast('Scan complete', `Found ${totalSenders} senders, ${totalReplies} replies`);
     } catch (err) {
       showToast('Scan failed', String(err));
     } finally {
       setTriageLoading(false);
+      setBgTaskLabel(null);
     }
   }
 
@@ -794,6 +808,15 @@ export default function Dashboard() {
           </button>
         ))}
       </div>
+
+      {/* Background task banner — visible across all tabs */}
+      {bgTaskLabel && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl mb-4 animate-pulse" style={{ background: '#eef2ff', border: '1px solid #c7d2fe' }}>
+          <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: '#6366f1', borderTopColor: 'transparent' }} />
+          <span className="text-sm font-medium" style={{ color: '#4338ca' }}>{bgTaskLabel}</span>
+          <span className="text-xs ml-auto" style={{ color: '#6366f1' }}>You can keep working</span>
+        </div>
+      )}
 
       {/* Tab content — fixed width container prevents layout shift between tabs */}
       <div className="w-full" style={{ minHeight: '60vh' }}>
