@@ -3316,7 +3316,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
                             disabled={isGroupSelected} className="rounded flex-shrink-0" style={{ accentColor: 'var(--accent)' }} />
                           <div className="min-w-0 cursor-pointer" onClick={() => onPreview(msg.id, msg.accountEmail)} onDoubleClick={() => onDialogPreview?.(msg.id, msg.accountEmail)}>
                             <div className="font-medium truncate hover:underline">{msg.subject}</div>
-                            <div className="truncate" style={{ color: 'var(--muted)' }}>{cleanSnippet(msg.snippet || '')}</div>
+                            <div className="line-clamp-2 text-xs" style={{ color: 'var(--muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{cleanSnippet(msg.snippet || '')}</div>
                           </div>
                         </div>
                         <div className="flex gap-1 flex-shrink-0 items-center">
