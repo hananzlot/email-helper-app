@@ -60,9 +60,18 @@ async function apiPut(path: string, data: Record<string, unknown> = {}) {
 
 type Tab = 'inbox' | 'reply-queue' | 'cleanup' | 'priorities' | 'accounts';
 
+interface ConnectedAccount {
+  email: string;
+  is_primary: boolean;
+  is_active_inbox: boolean;
+  display_name: string | null;
+  created_at: string;
+}
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('inbox');
   const [account, setAccount] = useState<string>('');
+  const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
   const [profile, setProfile] = useState<{ emailAddress: string } | null>(null);
   const [messages, setMessages] = useState<GmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +79,7 @@ export default function Dashboard() {
   const [toast, setToast] = useState<{ title: string; subtitle?: string } | null>(null);
   const [triageLoading, setTriageLoading] = useState(false);
   const [triageVersion, setTriageVersion] = useState(0);
+  const [userId, setUserId] = useState<string>('');
 
   // Load account from URL params first, then cookies
   useEffect(() => {
@@ -80,23 +90,46 @@ export default function Dashboard() {
       setCurrentAccount(urlAccount);
       document.cookie = `email_helper_account=${urlAccount};path=/;max-age=${60*60*24*30};samesite=lax`;
       window.history.replaceState({}, '', '/dashboard');
-      return;
+    } else {
+      const added = params.get('account_added');
+      if (added) {
+        showToast('Account connected', added);
+        window.history.replaceState({}, '', '/dashboard');
+      }
+      const cookies = document.cookie.split(';').reduce((acc, c) => {
+        const [k, v] = c.trim().split('=');
+        if (k && v) acc[k] = decodeURIComponent(v);
+        return acc;
+      }, {} as Record<string, string>);
+      if (cookies.email_helper_account) {
+        setAccount(cookies.email_helper_account);
+        setCurrentAccount(cookies.email_helper_account);
+      }
     }
-    const added = params.get('account_added');
-    if (added) {
-      showToast('Account connected', added);
-      window.history.replaceState({}, '', '/dashboard');
-    }
-    const cookies = document.cookie.split(';').reduce((acc, c) => {
-      const [k, v] = c.trim().split('=');
-      if (k && v) acc[k] = decodeURIComponent(v);
-      return acc;
-    }, {} as Record<string, string>);
-    if (cookies.email_helper_account) {
-      setAccount(cookies.email_helper_account);
-      setCurrentAccount(cookies.email_helper_account);
-    }
+    // Load connected accounts list
+    loadAccounts();
   }, []);
+
+  async function loadAccounts() {
+    try {
+      const res = await apiGet('accounts');
+      if (res.success && res.data) {
+        setAccounts(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load accounts:', err);
+    }
+  }
+
+  function switchAccount(newAccount: string) {
+    setAccount(newAccount);
+    setCurrentAccount(newAccount);
+    document.cookie = `email_helper_account=${newAccount};path=/;max-age=${60*60*24*30};samesite=lax`;
+    setMessages([]);
+    setProfile(null);
+    showToast('Switched account', newAccount);
+    // loadInbox will fire from the account useEffect
+  }
 
   useEffect(() => {
     if (!account) return;
@@ -206,11 +239,25 @@ export default function Dashboard() {
           <p className="text-sm" style={{ color: 'var(--muted)' }}>Inbox Command Center</p>
         </div>
         <div className="flex items-center gap-3">
-          {profile && (
+          {/* Account Switcher */}
+          {accounts.length > 1 ? (
+            <select
+              value={account}
+              onChange={(e) => switchAccount(e.target.value)}
+              className="text-sm px-3 py-2 rounded-lg border font-medium appearance-none cursor-pointer"
+              style={{ background: 'var(--normal-bg)', borderColor: 'var(--border)', color: '#065f46' }}
+            >
+              {accounts.map((a) => (
+                <option key={a.email} value={a.email}>
+                  {a.email}{a.is_primary ? ' ★' : ''}
+                </option>
+              ))}
+            </select>
+          ) : profile ? (
             <div className="text-sm px-4 py-2 rounded-lg" style={{ background: 'var(--normal-bg)', color: '#065f46' }}>
               <strong>{profile.emailAddress}</strong>
             </div>
-          )}
+          ) : null}
           <button
             onClick={runTriage}
             disabled={triageLoading}
@@ -246,7 +293,7 @@ export default function Dashboard() {
       {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} />}
       {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} />}
       {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
-      {activeTab === 'accounts' && <AccountsTab currentAccount={account} />}
+      {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} />}
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl text-white text-sm font-medium shadow-lg z-50 text-center"
@@ -583,24 +630,84 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
 
 // ============ ACCOUNTS TAB ============
 
-function AccountsTab({ currentAccount }: { currentAccount: string }) {
+function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast }: {
+  currentAccount: string;
+  accounts: ConnectedAccount[];
+  onSwitch: (email: string) => void;
+  onRefresh: () => void;
+  showToast: (title: string, subtitle?: string) => void;
+}) {
+  async function setPrimary(email: string) {
+    const res = await apiPut('accounts', { email, action: 'set_primary' });
+    if (res.success) {
+      showToast('Primary account set', email);
+      onRefresh();
+    } else {
+      showToast('Error', res.error);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
+      {/* Connected Accounts */}
       <div className="rounded-xl border p-6" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
-        <h3 className="font-semibold mb-2">Current Account</h3>
-        <div className="flex items-center gap-2 px-4 py-3 rounded-lg" style={{ background: 'var(--normal-bg)' }}>
-          <span className="w-2 h-2 rounded-full" style={{ background: 'var(--normal)' }} />
-          <span className="font-medium">{currentAccount || 'Not connected'}</span>
-        </div>
+        <h3 className="font-semibold mb-4">Connected Accounts</h3>
+        {accounts.length === 0 ? (
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>No accounts connected yet.</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {accounts.map((a) => (
+              <div key={a.email} className="flex items-center justify-between px-4 py-3 rounded-lg border"
+                style={{
+                  background: a.email === currentAccount ? 'var(--normal-bg)' : 'var(--bg)',
+                  borderColor: a.email === currentAccount ? 'var(--normal)' : 'var(--border)',
+                }}>
+                <div className="flex items-center gap-3">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: a.email === currentAccount ? 'var(--normal)' : 'var(--border)' }} />
+                  <div>
+                    <span className="font-medium">{a.email}</span>
+                    <div className="flex gap-2 mt-0.5">
+                      {a.is_primary && <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent)', color: 'white' }}>Primary</span>}
+                      {a.email === currentAccount && <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--normal-bg)', color: '#065f46' }}>Active</span>}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {a.email !== currentAccount && (
+                    <button onClick={() => onSwitch(a.email)}
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium border"
+                      style={{ borderColor: 'var(--border)' }}>
+                      Switch
+                    </button>
+                  )}
+                  {!a.is_primary && (
+                    <button onClick={() => setPrimary(a.email)}
+                      className="text-xs px-3 py-1.5 rounded-lg font-medium text-white"
+                      style={{ background: 'var(--accent)' }}>
+                      Set Primary
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Connect Another */}
       <div className="rounded-xl border-2 border-dashed p-6" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
         <h3 className="font-semibold mb-2">Connect Another Gmail Account</h3>
-        <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>Add another inbox to scan its sender history or triage it alongside your primary.</p>
-        <a href="/api/emailHelperV2/auth/login?state=add_account" className="inline-flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium text-white text-sm" style={{ background: 'var(--accent)' }}>
-          Connect Gmail Account
+        <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>Add another inbox to triage alongside your primary account.</p>
+        <a href="/api/emailHelperV2/auth/login?state=add_account"
+          className="inline-flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium text-white text-sm"
+          style={{ background: 'var(--accent)' }}>
+          + Connect Gmail Account
         </a>
       </div>
-      <div className="text-center mt-4"><a href="/" className="text-sm underline" style={{ color: 'var(--muted)' }}>Sign out</a></div>
+
+      <div className="text-center mt-4">
+        <a href="/" className="text-sm underline" style={{ color: 'var(--muted)' }}>Sign out</a>
+      </div>
     </div>
   );
 }

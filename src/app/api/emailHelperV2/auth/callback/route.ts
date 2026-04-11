@@ -106,7 +106,16 @@ export async function GET(request: NextRequest) {
       // Adding an account — redirect back to dashboard with success
       const redirectUrl = new URL('/dashboard', request.url);
       redirectUrl.searchParams.set('account_added', gmailProfile.email);
-      return NextResponse.redirect(redirectUrl);
+      redirectUrl.searchParams.set('account', gmailProfile.email);
+      const response = NextResponse.redirect(redirectUrl);
+      response.cookies.set('email_helper_account', gmailProfile.email, {
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 60 * 60 * 24 * 30,
+        path: '/',
+      });
+      return response;
     }
   } catch (err) {
     console.error('Auth callback error:', err);
