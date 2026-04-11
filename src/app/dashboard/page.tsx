@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { GmailMessage } from '@/types';
 
 // ============ API HELPERS ============
@@ -662,6 +662,47 @@ export default function Dashboard() {
   const [splitPreviewId, setSplitPreviewId] = useState<string | null>(null);
   const [splitPreviewAccount, setSplitPreviewAccount] = useState<string | undefined>(undefined);
 
+  // Draggable split pane width (percentage of container), persisted in localStorage
+  const [splitLeftPct, setSplitLeftPct] = useState<number>(() => {
+    if (typeof window === 'undefined') return 40;
+    try { const saved = localStorage.getItem('clearbox_split_pct'); return saved ? Number(saved) : 40; }
+    catch { return 40; }
+  });
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
+
+  function handleSplitDragStart(e: React.MouseEvent) {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    const onMove = (ev: MouseEvent) => {
+      if (!isDraggingRef.current || !splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      const clamped = Math.min(70, Math.max(20, pct));
+      setSplitLeftPct(clamped);
+    };
+    const onUp = () => {
+      isDraggingRef.current = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      // Save to localStorage
+      try {
+        const el = splitContainerRef.current;
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          // Read current state — we can't access splitLeftPct here due to closure, so read from DOM
+        }
+      } catch {}
+      setSplitLeftPct(prev => { try { localStorage.setItem('clearbox_split_pct', String(prev)); } catch {} return prev; });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }
+
   function openPreview(messageId: string, acctEmail?: string) {
     // In split mode on supported tabs, show in side panel instead of modal
     if (layoutMode === 'split' && !isMobile && splitSupportedTabs.includes(activeTab)) {
@@ -1227,7 +1268,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="w-full max-w-4xl mx-auto px-4 py-6">
+    <div className={`w-full mx-auto px-4 py-6 ${layoutMode === 'split' && !isMobile ? 'max-w-full px-6' : 'max-w-4xl'}`}>
       {/* Sticky header + tabs */}
       <div className="sticky top-0 z-30 -mx-4 px-4 pb-0 pt-0" style={{ background: 'var(--bg, #f8fafc)' }}>
         {/* Header */}
@@ -1466,12 +1507,25 @@ export default function Dashboard() {
 
           if (!inSplitMode) return tabContent;
 
-          // Split mode: tab on left, inline preview on right
+          // Split mode: tab on left, drag handle, inline preview on right
           return (
-            <div className="flex gap-0 rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)', height: 'calc(100vh - 220px)', minHeight: 400 }}>
-              <div className="w-2/5 min-w-[320px] overflow-y-auto border-r" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
+            <div ref={splitContainerRef} className="flex rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)', height: 'calc(100vh - 220px)', minHeight: 400 }}>
+              {/* Left panel — email list / tab content */}
+              <div className="overflow-y-auto" style={{ width: `${splitLeftPct}%`, minWidth: 280, background: 'var(--bg)' }}>
                 {tabContent}
               </div>
+              {/* Drag handle */}
+              <div
+                onMouseDown={handleSplitDragStart}
+                className="flex-shrink-0 flex items-center justify-center group"
+                style={{ width: 6, cursor: 'col-resize', background: 'var(--border)', transition: 'background 0.15s' }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--border)')}
+                title="Drag to resize"
+              >
+                <div className="w-0.5 h-8 rounded-full opacity-40 group-hover:opacity-80" style={{ background: 'var(--muted)' }} />
+              </div>
+              {/* Right panel — email preview */}
               <div className="flex-1 overflow-y-auto" style={{ background: 'var(--card)' }}>
                 {splitPreviewId ? (
                   <InlinePreview
@@ -1485,7 +1539,7 @@ export default function Dashboard() {
                     <div className="text-center">
                       <div className="text-4xl mb-3 opacity-30">📧</div>
                       <p className="text-sm">Select an email to preview</p>
-                      <p className="text-xs mt-1">Click Preview on any item</p>
+                      <p className="text-xs mt-1">Click any email on the left</p>
                     </div>
                   </div>
                 )}
