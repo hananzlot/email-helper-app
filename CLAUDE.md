@@ -4,13 +4,18 @@
 - **Local path**: `~/Documents/email-helper-app`
 - **GitHub**: `github.com/hananzlot/email-helper-app`
 - **Deployed**: `emaihelper.netlify.app`
+- **Netlify site ID**: `5bf49f8a-1f8c-4b69-9be5-d00df037977e`
 - **Cowork mount**: Always select `~/Documents/email-helper-app` — do NOT use `~/Email Helper/email-helper-app` (that is an outdated copy)
 
 ## Architecture
 - **Next.js App Router** with TypeScript, deployed on Netlify
 - **Supabase** backend (auth, sender priorities, reply queue, triage results, notification rules)
+  - Project ID: `ybyhqkfyfovcuxhiejgx`
+  - URL: `https://ybyhqkfyfovcuxhiejgx.supabase.co`
+  - Dashboard: `https://supabase.com/dashboard/project/ybyhqkfyfovcuxhiejgx`
+  - SQL Editor: `https://supabase.com/dashboard/project/ybyhqkfyfovcuxhiejgx/sql/new`
   - Env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-  - Dashboard: check `.env.local` for the project URL (format: `https://<project-id>.supabase.co`)
+  - Env vars are stored in **Netlify environment variables** (no local `.env.local` file)
 - **Gmail API** via `googleapis` — full CRUD, thread fetching, reply detection
   - Env vars: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
   - OAuth callback: `https://emaihelper.netlify.app/api/emailHelperV2/auth/callback`
@@ -30,6 +35,16 @@ Home | Triage | Follow Up | Snoozed | Cleanup | Sent | All Mail
 (All Mail tab has no count badge to avoid confusion with categorised tab counts)
 
 ## Important Rules
+
+### CRITICAL: User Data Isolation
+All features and updates MUST ensure full user isolation at all times:
+- Every Supabase query MUST filter by `user_id` — never return or modify another user's data
+- API routes use `getRequestContext(request)` to extract the authenticated `user_id` from cookies
+- Gmail API calls use per-user OAuth tokens scoped to `user_id` + `account_email`
+- The cron job processes all users but stores results per `user_id`
+- localStorage keys are shared per domain — do NOT store user-specific sensitive data there
+- Auth uses `getUserByEmail()` (not `listUsers()`) to prevent duplicate user creation
+- When adding new tables or features, always include `user_id` in the schema and filter by it
 
 ### Every new feature MUST be documented in the Home tab How-To section
 When adding any new feature, update the `HomeTab` component's "How Email Helper works" guide
@@ -82,3 +97,4 @@ git push         # Auto-deploys to Netlify
 - `triage_results` — cached triage output per user/account
 - `notification_rules` — pattern-based rules with priority scores
 - `connected_accounts` — multi-account OAuth tokens
+- `emailHelperV2_action_history` — undo-able action log (user_id, action, action_label, message_ids, account_email, subjects, undo_action, undone)

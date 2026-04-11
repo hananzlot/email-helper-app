@@ -590,6 +590,7 @@ export default function Dashboard() {
   const [profile, setProfile] = useState<{ emailAddress: string } | null>(null);
   const [messages, setMessages] = useState<GmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState<{ loaded: number; total: number | null; phase: string } | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ title: string; subtitle?: string; undoAction?: () => void; expiresAt?: number } | null>(null);
   // Pending undo actions — delayed destructive operations that can be cancelled
@@ -880,6 +881,7 @@ export default function Dashboard() {
   // silent=true skips the loading spinner (for background refreshes)
   const loadInbox = useCallback(async (silentTriage = false, silent = false) => {
     if (!silent) setLoading(true);
+    setLoadingProgress({ loaded: 0, total: null, phase: 'Connecting to Gmail...' });
     try {
       const [profileRes, inboxRes] = await Promise.all([
         gmailGet('profile'),
@@ -888,16 +890,23 @@ export default function Dashboard() {
       if (!profileRes.success && (profileRes.error?.includes('Not authenticated') || profileRes.error?.includes('auth failed'))) {
         setAuthError(true);
         setLoading(false);
+        setLoadingProgress(null);
         return;
       }
       if (profileRes.success) setProfile(profileRes.data);
       if (inboxRes.success && inboxRes.data?.messages) {
         const msgs = inboxRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
         setMessages(msgs);
+        const estimatedTotal = inboxRes.data.total || msgs.length;
+        setLoadingProgress({ loaded: msgs.length, total: estimatedTotal, phase: 'Loading emails...' });
         // Background pagination: keep fetching remaining pages
         let nextToken = inboxRes.data.nextPageToken;
         let totalLoaded = msgs.length;
         const MAX_MESSAGES = 20000;
+        if (nextToken && estimatedTotal > 200) {
+          setLoading(false); // Show first page immediately
+          setLoadingProgress({ loaded: totalLoaded, total: Math.min(estimatedTotal, MAX_MESSAGES), phase: `Loading ${Math.min(estimatedTotal, MAX_MESSAGES).toLocaleString()} emails...` });
+        }
         while (nextToken && totalLoaded < MAX_MESSAGES) {
           const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
           if (!pageRes.success || !pageRes.data?.messages?.length) break;
@@ -905,7 +914,11 @@ export default function Dashboard() {
           setMessages(prev => [...prev, ...pageMsgs]);
           totalLoaded += pageMsgs.length;
           nextToken = pageRes.data.nextPageToken;
+          const est = Math.min(estimatedTotal, MAX_MESSAGES);
+          const minutesLeft = Math.max(1, Math.ceil((est - totalLoaded) / 200 * 0.5));
+          setLoadingProgress({ loaded: totalLoaded, total: est, phase: `Loading emails... ~${minutesLeft} min remaining` });
         }
+        setLoadingProgress(null);
       } else {
         setMessages([]);
       }
@@ -913,6 +926,7 @@ export default function Dashboard() {
       console.error('Failed to load inbox:', err);
     } finally {
       setLoading(false);
+      setLoadingProgress(null);
     }
     // Silent triage: score new unread emails in background
     if (silentTriage) {
@@ -930,6 +944,7 @@ export default function Dashboard() {
   const loadUnifiedInbox = useCallback(async (silentTriage = false, silent = false) => {
     if (accounts.length === 0) return;
     if (!silent) setLoading(true);
+    setLoadingProgress({ loaded: 0, total: null, phase: `Connecting to ${accounts.length} account${accounts.length > 1 ? 's' : ''}...` });
     try {
       const savedAccount = _currentAccount;
       const primaryAcct = accounts.find(a => a.is_primary)?.email || accounts[0].email;
@@ -938,13 +953,15 @@ export default function Dashboard() {
       if (!profileRes.success && (profileRes.error?.includes('Not authenticated') || profileRes.error?.includes('auth failed'))) {
         setAuthError(true);
         setLoading(false);
+        setLoadingProgress(null);
         return;
       }
       if (profileRes.success) setProfile(profileRes.data);
 
       // Fetch first page from each account in parallel, then paginate in background
       const allMessages: GmailMessage[] = [];
-      const accountTokens: { email: string; nextPageToken?: string }[] = [];
+      const accountTokens: { email: string; nextPageToken?: string; estimatedTotal: number }[] = [];
+      let totalEstimate = 0;
       await Promise.all(accounts.map(async (acct) => {
         setCurrentAccount(acct.email);
         try {
@@ -953,8 +970,10 @@ export default function Dashboard() {
             for (const msg of res.data.messages) {
               allMessages.push({ ...msg, accountEmail: acct.email });
             }
+            const est = res.data.total || res.data.messages.length;
+            totalEstimate += est;
             if (res.data.nextPageToken) {
-              accountTokens.push({ email: acct.email, nextPageToken: res.data.nextPageToken });
+              accountTokens.push({ email: acct.email, nextPageToken: res.data.nextPageToken, estimatedTotal: est });
             }
           }
         } catch (e) {
@@ -965,9 +984,17 @@ export default function Dashboard() {
       allMessages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setMessages(allMessages);
       setCurrentAccount(savedAccount);
+      setLoading(false); // Show first page immediately
+
+      if (accountTokens.length > 0) {
+        setLoadingProgress({ loaded: allMessages.length, total: Math.min(totalEstimate, 20000 * accounts.length), phase: `Loading ${totalEstimate.toLocaleString()} emails across ${accounts.length} accounts...` });
+      } else {
+        setLoadingProgress(null);
+      }
 
       // Background pagination for accounts with more messages
       const MAX_PER_ACCOUNT = 20000;
+      let grandTotal = allMessages.length;
       for (const at of accountTokens) {
         let nextToken = at.nextPageToken;
         let loaded = allMessages.filter(m => m.accountEmail === at.email).length;
@@ -978,10 +1005,15 @@ export default function Dashboard() {
           const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: at.email }));
           setMessages(prev => [...prev, ...pageMsgs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
           loaded += pageMsgs.length;
+          grandTotal += pageMsgs.length;
           nextToken = pageRes.data.nextPageToken;
+          const remaining = Math.min(totalEstimate, MAX_PER_ACCOUNT * accounts.length) - grandTotal;
+          const minutesLeft = Math.max(1, Math.ceil(remaining / 200 * 0.5));
+          setLoadingProgress({ loaded: grandTotal, total: Math.min(totalEstimate, MAX_PER_ACCOUNT * accounts.length), phase: `Loading emails... ~${minutesLeft} min remaining` });
         }
       }
       setCurrentAccount(savedAccount);
+      setLoadingProgress(null);
     } catch (err) {
       console.error('Failed to load unified inbox:', err);
     } finally {
@@ -1838,6 +1870,27 @@ export default function Dashboard() {
           <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: '#6366f1', borderTopColor: 'transparent' }} />
           <span className="text-sm font-medium" style={{ color: '#4338ca' }}>{bgTaskLabel}</span>
           <span className="text-xs ml-auto" style={{ color: '#6366f1' }}>You can keep working</span>
+        </div>
+      )}
+
+      {/* Loading progress banner — shown while paginating through large inboxes */}
+      {loadingProgress && (
+        <div className="px-4 py-3 rounded-xl mb-4" style={{ background: '#f0fdf4', border: '1px solid #86efac' }}>
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: '#22c55e', borderTopColor: 'transparent' }} />
+              <span className="text-sm font-medium" style={{ color: '#166534' }}>{loadingProgress.phase}</span>
+            </div>
+            <span className="text-xs font-semibold" style={{ color: '#15803d' }}>
+              {loadingProgress.loaded.toLocaleString()}{loadingProgress.total ? ` / ${loadingProgress.total.toLocaleString()}` : ''} emails
+            </span>
+          </div>
+          {loadingProgress.total && loadingProgress.total > 0 && (
+            <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: '#dcfce7' }}>
+              <div className="h-full rounded-full transition-all duration-500" style={{ background: '#22c55e', width: `${Math.min(100, (loadingProgress.loaded / loadingProgress.total) * 100)}%` }} />
+            </div>
+          )}
+          <p className="text-[10px] mt-1" style={{ color: '#166534' }}>You can start working while emails continue loading in the background</p>
         </div>
       )}
 
