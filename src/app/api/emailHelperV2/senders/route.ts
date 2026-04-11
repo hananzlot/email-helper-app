@@ -60,3 +60,62 @@ export async function POST(request: NextRequest) {
     return apiError(`Failed: ${err}`, 500);
   }
 }
+
+/**
+ * PUT /api/emailHelperV2/senders
+ * Update a sender's tier
+ * Body: { sender_email: string, tier: 'A' | 'B' | 'C' | 'D' }
+ */
+export async function PUT(request: NextRequest) {
+  const { userId } = getRequestContext(request);
+  if (!userId) return apiError('Not authenticated', 401);
+
+  try {
+    const body = await request.json();
+    const { sender_email, tier } = body;
+    if (!sender_email || !tier) return apiError('Missing sender_email or tier');
+    if (!['A', 'B', 'C', 'D'].includes(tier)) return apiError('Tier must be A, B, C, or D');
+
+    const admin = createSupabaseAdmin();
+    const { data, error } = await admin
+      .from(TABLES.SENDER_PRIORITIES)
+      .update({ tier, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('sender_email', sender_email)
+      .select()
+      .single();
+
+    if (error) return apiError(error.message, 500);
+    return apiSuccess(data);
+  } catch (err) {
+    return apiError(`Failed: ${err}`, 500);
+  }
+}
+
+/**
+ * DELETE /api/emailHelperV2/senders
+ * Remove a sender from priorities
+ * Body: { sender_email: string }
+ */
+export async function DELETE(request: NextRequest) {
+  const { userId } = getRequestContext(request);
+  if (!userId) return apiError('Not authenticated', 401);
+
+  try {
+    const body = await request.json();
+    const { sender_email } = body;
+    if (!sender_email) return apiError('Missing sender_email');
+
+    const admin = createSupabaseAdmin();
+    const { error } = await admin
+      .from(TABLES.SENDER_PRIORITIES)
+      .delete()
+      .eq('user_id', userId)
+      .eq('sender_email', sender_email);
+
+    if (error) return apiError(error.message, 500);
+    return apiSuccess({ deleted: sender_email });
+  } catch (err) {
+    return apiError(`Failed: ${err}`, 500);
+  }
+}

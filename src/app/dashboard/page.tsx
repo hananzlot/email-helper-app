@@ -56,7 +56,14 @@ async function apiPut(path: string, data: Record<string, unknown> = {}) {
   return res.json();
 }
 
-// ============ MAIN DASHBOARD ============
+async function apiDelete(path: string, data: Record<string, unknown> = {}) {
+  const res = await fetch(withAccount(`/api/emailHelperV2/${path}`), {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
 
 // ============ CONFIRM MODAL ============
 
@@ -858,6 +865,11 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   const [senders, setSenders] = useState<any[]>([]);
   const [rules, setRules] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [addEmail, setAddEmail] = useState('');
+  const [addName, setAddName] = useState('');
+  const [addTier, setAddTier] = useState('A');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [filterTier, setFilterTier] = useState<string>('all');
 
   useEffect(() => { loadData(); }, []);
 
@@ -867,6 +879,47 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
     if (s.success) setSenders(s.data);
     if (r.success) setRules(r.data);
     setLoading(false);
+  }
+
+  async function changeTier(email: string, newTier: string) {
+    const res = await apiPut('senders', { sender_email: email, tier: newTier });
+    if (res.success) {
+      setSenders(prev => prev.map(s => s.sender_email === email ? { ...s, tier: newTier } : s));
+      showToast(`${email} → Tier ${newTier}`);
+    } else {
+      showToast('Error', res.error);
+    }
+  }
+
+  async function removeSender(email: string) {
+    const res = await apiDelete('senders', { sender_email: email });
+    if (res.success) {
+      setSenders(prev => prev.filter(s => s.sender_email !== email));
+      showToast('Removed', email);
+    } else {
+      showToast('Error', res.error);
+    }
+  }
+
+  async function addSender() {
+    if (!addEmail.trim()) return;
+    const res = await apiPost('senders', {
+      senders: [{
+        sender_email: addEmail.trim().toLowerCase(),
+        display_name: addName.trim() || addEmail.trim(),
+        reply_count: 0,
+        tier: addTier,
+      }],
+    });
+    if (res.success) {
+      showToast('Added', `${addEmail} as Tier ${addTier}`);
+      setAddEmail('');
+      setAddName('');
+      setShowAddForm(false);
+      loadData();
+    } else {
+      showToast('Error', res.error);
+    }
   }
 
   async function adjustRule(id: string, delta: number) {
@@ -885,6 +938,8 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
 
   const tierColors: Record<string, string> = { A: '#fee2e2', B: '#fef3c7', C: '#e0f2fe', D: '#f1f5f9' };
   const tierText: Record<string, string> = { A: '#991b1b', B: '#92400e', C: '#075985', D: '#475569' };
+  const tiers = ['A', 'B', 'C', 'D'];
+  const filteredSenders = filterTier === 'all' ? senders : senders.filter(s => s.tier === filterTier);
 
   return (
     <div className="flex flex-col gap-6">
@@ -895,22 +950,95 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
             <h3 className="font-semibold">Sender Priorities</h3>
             <p className="text-xs" style={{ color: 'var(--muted)' }}>{senders.length} senders ranked by reply frequency</p>
           </div>
-          <button onClick={onScanSent} disabled={scanning} className="px-4 py-2 text-xs font-medium rounded-lg text-white" style={{ background: scanning ? 'var(--muted)' : 'var(--accent)' }}>
-            {scanning ? 'Scanning...' : 'Scan Sent Mail'}
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setShowAddForm(!showAddForm)}
+              className="px-4 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+              {showAddForm ? 'Cancel' : '+ Add Sender'}
+            </button>
+            <button onClick={onScanSent} disabled={scanning} className="px-4 py-2 text-xs font-medium rounded-lg text-white" style={{ background: scanning ? 'var(--muted)' : 'var(--accent)' }}>
+              {scanning ? 'Scanning...' : 'Scan Sent Mail'}
+            </button>
+          </div>
         </div>
-        {senders.length === 0 ? (
-          <p className="text-sm py-8 text-center" style={{ color: 'var(--muted)' }}>No sender data yet. Click "Scan Sent Mail" to learn who you reply to most.</p>
+
+        {/* Add sender form */}
+        {showAddForm && (
+          <div className="mb-4 p-4 rounded-lg border" style={{ background: '#f8fafc', borderColor: 'var(--accent)' }}>
+            <div className="flex gap-2 flex-wrap items-end">
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-xs font-medium block mb-1">Email</label>
+                <input type="email" value={addEmail} onChange={e => setAddEmail(e.target.value)} placeholder="person@example.com"
+                  className="w-full px-3 py-2 text-sm rounded-lg border" style={{ borderColor: 'var(--border)' }} />
+              </div>
+              <div className="flex-1 min-w-[150px]">
+                <label className="text-xs font-medium block mb-1">Name (optional)</label>
+                <input type="text" value={addName} onChange={e => setAddName(e.target.value)} placeholder="John Smith"
+                  className="w-full px-3 py-2 text-sm rounded-lg border" style={{ borderColor: 'var(--border)' }} />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1">Tier</label>
+                <select value={addTier} onChange={e => setAddTier(e.target.value)}
+                  className="px-3 py-2 text-sm rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+                  {tiers.map(t => <option key={t} value={t}>Tier {t}</option>)}
+                </select>
+              </div>
+              <button onClick={addSender} className="px-4 py-2 text-sm font-medium rounded-lg text-white" style={{ background: 'var(--accent)' }}>Add</button>
+            </div>
+          </div>
+        )}
+
+        {/* Filter by tier */}
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setFilterTier('all')}
+            className="px-3 py-1 text-xs rounded-full border font-medium"
+            style={{ background: filterTier === 'all' ? 'var(--accent)' : 'transparent', color: filterTier === 'all' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
+            All ({senders.length})
+          </button>
+          {tiers.map(t => {
+            const count = senders.filter(s => s.tier === t).length;
+            return (
+              <button key={t} onClick={() => setFilterTier(t)}
+                className="px-3 py-1 text-xs rounded-full border font-medium"
+                style={{ background: filterTier === t ? tierColors[t] : 'transparent', color: filterTier === t ? tierText[t] : 'var(--muted)', borderColor: 'var(--border)' }}>
+                {t} ({count})
+              </button>
+            );
+          })}
+        </div>
+
+        {filteredSenders.length === 0 ? (
+          <p className="text-sm py-8 text-center" style={{ color: 'var(--muted)' }}>
+            {senders.length === 0 ? 'No sender data yet. Click "Scan Sent Mail" to learn who you reply to most.' : 'No senders in this tier.'}
+          </p>
         ) : (
           <div style={{ maxHeight: 400, overflowY: 'auto' }}>
             <table className="w-full text-sm">
-              <thead><tr className="text-xs uppercase" style={{ color: 'var(--muted)' }}><th className="text-left p-2">Sender</th><th className="p-2 text-center">Replies</th><th className="p-2">Tier</th></tr></thead>
+              <thead><tr className="text-xs uppercase" style={{ color: 'var(--muted)' }}>
+                <th className="text-left p-2">Sender</th><th className="p-2 text-center">Replies</th><th className="p-2">Tier</th><th className="p-2"></th>
+              </tr></thead>
               <tbody>
-                {senders.slice(0, 100).map((s: any) => (
+                {filteredSenders.slice(0, 100).map((s: any) => (
                   <tr key={s.sender_email} className="border-t" style={{ borderColor: 'var(--border)' }}>
                     <td className="p-2"><div className="font-medium text-sm">{s.display_name}</div><div className="text-xs" style={{ color: 'var(--muted)' }}>{s.sender_email}</div></td>
                     <td className="p-2 text-center font-semibold">{s.reply_count}</td>
-                    <td className="p-2"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: tierColors[s.tier] || '#f1f5f9', color: tierText[s.tier] || '#475569' }}>Tier {s.tier}</span></td>
+                    <td className="p-2">
+                      <div className="flex gap-1">
+                        {tiers.map(t => (
+                          <button key={t} onClick={() => changeTier(s.sender_email, t)}
+                            className="text-[10px] font-bold px-2 py-0.5 rounded-full transition-all"
+                            style={{
+                              background: s.tier === t ? tierColors[t] : 'transparent',
+                              color: s.tier === t ? tierText[t] : 'var(--muted)',
+                              border: `1px solid ${s.tier === t ? tierText[t] + '40' : 'var(--border)'}`,
+                            }}>
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-2">
+                      <button onClick={() => removeSender(s.sender_email)} className="text-xs px-2 py-0.5 rounded border text-red-400 hover:text-red-600" style={{ borderColor: 'var(--border)' }}>✕</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
