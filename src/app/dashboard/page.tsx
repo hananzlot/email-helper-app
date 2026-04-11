@@ -58,6 +58,33 @@ async function apiPut(path: string, data: Record<string, unknown> = {}) {
 
 // ============ MAIN DASHBOARD ============
 
+// ============ CONFIRM MODAL ============
+
+function ConfirmModal({ title, message, confirmLabel, confirmColor, onConfirm, onCancel }: {
+  title: string; message: string; confirmLabel: string; confirmColor: string;
+  onConfirm: () => void; onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+      <div className="fixed inset-0 bg-black/40" onClick={onCancel} />
+      <div className="relative z-10 bg-white rounded-2xl shadow-2xl p-6 max-w-sm mx-4 w-full">
+        <h3 className="text-lg font-bold mb-2">{title}</h3>
+        <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>{message}</p>
+        <div className="flex gap-3 justify-end">
+          <button onClick={onCancel} className="px-5 py-2.5 text-sm font-medium rounded-xl border" style={{ borderColor: 'var(--border)' }}>
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="px-5 py-2.5 text-sm font-semibold rounded-xl text-white" style={{ background: confirmColor }}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ MAIN DASHBOARD ============
+
 type Tab = 'inbox' | 'reply-queue' | 'cleanup' | 'priorities' | 'accounts';
 
 interface ConnectedAccount {
@@ -80,6 +107,8 @@ export default function Dashboard() {
   const [triageLoading, setTriageLoading] = useState(false);
   const [triageVersion, setTriageVersion] = useState(0);
   const [userId, setUserId] = useState<string>('');
+  // Track which messages are animating out and their animation type
+  const [animatingOut, setAnimatingOut] = useState<Record<string, 'trash' | 'delete' | 'archive'>>({});
 
   // Load account from URL params first, then cookies
   useEffect(() => {
@@ -167,15 +196,47 @@ export default function Dashboard() {
     setTimeout(() => setToast(null), 3500);
   }
 
-  async function handleAction(action: string, messageIds: string[], label?: string) {
+  async function handleAction(action: string, messageIds: string[], label?: string, overrideAccount?: string) {
     setActionLoading(messageIds[0]);
     try {
       const params: Record<string, unknown> = { action, messageIds };
       if (label) params.labelId = label;
+      // If an override account is provided, temporarily switch the API context
+      const savedAccount = _currentAccount;
+      if (overrideAccount && overrideAccount !== _currentAccount) {
+        setCurrentAccount(overrideAccount);
+      }
       const res = await gmailPost(action, params);
+      if (overrideAccount) setCurrentAccount(savedAccount);
       if (res.success) {
-        showToast(`${action} completed`, `${messageIds.length} message(s)`);
-        setMessages((prev) => prev.filter((m) => !messageIds.includes(m.id)));
+        const actionLabels: Record<string, string> = {
+          archive: 'Archived', trash: 'Trashed', delete: 'Deleted',
+          markRead: 'Marked read', markUnread: 'Marked unread',
+          star: 'Starred', unstar: 'Unstarred',
+        };
+        showToast(actionLabels[action] || action, `${messageIds.length} message${messageIds.length > 1 ? 's' : ''}`);
+        // Animate out for destructive actions
+        if (['trash', 'delete', 'archive'].includes(action)) {
+          const animType = action as 'trash' | 'delete' | 'archive';
+          const anims: Record<string, 'trash' | 'delete' | 'archive'> = {};
+          messageIds.forEach(id => { anims[id] = animType; });
+          setAnimatingOut(prev => ({ ...prev, ...anims }));
+          setTimeout(() => {
+            setMessages((prev) => prev.filter((m) => !messageIds.includes(m.id)));
+            setAnimatingOut(prev => {
+              const next = { ...prev };
+              messageIds.forEach(id => delete next[id]);
+              return next;
+            });
+          }, 400);
+        } else {
+          // Non-destructive: update immediately
+          if (action === 'markRead') {
+            setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
+          } else if (action === 'markUnread') {
+            setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
+          }
+        }
       } else {
         showToast('Error', res.error);
       }
@@ -293,7 +354,7 @@ export default function Dashboard() {
 
       {activeTab === 'inbox' && (
         <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
-          onAction={handleAction} onRefresh={loadInbox} showToast={showToast} />
+          onAction={handleAction} onRefresh={loadInbox} showToast={showToast} animatingOut={animatingOut} />
       )}
       {activeTab === 'reply-queue' && <ReplyQueueTab onAction={handleAction} showToast={showToast} reloadKey={triageVersion} />}
       {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} />}
@@ -372,14 +433,16 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
 
 // ============ INBOX TAB ============
 
-function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast }: {
+function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast, animatingOut }: {
   messages: GmailMessage[]; loading: boolean; actionLoading: string | null;
   onAction: (action: string, ids: string[], label?: string) => void; onRefresh: () => void;
   showToast: (title: string, subtitle?: string) => void;
+  animatingOut: Record<string, 'trash' | 'delete' | 'archive'>;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ ids: string[]; count: number } | null>(null);
   const toggleSelect = (id: string) => setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectAll = () => setSelected(selected.size === messages.length ? new Set() : new Set(messages.map(m => m.id)));
   const selectedIds = Array.from(selected);
@@ -395,7 +458,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
           <button onClick={() => { onAction('archive', selectedIds); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive ({selected.size})</button>
           <button onClick={() => { onAction('markRead', selectedIds); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Mark Read ({selected.size})</button>
           <button onClick={() => { onAction('trash', selectedIds); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border text-red-600" style={{ borderColor: 'var(--border)' }}>Trash ({selected.size})</button>
-          <button onClick={() => { if (confirm('Permanently delete selected messages?')) { onAction('delete', selectedIds); setSelected(new Set()); }}} className="px-3 py-2 text-xs font-medium rounded-lg border text-red-700 font-bold" style={{ borderColor: '#fca5a5' }}>Delete ({selected.size})</button>
+          <button onClick={() => setConfirmAction({ ids: selectedIds, count: selected.size })} className="px-3 py-2 text-xs font-medium rounded-lg border text-red-700 font-bold" style={{ borderColor: '#fca5a5' }}>Delete ({selected.size})</button>
         </>)}
         <span className="text-xs ml-auto" style={{ color: 'var(--muted)' }}>{messages.length} messages</span>
       </div>
@@ -406,7 +469,12 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
       ) : (
         <div className="flex flex-col gap-2">
           {messages.map((msg) => (
-            <div key={msg.id} className="rounded-xl border transition-all hover:shadow-sm"
+            <div key={msg.id}
+              className={`rounded-xl border transition-all hover:shadow-sm ${
+                animatingOut[msg.id] === 'trash' ? 'animate-trash-out' :
+                animatingOut[msg.id] === 'delete' ? 'animate-delete-out' :
+                animatingOut[msg.id] === 'archive' ? 'animate-archive-out' : ''
+              }`}
               style={{ background: selected.has(msg.id) ? '#eff6ff' : 'var(--card)', borderColor: selected.has(msg.id) ? 'var(--accent)' : 'var(--border)', opacity: actionLoading === msg.id ? 0.5 : 1 }}>
               <div className="flex items-start gap-3 p-4">
                 <input type="checkbox" checked={selected.has(msg.id)} onChange={() => toggleSelect(msg.id)} className="mt-1 rounded" />
@@ -433,7 +501,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                 </button>
                 <button onClick={() => onAction('star', [msg.id])} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
                 <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-1.5 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
-                <button onClick={() => { if (confirm('Permanently delete?')) onAction('delete', [msg.id]); }}
+                <button onClick={() => setConfirmAction({ ids: [msg.id], count: 1 })}
                   className="px-2 py-1.5 text-xs rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
               </div>
               {/* Inline Reply Composer */}
@@ -454,6 +522,65 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
           ))}
         </div>
       )}
+      {confirmAction && (
+        <ConfirmModal
+          title="Permanently Delete"
+          message={`This will permanently delete ${confirmAction.count} message${confirmAction.count > 1 ? 's' : ''} from Gmail. This cannot be undone.`}
+          confirmLabel="Delete Forever"
+          confirmColor="#dc2626"
+          onConfirm={() => { onAction('delete', confirmAction.ids); setConfirmAction(null); setSelected(new Set()); }}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============ SNOOZE DROPDOWN ============
+
+function SnoozeDropdown({ onSnooze }: { onSnooze: (hours: number, label: string) => void }) {
+  const [open, setOpen] = useState(false);
+
+  const options = [
+    { label: 'in 1 hour', hours: 1 },
+    { label: 'in 3 hours', hours: 3 },
+    { label: 'tomorrow morning', hours: (() => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(9, 0, 0, 0);
+      return (tomorrow.getTime() - Date.now()) / (1000 * 60 * 60);
+    })() },
+    { label: 'next Monday', hours: (() => {
+      const d = new Date();
+      const daysUntilMon = ((8 - d.getDay()) % 7) || 7;
+      d.setDate(d.getDate() + daysUntilMon);
+      d.setHours(9, 0, 0, 0);
+      return (d.getTime() - Date.now()) / (1000 * 60 * 60);
+    })() },
+    { label: 'in 1 week', hours: 168 },
+  ];
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(!open)}
+        className="px-3 py-1.5 text-xs font-medium rounded-lg"
+        style={{ background: '#fef9c3', color: '#854d0e' }}>
+        Snooze ▾
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1 min-w-[160px]"
+            style={{ background: 'white', borderColor: 'var(--border)' }}>
+            {options.map((opt) => (
+              <button key={opt.label} onClick={() => { onSnooze(opt.hours, opt.label); setOpen(false); }}
+                className="w-full text-left px-4 py-2 text-xs hover:bg-gray-50 transition-colors">
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -461,13 +588,14 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
 // ============ REPLY QUEUE TAB ============
 
 function ReplyQueueTab({ onAction, showToast, reloadKey }: {
-  onAction: (action: string, ids: string[], label?: string) => void;
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
   reloadKey: number;
 }) {
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   useEffect(() => { loadQueue(); }, [reloadKey]);
 
@@ -478,13 +606,41 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
     setLoading(false);
   }
 
-  async function updateStatus(id: string, status: string) {
-    const res = await apiPut('queue', { id, status });
+  async function updateStatus(id: string, status: string, snoozedUntil?: string) {
+    const payload: Record<string, unknown> = { id, status };
+    if (snoozedUntil) payload.snoozed_until = snoozedUntil;
+    const res = await apiPut('queue', payload);
     if (res.success) {
-      setQueue(prev => prev.map(q => q.id === id ? { ...q, status } : q));
+      setQueue(prev => prev.map(q => q.id === id ? { ...q, status, snoozed_until: snoozedUntil || q.snoozed_until } : q));
       showToast(`Marked ${status}`);
     }
   }
+
+  function snoozeItem(id: string, hours: number, label: string) {
+    const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+    updateStatus(id, 'snoozed', until);
+    showToast(`Snoozed`, `Will reappear ${label}`);
+  }
+
+  // Queue action: perform Gmail action and remove from queue view
+  async function queueAction(action: string, messageId: string, queueId: string, accountEmail: string) {
+    onAction(action, [messageId], undefined, accountEmail);
+    // Remove from queue display after trash/delete/archive
+    if (['trash', 'delete', 'archive'].includes(action)) {
+      setQueue(prev => prev.filter(q => q.id !== queueId));
+      updateStatus(queueId, 'done');
+    }
+  }
+
+  // Auto-reactivate snoozed items whose time is up
+  useEffect(() => {
+    const now = new Date().toISOString();
+    queue.forEach(q => {
+      if (q.status === 'snoozed' && q.snoozed_until && q.snoozed_until <= now) {
+        updateStatus(q.id, 'active');
+      }
+    });
+  }, [queue]);
 
   const active = queue.filter(q => q.status === 'active');
   const done = queue.filter(q => q.status === 'done');
@@ -548,12 +704,12 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
                   <button onClick={() => setReplyingTo(replyingTo === q.id ? null : q.id)}
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
                   <button onClick={() => updateStatus(q.id, 'done')} className="px-3 py-1.5 text-xs font-medium rounded-lg" style={{ background: '#dcfce7', color: '#166534' }}>Done</button>
-                  <button onClick={() => updateStatus(q.id, 'snoozed')} className="px-3 py-1.5 text-xs font-medium rounded-lg" style={{ background: '#fef9c3', color: '#854d0e' }}>Snooze</button>
+                  <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(q.id, hours, label)} />
                   <button onClick={() => updateStatus(q.id, 'later')} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Later</button>
-                  <button onClick={() => onAction('archive', [q.message_id])} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
-                  <button onClick={() => onAction('markRead', [q.message_id])} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Mark Read</button>
-                  <button onClick={() => onAction('trash', [q.message_id])} className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
-                  <button onClick={() => { if (confirm('Permanently delete?')) onAction('delete', [q.message_id]); }}
+                  <button onClick={() => queueAction('archive', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                  <button onClick={() => queueAction('markRead', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Mark Read</button>
+                  <button onClick={() => queueAction('trash', q.message_id, q.id, q.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                  <button onClick={() => setConfirmDelete(q.id + '::' + q.message_id + '::' + q.account_email)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
                 </div>
                 {replyingTo === q.id && (
@@ -593,12 +749,32 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
           <p className="text-xs font-semibold uppercase tracking-wide mb-2 pb-2 border-b" style={{ color: 'var(--important)', borderColor: 'var(--border)' }}>Snoozed ({snoozed.length})</p>
           {snoozed.map(q => (
             <div key={q.id} className="p-3 rounded-lg border mb-1 flex items-center justify-between" style={{ opacity: 0.6, borderColor: 'var(--border)' }}>
-              <span className="text-sm">{q.sender}: {q.subject}</span>
+              <div>
+                <span className="text-sm">{q.sender}: {q.subject}</span>
+                {q.snoozed_until && (
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--important)' }}>
+                    Reappears {new Date(q.snoozed_until).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                  </div>
+                )}
+              </div>
               <button onClick={() => updateStatus(q.id, 'active')} className="text-xs px-2 py-1 rounded border" style={{ borderColor: 'var(--border)' }}>Reactivate</button>
             </div>
           ))}
         </div>
       )}
+      {confirmDelete && (() => {
+        const [qId, msgId, acctEmail] = confirmDelete.split('::');
+        return (
+          <ConfirmModal
+            title="Permanently Delete"
+            message="This will permanently delete this message from Gmail. This cannot be undone."
+            confirmLabel="Delete Forever"
+            confirmColor="#dc2626"
+            onConfirm={() => { queueAction('delete', msgId, qId, acctEmail); setConfirmDelete(null); }}
+            onCancel={() => setConfirmDelete(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -606,6 +782,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey }: {
 // ============ CLEANUP TAB ============
 
 function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const newsletters = messages.filter(m => m.labelIds.includes('CATEGORY_PROMOTIONS') || /unsubscribe|newsletter/i.test(m.snippet));
   const social = messages.filter(m => m.labelIds.includes('CATEGORY_SOCIAL'));
   const updates = messages.filter(m => m.labelIds.includes('CATEGORY_UPDATES'));
@@ -616,6 +793,14 @@ function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction
     { label: 'Updates & Automated', items: updates, color: 'var(--muted)' },
   ].filter(c => c.items.length > 0);
 
+  const toggleExpand = (label: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+  };
+
   if (categories.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
       <p className="text-lg mb-2">Inbox looks clean</p>
@@ -625,23 +810,41 @@ function CleanupTab({ messages, onAction }: { messages: GmailMessage[]; onAction
 
   return (
     <div className="flex flex-col gap-6">
-      {categories.map(cat => (
-        <div key={cat.label} className="rounded-xl border p-4" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
-          <div className="flex items-center justify-between mb-3">
-            <div><h3 className="font-semibold text-sm" style={{ color: cat.color }}>{cat.label}</h3><p className="text-xs" style={{ color: 'var(--muted)' }}>{cat.items.length} messages</p></div>
-            <button onClick={() => onAction('archive', cat.items.map(m => m.id))} className="px-4 py-2 text-xs font-medium rounded-lg text-white" style={{ background: cat.color }}>Archive All</button>
+      {categories.map(cat => {
+        const isExpanded = expanded.has(cat.label);
+        const displayItems = isExpanded ? cat.items : cat.items.slice(0, 5);
+        const hiddenCount = cat.items.length - 5;
+        return (
+          <div key={cat.label} className="rounded-xl border p-4" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
+            <div className="flex items-center justify-between mb-3">
+              <div><h3 className="font-semibold text-sm" style={{ color: cat.color }}>{cat.label}</h3><p className="text-xs" style={{ color: 'var(--muted)' }}>{cat.items.length} messages</p></div>
+              <button onClick={() => onAction('archive', cat.items.map(m => m.id))} className="px-4 py-2 text-xs font-medium rounded-lg text-white" style={{ background: cat.color }}>Archive All</button>
+            </div>
+            <div className="flex flex-col gap-1">
+              {displayItems.map(msg => (
+                <div key={msg.id} className="flex items-center justify-between py-2 text-xs border-b" style={{ borderColor: 'var(--border)' }}>
+                  <div className="flex-1 min-w-0 mr-2">
+                    <span className="font-medium">{msg.sender}</span>
+                    <span className="mx-1" style={{ color: 'var(--muted)' }}>·</span>
+                    <span className="truncate" style={{ color: 'var(--muted)' }}>{msg.subject}</span>
+                  </div>
+                  <div className="flex gap-1 flex-shrink-0">
+                    <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-0.5 rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                    <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-0.5 rounded border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                  </div>
+                </div>
+              ))}
+              {cat.items.length > 5 && (
+                <button onClick={() => toggleExpand(cat.label)}
+                  className="text-xs font-medium mt-2 px-3 py-1.5 rounded-lg border self-start"
+                  style={{ borderColor: 'var(--border)', color: 'var(--accent)' }}>
+                  {isExpanded ? 'Show less' : `Show all ${cat.items.length} messages (+${hiddenCount} more)`}
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex flex-col gap-1">
-            {cat.items.slice(0, 5).map(msg => (
-              <div key={msg.id} className="flex items-center justify-between py-1 text-xs">
-                <span className="truncate flex-1">{msg.sender}: {msg.subject}</span>
-                <button onClick={() => onAction('archive', [msg.id])} className="ml-2 px-2 py-0.5 rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
-              </div>
-            ))}
-            {cat.items.length > 5 && <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>+ {cat.items.length - 5} more</p>}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

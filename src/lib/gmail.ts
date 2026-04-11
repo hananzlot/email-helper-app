@@ -20,13 +20,9 @@ export function getGmailClient(accessToken: string, refreshToken?: string) {
   return google.gmail({ version: 'v1', auth });
 }
 
-// Gmail scopes needed for full inbox management
+// Gmail scopes — full access scope covers read, modify, compose, send, delete
 export const GMAIL_SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/gmail.compose',
-  'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/gmail.labels',
+  'https://mail.google.com/',  // Full access — needed for permanent delete
   'openid',
   'email',
   'profile',
