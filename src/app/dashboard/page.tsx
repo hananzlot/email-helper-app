@@ -417,6 +417,8 @@ export default function Dashboard() {
   // Email preview modal — shared across all tabs
   const [previewMessageId, setPreviewMessageId] = useState<string | null>(null);
   const [previewAccount, setPreviewAccount] = useState<string | undefined>(undefined);
+  // Auth error state — show login prompt instead of auto-redirect loop
+  const [authError, setAuthError] = useState(false);
 
   function openPreview(messageId: string, acctEmail?: string) {
     setPreviewMessageId(messageId);
@@ -490,7 +492,8 @@ export default function Dashboard() {
         gmailGet('inbox', { q: 'in:inbox', max: '50' }),
       ]);
       if (!profileRes.success && (profileRes.error?.includes('Not authenticated') || profileRes.error?.includes('auth failed'))) {
-        window.location.href = '/api/emailHelperV2/auth/login';
+        setAuthError(true);
+        setLoading(false);
         return;
       }
       if (profileRes.success) setProfile(profileRes.data);
@@ -526,7 +529,8 @@ export default function Dashboard() {
       setCurrentAccount(primaryAcct);
       const profileRes = await gmailGet('profile');
       if (!profileRes.success && (profileRes.error?.includes('Not authenticated') || profileRes.error?.includes('auth failed'))) {
-        window.location.href = '/api/emailHelperV2/auth/login';
+        setAuthError(true);
+        setLoading(false);
         return;
       }
       if (profileRes.success) setProfile(profileRes.data);
@@ -698,6 +702,25 @@ export default function Dashboard() {
     { id: 'priorities', label: 'My Priorities' },
     { id: 'accounts', label: 'Accounts' },
   ];
+
+  // Auth error — show login prompt instead of redirect loop
+  if (authError) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-20 text-center">
+        <h1 className="text-2xl font-bold mb-3">Email Helper</h1>
+        <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>
+          Your session has expired or you need to sign in.
+        </p>
+        <a
+          href="/api/emailHelperV2/auth/login"
+          className="inline-block px-6 py-3 rounded-xl text-white font-semibold"
+          style={{ background: '#4f46e5' }}
+        >
+          Sign in with Google
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">

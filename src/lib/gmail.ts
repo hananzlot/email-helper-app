@@ -3,11 +3,11 @@ import type { GmailMessage, GmailAttachment, GmailDraft, GmailLabel, GmailAction
 
 // ============ AUTH ============
 
-export function getOAuth2Client() {
+export function getOAuth2Client(redirectUri?: string) {
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    `${process.env.NEXT_PUBLIC_APP_URL}/api/emailHelperV2/auth/callback`
+    redirectUri || `${process.env.NEXT_PUBLIC_APP_URL}/api/emailHelperV2/auth/callback`
   );
 }
 

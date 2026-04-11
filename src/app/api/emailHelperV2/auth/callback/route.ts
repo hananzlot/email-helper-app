@@ -20,8 +20,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Use the current request origin for redirect URI (must match what login route used)
+    const origin = new URL(request.url).origin;
+    const redirectUri = `${origin}/api/emailHelperV2/auth/callback`;
+
     // Exchange Google auth code for tokens + user info
-    const { tokens, userInfo, gmailProfile } = await exchangeCodeForTokens(code);
+    const { tokens, userInfo, gmailProfile } = await exchangeCodeForTokens(code, redirectUri);
 
     let userId: string;
     const isAddAccount = state?.startsWith('add_account:');

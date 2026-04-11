@@ -16,6 +16,10 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const authUrl = getGoogleAuthUrl(state);
+  // Use the current request origin for the redirect URI so branch deploys work
+  const origin = new URL(request.url).origin;
+  const redirectUri = `${origin}/api/emailHelperV2/auth/callback`;
+
+  const authUrl = getGoogleAuthUrl(state, redirectUri);
   return NextResponse.redirect(authUrl);
 }

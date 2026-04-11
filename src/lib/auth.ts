@@ -10,8 +10,8 @@ import { TABLES } from './tables';
  * After Google redirects back, we exchange the code, store the Gmail tokens
  * in our gmail_accounts table, and sign the user into Supabase.
  */
-export function getGoogleAuthUrl(state?: string) {
-  const oauth2Client = getOAuth2Client();
+export function getGoogleAuthUrl(state?: string, redirectUri?: string) {
+  const oauth2Client = getOAuth2Client(redirectUri);
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',       // Get refresh_token for long-lived access
     prompt: 'consent',            // Always show consent to get refresh_token
@@ -25,8 +25,8 @@ export function getGoogleAuthUrl(state?: string) {
  * Exchange the authorization code from Google for tokens.
  * Returns the tokens + user info from Google.
  */
-export async function exchangeCodeForTokens(code: string) {
-  const oauth2Client = getOAuth2Client();
+export async function exchangeCodeForTokens(code: string, redirectUri?: string) {
+  const oauth2Client = getOAuth2Client(redirectUri);
   const { tokens } = await oauth2Client.getToken(code);
   oauth2Client.setCredentials(tokens);
 
@@ -96,6 +96,20 @@ export async function storeGmailTokens(
   expiresAt: Date | null
 ) {
   const admin = createSupabaseAdmin();
+
+  // If no new refresh_token provided, preserve the existing one
+  if (!refreshToken) {
+    const { data: existing } = await admin
+      .from(TABLES.GMAIL_ACCOUNTS)
+      .select('refresh_token')
+      .eq('user_id', userId)
+      .eq('email', email)
+      .single();
+    if (existing?.refresh_token) {
+      refreshToken = existing.refresh_token;
+    }
+  }
+
   const { data, error } = await admin
     .from(TABLES.GMAIL_ACCOUNTS)
     .upsert(
