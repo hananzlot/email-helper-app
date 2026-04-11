@@ -2313,10 +2313,87 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
   const snoozedCount = tabCounts['snoozed'] || 0;
   const cleanupCount = tabCounts['cleanup'] || 0;
   const hasAccounts = accounts.length > 0;
-  const [showGuide, setShowGuide] = useState(!hasAccounts);
+  const [showGuide, setShowGuide] = useState(false);
+
+  // New user — show onboarding flow
+  if (!hasAccounts) {
+    return (
+      <div className="max-w-lg mx-auto py-8">
+        <div className="text-center mb-8">
+          <h2 className="text-2xl font-bold mb-2">Welcome to Clearbox</h2>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>Get started in 3 simple steps</p>
+        </div>
+
+        {/* Step 1 — big prominent CTA */}
+        <div className="p-6 rounded-2xl border-2 mb-4" style={{ borderColor: 'var(--accent)', background: '#eef2ff' }}>
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold text-white" style={{ background: 'var(--accent)' }}>1</div>
+            <div>
+              <div className="font-bold text-base">Connect your Gmail</div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>Takes 10 seconds. We never store your emails.</div>
+            </div>
+          </div>
+          <a href="/api/emailHelperV2/auth/login?state=add_account"
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-white font-semibold text-sm transition-all hover:shadow-lg active:scale-[0.98]"
+            style={{ background: 'var(--accent)' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            Connect Gmail Account
+          </a>
+        </div>
+
+        {/* Steps 2 & 3 — dimmed, coming next */}
+        <div className="p-4 rounded-xl border mb-3" style={{ borderColor: 'var(--border)', background: 'var(--card)', opacity: 0.6 }}>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: '#f1f5f9', color: 'var(--muted)' }}>2</div>
+            <div>
+              <div className="font-semibold text-sm">We learn who matters to you</div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>Clearbox scans who you reply to most and auto-sorts your senders into priority tiers.</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-xl border mb-6" style={{ borderColor: 'var(--border)', background: 'var(--card)', opacity: 0.6 }}>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: '#f1f5f9', color: 'var(--muted)' }}>3</div>
+            <div>
+              <div className="font-semibold text-sm">Start clearing your inbox</div>
+              <div className="text-xs" style={{ color: 'var(--muted)' }}>Reply to important emails, bulk-archive the noise, and reach inbox zero.</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Trust strip */}
+        <div className="grid grid-cols-3 gap-3 text-center p-4 rounded-xl" style={{ background: '#f8fafc', border: '1px solid var(--border)' }}>
+          <div>
+            <div className="text-lg font-bold" style={{ color: 'var(--accent)' }}>100%</div>
+            <div className="text-[10px]" style={{ color: 'var(--muted)' }}>Private & encrypted</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold" style={{ color: 'var(--accent)' }}>30s</div>
+            <div className="text-[10px]" style={{ color: 'var(--muted)' }}>Setup time</div>
+          </div>
+          <div>
+            <div className="text-lg font-bold" style={{ color: 'var(--accent)' }}>1-click</div>
+            <div className="text-[10px]" style={{ color: 'var(--muted)' }}>Undo any action</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Returning user — dashboard view
+  const totalActionable = triageCount + followUpCount + snoozedCount + cleanupCount;
 
   return (
     <div>
+      {/* Summary banner */}
+      {totalActionable > 0 && (
+        <div className="p-4 rounded-xl mb-6" style={{ background: '#eef2ff', border: '1px solid #c7d2fe' }}>
+          <div className="text-lg font-bold" style={{ color: '#4338ca' }}>{totalActionable} emails need attention</div>
+          <div className="text-xs mt-1" style={{ color: '#6366f1' }}>Start with Top Tiers — your most important emails first</div>
+        </div>
+      )}
+
       {/* Stats cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <button onClick={() => onNavigate('reply-queue')}
@@ -2326,7 +2403,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
           <div className="text-xs font-medium mt-1" style={{ color: triageCount > 0 ? '#6366f1' : 'var(--muted)' }}>
             {triageCount === 0 ? 'All clear!' : 'Needs your reply'}
           </div>
-          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Triage</div>
+          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Top Tiers</div>
         </button>
 
         <button onClick={() => onNavigate('follow-up')}
@@ -2356,7 +2433,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
           <div className="text-xs font-medium mt-1" style={{ color: cleanupCount > 5 ? '#ef4444' : 'var(--muted)' }}>
             {cleanupCount === 0 ? 'Inbox clean!' : 'Low-priority emails'}
           </div>
-          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Cleanup</div>
+          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Quick Clear</div>
         </button>
       </div>
 
@@ -2365,7 +2442,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
         <button onClick={() => onNavigate('reply-queue')}
           className="px-4 py-2.5 text-xs font-semibold rounded-lg text-white transition-all hover:shadow-md active:scale-95"
           style={{ background: 'var(--accent)' }}>
-          Go to Triage
+          Go to Top Tiers
         </button>
         <button onClick={onRunTriage}
           disabled={triageLoading}
@@ -2376,7 +2453,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
         <button onClick={() => onNavigate('cleanup')}
           className="px-4 py-2.5 text-xs font-semibold rounded-lg border transition-all hover:shadow-md active:scale-95"
           style={{ borderColor: 'var(--border)', color: '#64748b' }}>
-          Clean Up Noise
+          Quick Clear Noise
         </button>
       </div>
 
@@ -2439,7 +2516,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
                   <span className="text-[10px] px-2 py-1 rounded-full font-bold" style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>Tier D — Low priority</span>
                 </div>
                 <p className="text-xs mt-2 leading-relaxed" style={{ color: '#475569' }}>
-                  Tiers A, B, and C go to <strong>Triage</strong> (emails that need your attention). Tier D and unknown senders go to <strong>Cleanup</strong> (newsletters, notifications, noise).
+                  Tiers A, B, and C go to <strong>Top Tiers</strong> (emails that need your attention). Tier D and unknown senders go to <strong>Quick Clear Boxers</strong> (newsletters, notifications, noise).
                   You can change any sender&apos;s tier at any time.
                 </p>
               </div>
@@ -2452,9 +2529,9 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
                 3
               </div>
               <div>
-                <div className="font-semibold text-sm mb-1">Work through your Triage</div>
+                <div className="font-semibold text-sm mb-1">Work through your Top Tiers</div>
                 <p className="text-xs leading-relaxed" style={{ color: '#475569' }}>
-                  The <button onClick={() => onNavigate('reply-queue')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Triage</button> tab
+                  The <button onClick={() => onNavigate('reply-queue')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Top Tiers</button> tab
                   shows emails that need your attention, scored and sorted by priority. For each email you can: <strong>Reply</strong> directly,
                   <strong> Snooze</strong> to deal with it later, <strong>Archive</strong> when done, or <strong>Trash</strong> it.
                   Archive and Trash have a 5-second undo window — so go fast.
@@ -2487,9 +2564,9 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
               <div>
                 <div className="font-semibold text-sm mb-1">Batch-clean the noise</div>
                 <p className="text-xs leading-relaxed" style={{ color: '#475569' }}>
-                  The <button onClick={() => onNavigate('cleanup')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Cleanup</button> tab
+                  The <button onClick={() => onNavigate('cleanup')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Quick Clear Boxers</button> tab
                   groups all low-priority email by sender. Select entire senders and archive or trash dozens of messages in one click.
-                  If a sender is showing up here that shouldn&apos;t be, change their tier to promote them to Triage.
+                  If a sender is showing up here that shouldn&apos;t be, change their tier to promote them to Top Tiers.
                 </p>
               </div>
             </div>
@@ -2515,14 +2592,14 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
               <div className="font-semibold text-xs mb-2" style={{ color: '#166534' }}>Pro tips</div>
               <div className="flex flex-col gap-1.5 text-xs" style={{ color: '#15803d' }}>
                 <div>• <strong>Snooze</strong> emails you need to deal with but not right now — they&apos;ll pop back into your queue at the time you choose.</div>
-                <div>• <strong>Quick Reply</strong> — in Triage, use the &quot;Quick Reply&quot; dropdown to send a template response and auto-archive in one click.</div>
-                <div>• <strong>Drag to reorder</strong> — drag Triage cards to rearrange priority. Pin important emails with the 📌 button to keep them at top.</div>
+                <div>• <strong>Quick Reply</strong> — in Top Tiers, use the &quot;Quick Reply&quot; dropdown to send a template response and auto-archive in one click.</div>
+                <div>• <strong>Drag to reorder</strong> — drag Top Tiers cards to rearrange priority. Pin important emails with the 📌 button to keep them at top.</div>
                 <div>• <strong>Undo</strong> — after archiving or trashing, you get a 5-second window to undo. Go fast, undo if needed.</div>
                 <div>• <strong>Auto-Clean</strong> — in Priorities, enable &quot;Auto-Clean&quot; for high-tier senders whose update emails should be auto-archived during triage.</div>
                 <div>• <strong>Merge Senders</strong> — in Priorities, click &quot;Merge Senders&quot; to manually combine duplicate contacts, or use the auto-detected suggestions.</div>
                 <div>• <strong>Search</strong> — press <strong>⌘K</strong> (or <strong>/</strong>) to open global search. It searches all emails across all connected accounts by sender or subject.</div>
                 <div>• The <strong>Sent</strong> tab groups your outgoing mail into conversations — no more scrolling through duplicates.</div>
-                <div>• Triage runs automatically every 2 minutes. You can also trigger it manually from the button above.</div>
+                <div>• Top Tiers runs automatically every 2 minutes. You can also trigger it manually from the button above.</div>
               </div>
             </div>
 
@@ -3250,7 +3327,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
   if (signalQueue.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
       <p className="text-lg mb-2">No priority emails in triage</p>
-      <p className="text-sm">Triage runs automatically every 2 minutes. Only high-priority senders (Tier A/B) and emails needing replies appear here. You can also run it manually from the Accounts tab.</p>
+      <p className="text-sm">Top Tiers runs automatically every 2 minutes. Only high-priority senders (Tier A/B) and emails needing replies appear here. You can also run it manually from the Accounts tab.</p>
     </div>
   );
 
@@ -3288,7 +3365,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
         })}
       </div>
 
-      {/* Active items grouped by priority + thread — low priority goes to Cleanup tab */}
+      {/* Active items grouped by priority + thread — low priority goes to Quick Clear Boxers tab */}
       {['urgent', 'important', 'normal'].map(priority => {
         const groups = filteredActive.filter(g => g.lead.priority === priority);
         if (groups.length === 0) return null;
@@ -4220,7 +4297,7 @@ function SnoozedTab({ onAction, showToast, onPreview, onDialogPreview, reloadKey
   if (snoozedItems.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
       <p className="text-lg mb-2">No snoozed emails</p>
-      <p className="text-sm">Snooze emails from the Triage tab to deal with them later.</p>
+      <p className="text-sm">Snooze emails from the Top Tiers tab to deal with them later.</p>
     </div>
   );
 
@@ -5413,7 +5490,7 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
       {/* Manual Tools */}
       <div className="rounded-xl border p-6" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
         <h3 className="font-semibold mb-2">Manual Tools</h3>
-        <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>Triage runs automatically every 2 minutes. Use these to run manually.</p>
+        <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>Top Tiers runs automatically every 2 minutes. Use these to run manually.</p>
         <div className="flex gap-3 flex-wrap">
           <button onClick={onRunTriage} disabled={triageLoading}
             className="px-4 py-2 text-sm font-semibold rounded-lg text-white"
