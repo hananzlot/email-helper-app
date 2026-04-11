@@ -62,9 +62,9 @@ export async function PUT(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { id, status, snoozed_until } = body;
+    const { id, message_id, status, snoozed_until } = body;
 
-    if (!id || !status) return apiError('Missing id or status');
+    if ((!id && !message_id) || !status) return apiError('Missing id/message_id or status');
 
     const admin = createSupabaseAdmin();
     const update: Record<string, unknown> = {
@@ -73,16 +73,18 @@ export async function PUT(request: NextRequest) {
     };
     if (snoozed_until) update.snoozed_until = snoozed_until;
 
-    const { data, error } = await admin
-      .from(TABLES.REPLY_QUEUE)
-      .update(update)
-      .eq('id', id)
-      .eq('user_id', userId)
-      .select()
-      .single();
+    // Support lookup by either queue ID or Gmail message_id
+    let query = admin.from(TABLES.REPLY_QUEUE).update(update).eq('user_id', userId);
+    if (id) {
+      query = query.eq('id', id);
+    } else {
+      query = query.eq('message_id', message_id);
+    }
+
+    const { data, error } = await query.select();
 
     if (error) return apiError(error.message, 500);
-    return apiSuccess(data);
+    return apiSuccess(data?.[0] || { updated: true });
   } catch (err) {
     return apiError(`Failed: ${err}`, 500);
   }

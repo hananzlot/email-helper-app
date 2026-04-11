@@ -700,10 +700,20 @@ export default function Dashboard() {
               return next;
             });
           }, 400);
+          // Also mark reply queue items as done
+          for (const msgId of messageIds) {
+            apiPut('queue', { message_id: msgId, status: 'done' }).catch(() => {});
+          }
+          setTriageVersion(v => v + 1);
         } else {
           // Non-destructive: update immediately
           if (action === 'markRead') {
             setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
+            // Also mark reply queue items as done so they disappear from Triage
+            for (const msgId of messageIds) {
+              apiPut('queue', { message_id: msgId, status: 'done' }).catch(() => {});
+            }
+            setTriageVersion(v => v + 1); // trigger Triage tab reload
           } else if (action === 'markUnread') {
             setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
           }

@@ -37,13 +37,16 @@ button:active:not(:disabled) {
   transform: translateY(0) scale(0.97);
   box-shadow: none;
 }
-/* White/bordered buttons get a subtle background fill on hover */
-button[style*="border"]:hover:not(:disabled) {
+/* White/bordered buttons get a subtle background fill on hover — works for both inline style and Tailwind class borders */
+button[style*="border"]:hover:not(:disabled),
+button.border:hover:not(:disabled),
+button[class*="border"]:hover:not(:disabled) {
   background: #f1f5f9 !important;
 }
 /* Colored (filled) buttons get brighter on hover */
 button[style*="background: var(--accent)"]:hover:not(:disabled),
-button[style*="background: var(--urgent)"]:hover:not(:disabled) {
+button[style*="background: var(--urgent)"]:hover:not(:disabled),
+button[style*="background: #"]:hover:not(:disabled) {
   filter: brightness(1.1);
 }
 
