@@ -16,8 +16,9 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Use the current request origin for the redirect URI so branch deploys work
-  const origin = new URL(request.url).origin;
+  // Use NEXT_PUBLIC_APP_URL for the redirect URI — Netlify's request.url
+  // returns internal deploy preview URLs which aren't registered with Google
+  const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
   const redirectUri = `${origin}/api/emailHelperV2/auth/callback`;
 
   const authUrl = getGoogleAuthUrl(state, redirectUri);

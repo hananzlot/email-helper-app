@@ -9,19 +9,21 @@ export async function GET(request: NextRequest) {
   const state = searchParams.get('state');  // 'login' or 'add_account:userId'
   const error = searchParams.get('error');
 
+  // Use NEXT_PUBLIC_APP_URL so all redirects go to the production domain,
+  // not Netlify's internal deploy preview URLs
+  const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+
   if (error) {
     return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent(error)}`, request.url)
+      new URL(`/login?error=${encodeURIComponent(error)}`, origin)
     );
   }
 
   if (!code) {
-    return NextResponse.redirect(new URL('/login?error=no_code', request.url));
+    return NextResponse.redirect(new URL('/login?error=no_code', origin));
   }
 
   try {
-    // Use the current request origin for redirect URI (must match what login route used)
-    const origin = new URL(request.url).origin;
     const redirectUri = `${origin}/api/emailHelperV2/auth/callback`;
 
     // Exchange Google auth code for tokens + user info
@@ -84,7 +86,7 @@ export async function GET(request: NextRequest) {
       });
 
       // Redirect to dashboard with session info
-      const redirectUrl = new URL('/dashboard', request.url);
+      const redirectUrl = new URL('/dashboard', origin);
       redirectUrl.searchParams.set('session_token', linkData.properties?.hashed_token || '');
       redirectUrl.searchParams.set('account', gmailProfile.email);
 
@@ -108,7 +110,7 @@ export async function GET(request: NextRequest) {
       return response;
     } else {
       // Adding an account — redirect back to dashboard with success
-      const redirectUrl = new URL('/dashboard', request.url);
+      const redirectUrl = new URL('/dashboard', origin);
       redirectUrl.searchParams.set('account_added', gmailProfile.email);
       redirectUrl.searchParams.set('account', gmailProfile.email);
       const response = NextResponse.redirect(redirectUrl);
@@ -132,7 +134,7 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error('Auth callback error:', err);
     return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent('Authentication failed')}`, request.url)
+      new URL(`/login?error=${encodeURIComponent('Authentication failed')}`, origin)
     );
   }
 }
