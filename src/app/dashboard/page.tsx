@@ -520,8 +520,9 @@ export default function Dashboard() {
   }
 
   // Load inbox for a single account, optionally run silent triage after
-  const loadInbox = useCallback(async (silentTriage = false) => {
-    setLoading(true);
+  // silent=true skips the loading spinner (for background refreshes)
+  const loadInbox = useCallback(async (silentTriage = false, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [profileRes, inboxRes] = await Promise.all([
         gmailGet('profile'),
@@ -556,9 +557,10 @@ export default function Dashboard() {
   }, [account]);
 
   // Load inbox from ALL accounts and merge, optionally run silent triage
-  const loadUnifiedInbox = useCallback(async (silentTriage = false) => {
+  // silent=true skips the loading spinner (for background refreshes)
+  const loadUnifiedInbox = useCallback(async (silentTriage = false, silent = false) => {
     if (accounts.length === 0) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const savedAccount = _currentAccount;
       const primaryAcct = accounts.find(a => a.is_primary)?.email || accounts[0].email;
@@ -610,17 +612,29 @@ export default function Dashboard() {
     }
   }, [accounts]);
 
+  // Track whether we've done the first load (to avoid flashing spinner on re-loads)
+  const hasLoadedRef = React.useRef(false);
+
   // Initial load + triage on first load
   // Re-runs when accounts populate so unified view loads all accounts
   useEffect(() => {
     if (!account) return;
+    const isFirstLoad = !hasLoadedRef.current;
+
     if (unified && accounts.length > 1) {
-      loadUnifiedInbox(true);
+      // All accounts ready — load unified (show spinner only on first load)
+      hasLoadedRef.current = true;
+      loadUnifiedInbox(true, !isFirstLoad);
     } else if (unified && accounts.length <= 1) {
-      // Unified requested but accounts not yet loaded — load single for now
-      loadInbox(true);
+      // Accounts not loaded yet — load single account quietly if we already showed data
+      if (isFirstLoad) {
+        hasLoadedRef.current = true;
+        loadInbox(true);
+      }
+      // Otherwise skip — wait for accounts to populate and trigger unified load
     } else {
-      loadInbox(true);
+      hasLoadedRef.current = true;
+      loadInbox(true, !isFirstLoad);
     }
   }, [account, unified, accounts.length]);
 
@@ -953,7 +967,10 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
         <span className="text-xs ml-auto" style={{ color: 'var(--muted)' }}>{messages.length} messages</span>
       </div>
       {loading ? (
-        <div className="text-center py-16" style={{ color: 'var(--muted)' }}><p className="text-lg mb-2">Loading inbox...</p></div>
+        <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+          <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+          <p className="text-sm">Loading your inbox...</p>
+        </div>
       ) : messages.length === 0 ? (
         <div className="text-center py-16" style={{ color: 'var(--muted)' }}><p className="text-lg mb-2">Inbox Zero!</p><p className="text-sm">No messages.</p></div>
       ) : (
@@ -1164,7 +1181,12 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview }: {
     normal: { border: 'var(--normal)', bg: 'var(--normal-bg)', label: 'When Free' },
   };
 
-  if (loading) return <div className="text-center py-16" style={{ color: 'var(--muted)' }}>Loading triaged inbox...</div>;
+  if (loading) return (
+    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+      <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+      <p className="text-sm">Loading your priority emails...</p>
+    </div>
+  );
 
   if (signalQueue.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
