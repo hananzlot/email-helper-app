@@ -1,5 +1,11 @@
 # Email Helper App — Development Guide
 
+## Project Location
+- **Local path**: `~/Documents/email-helper-app`
+- **GitHub**: `github.com/hananzlot/email-helper-app`
+- **Deployed**: `emaihelper.netlify.app`
+- **Cowork mount**: Always select `~/Documents/email-helper-app` — do NOT use `~/Email Helper/email-helper-app` (that is an outdated copy)
+
 ## Architecture
 - **Next.js App Router** with TypeScript, deployed on Netlify
 - **Supabase** backend (auth, sender priorities, reply queue, triage results, notification rules)
@@ -54,10 +60,10 @@ and/or the "Pro tips" section so users can discover and learn it. This is critic
 - `--bg`: page background (#f8f9fa)
 
 ### File Sync Warning
-- The local project at `~/Documents/email-helper-app` is the source of truth that feeds GitHub and Netlify deployments.
-- Previous Cowork sessions may write code to temporary session directories. Those changes are deployed to Netlify and pushed to GitHub, but the LOCAL project folder is NOT automatically updated.
-- **ALWAYS verify the local file matches GitHub before editing.** Run `git pull origin main` or use `git show origin/main:<filepath>` to compare.
+- The local project at `~/Documents/email-helper-app` is the **source of truth** that feeds GitHub and Netlify deployments.
+- **ALWAYS `git pull origin main` before making any edits** to ensure the local file matches GitHub.
 - If the local file is outdated, fetch from origin and overwrite it before making changes.
+- After editing, commit and push: `git add <files> && git commit -m "message" && git push origin main`
 
 ## Build & Deploy
 ```bash

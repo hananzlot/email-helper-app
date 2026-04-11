@@ -25,6 +25,13 @@ export interface GmailAccount {
 
 // ============ GMAIL ============
 
+export interface GmailAttachment {
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachmentId: string;
+}
+
 export interface GmailMessage {
   id: string;
   threadId: string;
@@ -33,9 +40,14 @@ export interface GmailMessage {
   subject: string;
   snippet: string;
   body?: string;
+  bodyHtml?: string;
   date: string;
   labelIds: string[];
   isUnread: boolean;
+  to?: string;
+  cc?: string;
+  attachments?: GmailAttachment[];
+  accountEmail?: string; // Which account this message belongs to (for unified view)
 }
 
 export interface GmailDraft {

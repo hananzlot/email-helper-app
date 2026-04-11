@@ -2,8 +2,12 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Email Helper — Inbox Command Center",
+  title: "Clearbox — Your Inbox Command Center",
   description: "Triage, prioritize, and manage your Gmail inbox with AI-powered intelligence.",
+  icons: {
+    icon: '/clearbox-favicon.svg',
+    apple: '/clearbox-logo.svg',
+  },
 };
 
 export default function RootLayout({

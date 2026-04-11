@@ -1,6 +1,7 @@
 import { createSupabaseServerClient, createSupabaseAdmin } from './supabase-server';
 import { getOAuth2Client, GMAIL_SCOPES } from './gmail';
 import { TABLES } from './tables';
+import { encrypt, decrypt } from './crypto';
 
 /**
  * Generate the Google OAuth URL that requests Gmail permissions.
@@ -10,8 +11,8 @@ import { TABLES } from './tables';
  * After Google redirects back, we exchange the code, store the Gmail tokens
  * in our gmail_accounts table, and sign the user into Supabase.
  */
-export function getGoogleAuthUrl(state?: string) {
-  const oauth2Client = getOAuth2Client();
+export function getGoogleAuthUrl(state?: string, redirectUri?: string) {
+  const oauth2Client = getOAuth2Client(redirectUri);
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',       // Get refresh_token for long-lived access
     prompt: 'consent',            // Always show consent to get refresh_token
@@ -25,8 +26,8 @@ export function getGoogleAuthUrl(state?: string) {
  * Exchange the authorization code from Google for tokens.
  * Returns the tokens + user info from Google.
  */
-export async function exchangeCodeForTokens(code: string) {
-  const oauth2Client = getOAuth2Client();
+export async function exchangeCodeForTokens(code: string, redirectUri?: string) {
+  const oauth2Client = getOAuth2Client(redirectUri);
   const { tokens } = await oauth2Client.getToken(code);
   oauth2Client.setCredentials(tokens);
 
@@ -96,14 +97,34 @@ export async function storeGmailTokens(
   expiresAt: Date | null
 ) {
   const admin = createSupabaseAdmin();
+
+  // If no new refresh_token provided, preserve the existing one (already encrypted in DB)
+  let encryptedRefreshToken: string | null = null;
+  if (!refreshToken) {
+    const { data: existing } = await admin
+      .from(TABLES.GMAIL_ACCOUNTS)
+      .select('refresh_token')
+      .eq('user_id', userId)
+      .eq('email', email)
+      .single();
+    // Keep the already-encrypted value as-is (don't double-encrypt)
+    encryptedRefreshToken = existing?.refresh_token || null;
+  } else {
+    // New refresh token — encrypt it
+    encryptedRefreshToken = encrypt(refreshToken, userId);
+  }
+
+  // Encrypt access token before storing
+  const encryptedAccessToken = encrypt(accessToken, userId);
+
   const { data, error } = await admin
     .from(TABLES.GMAIL_ACCOUNTS)
     .upsert(
       {
         user_id: userId,
         email,
-        access_token: accessToken,
-        refresh_token: refreshToken,
+        access_token: encryptedAccessToken,
+        refresh_token: encryptedRefreshToken,
         token_expires_at: expiresAt?.toISOString(),
         status: 'connected',
         updated_at: new Date().toISOString(),
@@ -130,6 +151,12 @@ export async function getGmailTokens(userId: string, email: string) {
     .single();
 
   if (error) return null;
+
+  // Decrypt tokens (gracefully handles unencrypted legacy data)
+  if (data) {
+    data.access_token = decrypt(data.access_token, userId);
+    data.refresh_token = decrypt(data.refresh_token, userId);
+  }
   return data;
 }
 

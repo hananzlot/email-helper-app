@@ -1,6 +1,6 @@
 /**
  * Central table name constants.
- * All Email Helper tables are prefixed with emailHelperV2_ to coexist
+ * All Clearbox tables are prefixed with emailHelperV2_ to coexist
  * with other data in the same Supabase project.
  */
 export const TABLES = {
@@ -11,4 +11,5 @@ export const TABLES = {
   TRIAGE_RESULTS: 'emailHelperV2_triage_results',
   REPLY_QUEUE: 'emailHelperV2_reply_queue',
   CLEANUP_REPORTS: 'emailHelperV2_cleanup_reports',
+  FOLLOW_UP_CACHE: 'emailHelperV2_follow_up_cache',
 } as const;

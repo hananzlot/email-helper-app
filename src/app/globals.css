@@ -8,8 +8,8 @@
   --muted: #718096;
   --accent: #3b82f6;
   --accent-hover: #2563eb;
-  --urgent: #ef4444;
-  --urgent-bg: #fef2f2;
+  --urgent: #6366f1;
+  --urgent-bg: #eef2ff;
   --important: #f59e0b;
   --important-bg: #fffbeb;
   --normal: #10b981;
@@ -22,4 +22,72 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Action button hover effects — applies to all card and modal buttons */
+button {
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease, background 0.15s ease;
+}
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  filter: brightness(0.95);
+}
+button:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+  box-shadow: none;
+}
+/* White/bordered buttons get a subtle background fill on hover — works for both inline style and Tailwind class borders */
+button[style*="border"]:hover:not(:disabled),
+button.border:hover:not(:disabled),
+button[class*="border"]:hover:not(:disabled) {
+  background: #f1f5f9 !important;
+}
+/* Colored (filled) buttons get brighter on hover */
+button[style*="background: var(--accent)"]:hover:not(:disabled),
+button[style*="background: var(--urgent)"]:hover:not(:disabled),
+button[style*="background: #"]:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+/* Trash animation: red flash + slide left */
+@keyframes trash-out {
+  0% { transform: translateX(0); opacity: 1; background: var(--card); }
+  30% { background: #fef2f2; border-color: #ef4444; }
+  100% { transform: translateX(-100%); opacity: 0; max-height: 0; padding: 0; margin: 0; overflow: hidden; }
+}
+.animate-trash-out {
+  animation: trash-out 0.4s ease-in-out forwards;
+}
+
+/* Delete animation: red flash + shrink to nothing */
+@keyframes delete-out {
+  0% { transform: scale(1); opacity: 1; background: var(--card); }
+  20% { background: #fee2e2; border-color: #dc2626; transform: scale(1.02); }
+  100% { transform: scale(0.8); opacity: 0; max-height: 0; padding: 0; margin: 0; overflow: hidden; }
+}
+.animate-delete-out {
+  animation: delete-out 0.4s ease-in-out forwards;
+}
+
+/* Archive animation: fade + slide up */
+@keyframes archive-out {
+  0% { transform: translateY(0); opacity: 1; }
+  30% { background: #eff6ff; border-color: #3b82f6; }
+  100% { transform: translateY(-20px); opacity: 0; max-height: 0; padding: 0; margin: 0; overflow: hidden; }
+}
+.animate-archive-out {
+  animation: archive-out 0.4s ease-in-out forwards;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 640px) {
+  /* Reduce padding on small screens */
+  .max-w-4xl { padding-left: 12px !important; padding-right: 12px !important; }
+  /* Make modals full-width on mobile */
+  .max-w-3xl { max-width: calc(100vw - 16px) !important; }
+  /* Tighter button spacing */
+  button { font-size: 12px; }
+  /* Stack header elements */
+  .sticky .flex.items-center.justify-between { flex-wrap: wrap; gap: 8px; }
 }

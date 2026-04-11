@@ -1,13 +1,13 @@
 import { google, gmail_v1 } from 'googleapis';
-import type { GmailMessage, GmailDraft, GmailLabel, GmailAction } from '@/types';
+import type { GmailMessage, GmailAttachment, GmailDraft, GmailLabel, GmailAction } from '@/types';
 
 // ============ AUTH ============
 
-export function getOAuth2Client() {
+export function getOAuth2Client(redirectUri?: string) {
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    `${process.env.NEXT_PUBLIC_APP_URL}/api/emailHelperV2/auth/callback`
+    redirectUri || `${process.env.NEXT_PUBLIC_APP_URL}/api/emailHelperV2/auth/callback`
   );
 }
 
@@ -20,13 +20,9 @@ export function getGmailClient(accessToken: string, refreshToken?: string) {
   return google.gmail({ version: 'v1', auth });
 }
 
-// Gmail scopes needed for full inbox management
+// Gmail scopes — full access scope covers read, modify, compose, send, delete
 export const GMAIL_SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/gmail.compose',
-  'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/gmail.labels',
+  'https://mail.google.com/',  // Full access — needed for permanent delete
   'openid',
   'email',
   'profile',
@@ -79,8 +75,20 @@ export async function getMessage(
 
   // Extract body for full format
   let body = '';
+  let bodyHtml = '';
+  let attachments: GmailAttachment[] = [];
   if (format === 'full' && msg.payload) {
-    body = extractBody(msg.payload);
+    body = extractBody(msg.payload, 'text/plain') || extractBody(msg.payload, 'text/html');
+    bodyHtml = extractBody(msg.payload, 'text/html') || body;
+    attachments = extractAttachments(msg.payload, msg.id!);
+
+    // Resolve inline CID images — replace cid: references with data: URLs
+    const inlineImages = extractInlineImages(msg.payload);
+    for (const [cid, dataUrl] of Object.entries(inlineImages)) {
+      // CID can appear as "cid:abc" or "cid:abc@domain"
+      const cidPattern = new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
+      bodyHtml = bodyHtml.replace(cidPattern, dataUrl);
+    }
   }
 
   const fromHeader = getHeader('From');
@@ -94,40 +102,119 @@ export async function getMessage(
     subject: getHeader('Subject'),
     snippet: msg.snippet || '',
     body,
+    bodyHtml,
+    to: getHeader('To'),
+    cc: getHeader('Cc'),
     date: getHeader('Date'),
     labelIds: msg.labelIds || [],
     isUnread: (msg.labelIds || []).includes('UNREAD'),
+    attachments,
   };
 }
 
-function extractBody(payload: gmail_v1.Schema$MessagePart): string {
-  // Try to get text/plain first, then text/html
-  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+function extractBody(payload: gmail_v1.Schema$MessagePart, preferMime?: string): string {
+  const target = preferMime || 'text/html';
+  const fallback = target === 'text/html' ? 'text/plain' : 'text/html';
+
+  // Direct match
+  if (payload.mimeType === target && payload.body?.data) {
     return Buffer.from(payload.body.data, 'base64').toString('utf-8');
   }
-  if (payload.mimeType === 'text/html' && payload.body?.data) {
+  if (!preferMime && payload.mimeType === fallback && payload.body?.data) {
     return Buffer.from(payload.body.data, 'base64').toString('utf-8');
   }
+
   if (payload.parts) {
-    // Prefer plain text
+    // First pass: exact match
     for (const part of payload.parts) {
-      if (part.mimeType === 'text/plain' && part.body?.data) {
+      if (part.mimeType === target && part.body?.data) {
         return Buffer.from(part.body.data, 'base64').toString('utf-8');
       }
     }
-    // Fall back to HTML
-    for (const part of payload.parts) {
-      if (part.mimeType === 'text/html' && part.body?.data) {
-        return Buffer.from(part.body.data, 'base64').toString('utf-8');
+    // Second pass: fallback
+    if (!preferMime) {
+      for (const part of payload.parts) {
+        if (part.mimeType === fallback && part.body?.data) {
+          return Buffer.from(part.body.data, 'base64').toString('utf-8');
+        }
       }
     }
     // Recurse into multipart
     for (const part of payload.parts) {
-      const result = extractBody(part);
+      const result = extractBody(part, preferMime);
       if (result) return result;
     }
   }
   return '';
+}
+
+function extractAttachments(payload: gmail_v1.Schema$MessagePart, messageId: string): GmailAttachment[] {
+  const attachments: GmailAttachment[] = [];
+
+  function walk(part: gmail_v1.Schema$MessagePart) {
+    if (part.filename && part.filename.length > 0 && part.body?.attachmentId) {
+      attachments.push({
+        filename: part.filename,
+        mimeType: part.mimeType || 'application/octet-stream',
+        size: part.body.size || 0,
+        attachmentId: part.body.attachmentId,
+      });
+    }
+    if (part.parts) {
+      for (const child of part.parts) walk(child);
+    }
+  }
+
+  walk(payload);
+  return attachments;
+}
+
+/**
+ * Extract inline images (Content-Disposition: inline with Content-ID)
+ * and return a map of CID → data:URL so we can replace cid: references in the HTML body.
+ */
+function extractInlineImages(payload: gmail_v1.Schema$MessagePart): Record<string, string> {
+  const images: Record<string, string> = {};
+
+  function walk(part: gmail_v1.Schema$MessagePart) {
+    const contentId = part.headers?.find(h => h.name?.toLowerCase() === 'content-id')?.value;
+    const mimeType = part.mimeType || '';
+
+    if (contentId && mimeType.startsWith('image/') && part.body?.data) {
+      // Content-ID is usually <abc@domain> — strip angle brackets
+      const cid = contentId.replace(/^<|>$/g, '');
+      // Gmail returns base64url — convert to standard base64 for data URL
+      const base64 = part.body.data.replace(/-/g, '+').replace(/_/g, '/');
+      images[cid] = `data:${mimeType};base64,${base64}`;
+    }
+
+    if (part.parts) {
+      for (const child of part.parts) walk(child);
+    }
+  }
+
+  walk(payload);
+  return images;
+}
+
+/**
+ * Fetch attachment data from Gmail.
+ * Returns base64url-encoded data string.
+ */
+export async function getAttachment(
+  client: gmail_v1.Gmail,
+  messageId: string,
+  attachmentId: string
+): Promise<{ data: string; size: number }> {
+  const res = await client.users.messages.attachments.get({
+    userId: 'me',
+    messageId,
+    id: attachmentId,
+  });
+  return {
+    data: res.data.data || '',
+    size: res.data.size || 0,
+  };
 }
 
 export async function getThread(gmail: gmail_v1.Gmail, threadId: string) {

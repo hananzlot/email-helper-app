@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563EB"/>
+      <stop offset="100%" stop-color="#0891B2"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background -->
+  <rect x="2" y="2" width="60" height="60" rx="14" ry="14" fill="url(#bg)"/>
+  <!-- Simple isometric box -->
+  <path d="M 18 26 L 32 19 L 46 26 L 46 42 L 32 49 L 18 42 Z"
+        fill="rgba(255,255,255,0.12)" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M 18 26 L 32 19 L 46 26 L 32 33 Z"
+        fill="rgba(255,255,255,0.1)" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+  <line x1="32" y1="33" x2="32" y2="49" stroke="#ffffff" stroke-width="1.5" opacity="0.4"/>
+  <!-- Checkmark -->
+  <polyline points="25,38 30,43 39,33" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
