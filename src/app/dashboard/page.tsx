@@ -924,13 +924,6 @@ export default function Dashboard() {
         setLoading(false);
         cacheHit = true;
         cachedMsgCount = cachedMsgs.length;
-        // Check if cache is fresh (under 2 minutes old)
-        const syncInfo = cacheRes.data.sync?.[0];
-        const lastSync = syncInfo?.last_synced_at ? new Date(syncInfo.last_synced_at).getTime() : 0;
-        if (Date.now() - lastSync < 2 * 60 * 1000 && !silentTriage) {
-          setLoadingProgress(null);
-          return; // Cache is fresh, skip Gmail fetch
-        }
       }
     } catch {
       // Cache unavailable — proceed with full Gmail fetch
@@ -1034,12 +1027,6 @@ export default function Dashboard() {
         setLoading(false);
         unifiedCacheHit = true;
         unifiedCacheCount = cachedMsgs.length;
-        const syncEntries = cacheRes.data.sync || [];
-        const oldestSync = syncEntries.length > 0 ? Math.min(...syncEntries.map((s: { last_synced_at?: string }) => s.last_synced_at ? new Date(s.last_synced_at).getTime() : 0)) : 0;
-        if (Date.now() - oldestSync < 2 * 60 * 1000 && !silentTriage) {
-          setLoadingProgress(null);
-          return;
-        }
       }
     } catch {}
 
