@@ -910,6 +910,8 @@ export default function Dashboard() {
     if (!silent) setLoading(true);
 
     // Step 1: Try loading from cache for instant display
+    let cacheHit = false;
+    let cachedMsgCount = 0;
     try {
       const cacheRes = await apiGet('inbox-cache');
       if (cacheRes.success && cacheRes.data?.messages?.length > 0) {
@@ -920,6 +922,8 @@ export default function Dashboard() {
         } as GmailMessage));
         setMessages(cachedMsgs);
         setLoading(false);
+        cacheHit = true;
+        cachedMsgCount = cachedMsgs.length;
         // Check if cache is fresh (under 2 minutes old)
         const syncInfo = cacheRes.data.sync?.[0];
         const lastSync = syncInfo?.last_synced_at ? new Date(syncInfo.last_synced_at).getTime() : 0;
@@ -927,17 +931,13 @@ export default function Dashboard() {
           setLoadingProgress(null);
           return; // Cache is fresh, skip Gmail fetch
         }
-        // Cache is stale — refresh from Gmail in background
-        setLoadingProgress({ loaded: cachedMsgs.length, total: null, phase: 'Refreshing from Gmail...' });
       }
     } catch {
-      // Cache unavailable — proceed with Gmail fetch
+      // Cache unavailable — proceed with full Gmail fetch
     }
 
-    // Step 2: Fetch from Gmail (full load or background refresh)
-    setLoadingProgress(prev => prev || { loaded: 0, total: null, phase: 'Connecting to Gmail...' });
+    // Step 2: Fetch from Gmail
     try {
-      // Fetch profile, inbox label count (exact), and first page in parallel
       const [profileRes, labelRes, inboxRes] = await Promise.all([
         gmailGet('profile'),
         gmailGet('labelInfo', { labelId: 'INBOX' }),
@@ -950,40 +950,49 @@ export default function Dashboard() {
         return;
       }
       if (profileRes.success) setProfile(profileRes.data);
-      // Use exact inbox count from labels.get (not the inaccurate resultSizeEstimate)
       const exactInboxTotal = labelRes.success ? labelRes.data.messagesTotal : 0;
+
       if (inboxRes.success && inboxRes.data?.messages) {
-        const msgs = inboxRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
-        setMessages(msgs);
-        const totalToLoad = exactInboxTotal || inboxRes.data.total || msgs.length;
-        setLoadingProgress({ loaded: msgs.length, total: totalToLoad, phase: `Loading ${totalToLoad.toLocaleString()} emails...` });
-        // Save first page to cache
-        saveToCacheBackground(account, msgs);
-        // Background pagination: keep fetching remaining pages
-        let nextToken = inboxRes.data.nextPageToken;
-        let totalLoaded = msgs.length;
-        const allMsgs = [...msgs];
-        const MAX_MESSAGES = 20000;
-        if (nextToken && totalToLoad > 200) {
-          setLoading(false); // Show first page immediately
-          setLoadingProgress({ loaded: totalLoaded, total: Math.min(totalToLoad, MAX_MESSAGES), phase: `Loading ${Math.min(totalToLoad, MAX_MESSAGES).toLocaleString()} emails...` });
+        const freshMsgs = inboxRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
+        saveToCacheBackground(account, freshMsgs);
+
+        if (cacheHit && cachedMsgCount > 200) {
+          // Large cache exists — merge newest 200 from Gmail with cache (don't re-paginate)
+          setMessages(prev => {
+            const existingIds = new Set(prev.map(m => m.id));
+            const newMsgs = freshMsgs.filter((m: GmailMessage) => !existingIds.has(m.id));
+            if (newMsgs.length === 0) return prev; // No new emails
+            return [...newMsgs, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          });
+          setLoadingProgress(null);
+          setLoading(false);
+        } else {
+          // No cache or small cache — full pagination
+          setMessages(freshMsgs);
+          const totalToLoad = exactInboxTotal || inboxRes.data.total || freshMsgs.length;
+          setLoadingProgress({ loaded: freshMsgs.length, total: totalToLoad, phase: `Loading ${totalToLoad.toLocaleString()} emails...` });
+          let nextToken = inboxRes.data.nextPageToken;
+          let totalLoaded = freshMsgs.length;
+          const MAX_MESSAGES = 20000;
+          if (nextToken && totalToLoad > 200) {
+            setLoading(false);
+            setLoadingProgress({ loaded: totalLoaded, total: Math.min(totalToLoad, MAX_MESSAGES), phase: `Loading ${Math.min(totalToLoad, MAX_MESSAGES).toLocaleString()} emails...` });
+          }
+          while (nextToken && totalLoaded < MAX_MESSAGES) {
+            const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+            if (!pageRes.success || !pageRes.data?.messages?.length) break;
+            const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
+            setMessages(prev => [...prev, ...pageMsgs]);
+            totalLoaded += pageMsgs.length;
+            nextToken = pageRes.data.nextPageToken;
+            saveToCacheBackground(account, pageMsgs);
+            const displayTotal = Math.max(totalToLoad, totalLoaded);
+            const minutesLeft = nextToken ? Math.max(1, Math.ceil((displayTotal - totalLoaded) / 200 * 0.5)) : 0;
+            setLoadingProgress({ loaded: totalLoaded, total: displayTotal, phase: nextToken ? `Loading emails... ~${minutesLeft} min remaining` : `Loaded ${totalLoaded.toLocaleString()} emails` });
+          }
+          setLoadingProgress(null);
         }
-        while (nextToken && totalLoaded < MAX_MESSAGES) {
-          const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-          if (!pageRes.success || !pageRes.data?.messages?.length) break;
-          const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
-          setMessages(prev => [...prev, ...pageMsgs]);
-          allMsgs.push(...pageMsgs);
-          totalLoaded += pageMsgs.length;
-          nextToken = pageRes.data.nextPageToken;
-          // Save each page to cache as it loads
-          saveToCacheBackground(account, pageMsgs);
-          const displayTotal = Math.max(totalToLoad, totalLoaded);
-          const minutesLeft = nextToken ? Math.max(1, Math.ceil((displayTotal - totalLoaded) / 200 * 0.5)) : 0;
-          setLoadingProgress({ loaded: totalLoaded, total: displayTotal, phase: nextToken ? `Loading emails... ~${minutesLeft} min remaining` : `Loaded ${totalLoaded.toLocaleString()} emails` });
-        }
-        setLoadingProgress(null);
-      } else {
+      } else if (!cacheHit) {
         setMessages([]);
       }
     } catch (err) {
@@ -1010,6 +1019,8 @@ export default function Dashboard() {
     if (!silent) setLoading(true);
 
     // Step 1: Try loading from cache (returns all accounts)
+    let unifiedCacheHit = false;
+    let unifiedCacheCount = 0;
     try {
       const cacheRes = await apiGet('inbox-cache');
       if (cacheRes.success && cacheRes.data?.messages?.length > 0) {
@@ -1021,21 +1032,18 @@ export default function Dashboard() {
         cachedMsgs.sort((a: GmailMessage, b: GmailMessage) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setMessages(cachedMsgs);
         setLoading(false);
-        // Check freshness
+        unifiedCacheHit = true;
+        unifiedCacheCount = cachedMsgs.length;
         const syncEntries = cacheRes.data.sync || [];
         const oldestSync = syncEntries.length > 0 ? Math.min(...syncEntries.map((s: { last_synced_at?: string }) => s.last_synced_at ? new Date(s.last_synced_at).getTime() : 0)) : 0;
         if (Date.now() - oldestSync < 2 * 60 * 1000 && !silentTriage) {
           setLoadingProgress(null);
-          return; // Cache is fresh
+          return;
         }
-        setLoadingProgress({ loaded: cachedMsgs.length, total: null, phase: 'Refreshing from Gmail...' });
       }
-    } catch {
-      // Cache unavailable
-    }
+    } catch {}
 
     // Step 2: Fetch from Gmail
-    setLoadingProgress(prev => prev || { loaded: 0, total: null, phase: `Connecting to ${accounts.length} account${accounts.length > 1 ? 's' : ''}...` });
     try {
       const savedAccount = _currentAccount;
       const primaryAcct = accounts.find(a => a.is_primary)?.email || accounts[0].email;
@@ -1049,20 +1057,16 @@ export default function Dashboard() {
       }
       if (profileRes.success) setProfile(profileRes.data);
 
-      const allMessages: GmailMessage[] = [];
+      // Fetch first page + label info from each account
+      const freshMessages: GmailMessage[] = [];
       const accountTokens: { email: string; nextPageToken?: string }[] = [];
-      let exactTotal = 0;
       await Promise.all(accounts.map(async (acct) => {
         setCurrentAccount(acct.email);
         try {
-          const [labelRes, res] = await Promise.all([
-            gmailGet('labelInfo', { labelId: 'INBOX' }),
-            gmailGet('inbox', { q: 'in:inbox', max: '200' }),
-          ]);
-          if (labelRes.success) exactTotal += labelRes.data.messagesTotal || 0;
+          const res = await gmailGet('inbox', { q: 'in:inbox', max: '200' });
           if (res.success && res.data?.messages) {
             const acctMsgs = res.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: acct.email }));
-            allMessages.push(...acctMsgs);
+            freshMessages.push(...acctMsgs);
             saveToCacheBackground(acct.email, acctMsgs);
             if (res.data.nextPageToken) {
               accountTokens.push({ email: acct.email, nextPageToken: res.data.nextPageToken });
@@ -1073,40 +1077,52 @@ export default function Dashboard() {
         }
       }));
 
-      allMessages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setMessages(allMessages);
-      setCurrentAccount(savedAccount);
-      setLoading(false);
-
-      if (accountTokens.length > 0) {
-        setLoadingProgress({ loaded: allMessages.length, total: Math.min(exactTotal || allMessages.length, 20000 * accounts.length), phase: `Loading ${(exactTotal || allMessages.length).toLocaleString()} emails across ${accounts.length} accounts...` });
+      if (unifiedCacheHit && unifiedCacheCount > 200) {
+        // Large cache — merge newest from Gmail, don't re-paginate
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.id));
+          const newMsgs = freshMessages.filter(m => !existingIds.has(m.id));
+          if (newMsgs.length === 0) return prev;
+          return [...newMsgs, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        });
+        setCurrentAccount(savedAccount);
+        setLoading(false);
+        setLoadingProgress(null);
       } else {
+        // No cache — full pagination
+        freshMessages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setMessages(freshMessages);
+        setCurrentAccount(savedAccount);
+        setLoading(false);
+
+        if (accountTokens.length > 0) {
+          setLoadingProgress({ loaded: freshMessages.length, total: null, phase: `Loading more emails across ${accounts.length} accounts...` });
+        } else {
+          setLoadingProgress(null);
+        }
+
+        const MAX_PER_ACCOUNT = 20000;
+        let grandTotal = freshMessages.length;
+        for (const at of accountTokens) {
+          let nextToken = at.nextPageToken;
+          let loaded = freshMessages.filter(m => m.accountEmail === at.email).length;
+          while (nextToken && loaded < MAX_PER_ACCOUNT) {
+            setCurrentAccount(at.email);
+            const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+            if (!pageRes.success || !pageRes.data?.messages?.length) break;
+            const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: at.email }));
+            setMessages(prev => [...prev, ...pageMsgs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            saveToCacheBackground(at.email, pageMsgs);
+            loaded += pageMsgs.length;
+            grandTotal += pageMsgs.length;
+            nextToken = pageRes.data.nextPageToken;
+            const minutesLeft = nextToken ? Math.max(1, Math.ceil((grandTotal * 0.2) / 200 * 0.5)) : 0;
+            setLoadingProgress({ loaded: grandTotal, total: null, phase: nextToken ? `Loading emails... ${grandTotal.toLocaleString()} loaded` : `Loaded ${grandTotal.toLocaleString()} emails` });
+          }
+        }
+        setCurrentAccount(savedAccount);
         setLoadingProgress(null);
       }
-
-      // Background pagination
-      const MAX_PER_ACCOUNT = 20000;
-      let grandTotal = allMessages.length;
-      for (const at of accountTokens) {
-        let nextToken = at.nextPageToken;
-        let loaded = allMessages.filter(m => m.accountEmail === at.email).length;
-        while (nextToken && loaded < MAX_PER_ACCOUNT) {
-          setCurrentAccount(at.email);
-          const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-          if (!pageRes.success || !pageRes.data?.messages?.length) break;
-          const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: at.email }));
-          setMessages(prev => [...prev, ...pageMsgs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-          saveToCacheBackground(at.email, pageMsgs);
-          loaded += pageMsgs.length;
-          grandTotal += pageMsgs.length;
-          nextToken = pageRes.data.nextPageToken;
-          const displayTotal = Math.max(exactTotal || 0, grandTotal);
-          const minutesLeft = nextToken ? Math.max(1, Math.ceil((displayTotal - grandTotal) / 200 * 0.5)) : 0;
-          setLoadingProgress({ loaded: grandTotal, total: displayTotal, phase: nextToken ? `Loading emails... ~${minutesLeft} min remaining` : `Loaded ${grandTotal.toLocaleString()} emails` });
-        }
-      }
-      setCurrentAccount(savedAccount);
-      setLoadingProgress(null);
     } catch (err) {
       console.error('Failed to load unified inbox:', err);
     } finally {
