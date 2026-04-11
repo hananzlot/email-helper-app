@@ -33,23 +33,36 @@ export default function Dashboard() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ title: string; subtitle?: string } | null>(null);
 
-  // Load account from cookie
+  // Load account from URL params first, then cookies
   useEffect(() => {
-    const cookies = document.cookie.split(';').reduce((acc, c) => {
-      const [k, v] = c.trim().split('=');
-      acc[k] = v;
-      return acc;
-    }, {} as Record<string, string>);
-    if (cookies.email_helper_account) {
-      setAccount(cookies.email_helper_account);
+    const params = new URLSearchParams(window.location.search);
+
+    // Primary login flow — account comes in the URL
+    const urlAccount = params.get('account');
+    if (urlAccount) {
+      setAccount(urlAccount);
+      // Store in cookie for future page loads
+      document.cookie = `email_helper_account=${urlAccount};path=/;max-age=${60*60*24*30};samesite=lax`;
+      // Clean URL
+      window.history.replaceState({}, '', '/dashboard');
+      return;
     }
 
-    // Check URL params for newly added account
-    const params = new URLSearchParams(window.location.search);
+    // Check for newly added account
     const added = params.get('account_added');
     if (added) {
       showToast('Account connected', added);
       window.history.replaceState({}, '', '/dashboard');
+    }
+
+    // Fall back to cookie
+    const cookies = document.cookie.split(';').reduce((acc, c) => {
+      const [k, v] = c.trim().split('=');
+      if (k && v) acc[k] = decodeURIComponent(v);
+      return acc;
+    }, {} as Record<string, string>);
+    if (cookies.email_helper_account) {
+      setAccount(cookies.email_helper_account);
     }
   }, []);
 
