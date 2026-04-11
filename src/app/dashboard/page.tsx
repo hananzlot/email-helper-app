@@ -2757,12 +2757,43 @@ function SnoozeDropdown({ onSnooze }: { onSnooze: (hours: number, label: string)
 
 // ============ QUICK REPLY DROPDOWN ============
 
-function QuickReplyDropdown({ templates, onSend }: {
+function QuickReplyDropdown({ templates, onSend, senderEmail, senderName, cc, subject }: {
   templates: { id: string; label: string; body: string }[];
-  onSend: (body: string, label: string) => void;
+  onSend: (body: string, label: string, replyAll?: boolean) => void;
+  senderEmail?: string;
+  senderName?: string;
+  cc?: string;
+  subject?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ body: string; label: string; editedBody: string } | null>(null);
+  const [replyMode, setReplyMode] = useState<'sender' | 'all' | null>(null);
+
+  // Check if this is a multi-recipient email
+  const hasMultipleRecipients = !!(cc && cc.trim());
+
+  function handleTemplateClick(t: { id: string; label: string; body: string }) {
+    if (hasMultipleRecipients) {
+      // Show reply mode choice first
+      setPreview({ body: t.body, label: t.label, editedBody: t.body });
+      setReplyMode(null); // Force user to choose
+    } else {
+      // Single recipient — go straight to preview
+      setPreview({ body: t.body, label: t.label, editedBody: t.body });
+      setReplyMode('sender');
+    }
+  }
+
+  async function confirmSend() {
+    if (!preview || !replyMode) return;
+    setSending(preview.label);
+    await onSend(preview.editedBody, preview.label, replyMode === 'all');
+    setSending(null);
+    setPreview(null);
+    setReplyMode(null);
+    setOpen(false);
+  }
 
   return (
     <div className="relative">
@@ -2773,24 +2804,86 @@ function QuickReplyDropdown({ templates, onSend }: {
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1 min-w-[220px]"
+          <div className="fixed inset-0 z-40" onClick={() => { setOpen(false); setPreview(null); setReplyMode(null); }} />
+          <div className="absolute left-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1 min-w-[320px]"
             style={{ background: 'white', borderColor: 'var(--border)' }}>
-            <div className="px-3 py-1.5 text-[10px] font-semibold uppercase" style={{ color: 'var(--muted)' }}>Send &amp; Archive</div>
-            {templates.map((t) => (
-              <button key={t.id} onClick={async () => {
-                setSending(t.id);
-                await onSend(t.body, t.label);
-                setSending(null);
-                setOpen(false);
-              }}
-                disabled={sending === t.id}
-                className="w-full text-left px-3 py-2.5 text-xs hover:bg-blue-50 transition-colors flex flex-col gap-0.5"
-                style={{ opacity: sending === t.id ? 0.5 : 1 }}>
-                <span className="font-semibold">{sending === t.id ? 'Sending...' : t.label}</span>
-                <span className="text-[10px] truncate" style={{ color: 'var(--muted)' }}>{t.body}</span>
-              </button>
-            ))}
+
+            {/* Step 1: Template selection */}
+            {!preview && (
+              <>
+                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase" style={{ color: 'var(--muted)' }}>Choose a quick reply</div>
+                {templates.map((t) => (
+                  <button key={t.id} onClick={() => handleTemplateClick(t)}
+                    className="w-full text-left px-3 py-2.5 text-xs hover:bg-blue-50 transition-colors flex flex-col gap-0.5">
+                    <span className="font-semibold">{t.label}</span>
+                    <span className="text-[10px] truncate" style={{ color: 'var(--muted)' }}>{t.body}</span>
+                  </button>
+                ))}
+              </>
+            )}
+
+            {/* Step 2: Preview & confirm */}
+            {preview && (
+              <div className="p-3">
+                <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: 'var(--muted)' }}>Preview — {preview.label}</div>
+
+                {/* Recipients */}
+                <div className="text-xs mb-2 p-2 rounded" style={{ background: '#f8fafc' }}>
+                  <div><span className="font-semibold" style={{ color: 'var(--muted)' }}>To:</span> {senderName || senderEmail || 'Sender'}</div>
+                  {subject && <div><span className="font-semibold" style={{ color: 'var(--muted)' }}>Subject:</span> Re: {subject}</div>}
+                  {hasMultipleRecipients && replyMode === 'all' && (
+                    <div><span className="font-semibold" style={{ color: 'var(--muted)' }}>CC:</span> {cc}</div>
+                  )}
+                </div>
+
+                {/* Editable body */}
+                <textarea
+                  value={preview.editedBody}
+                  onChange={(e) => setPreview({ ...preview, editedBody: e.target.value })}
+                  className="w-full text-xs p-2 rounded border resize-none focus:outline-none focus:ring-1"
+                  style={{ borderColor: 'var(--border)', minHeight: '80px', focusRingColor: 'var(--accent)' }}
+                  rows={4}
+                />
+
+                {/* Reply mode choice for multi-recipient */}
+                {hasMultipleRecipients && (
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={() => setReplyMode('sender')}
+                      className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border transition-all"
+                      style={{
+                        borderColor: replyMode === 'sender' ? 'var(--accent)' : 'var(--border)',
+                        background: replyMode === 'sender' ? '#eff6ff' : 'white',
+                        color: replyMode === 'sender' ? 'var(--accent)' : 'var(--muted)',
+                      }}>
+                      Reply to Sender
+                    </button>
+                    <button onClick={() => setReplyMode('all')}
+                      className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border transition-all"
+                      style={{
+                        borderColor: replyMode === 'all' ? '#7c3aed' : 'var(--border)',
+                        background: replyMode === 'all' ? '#f5f3ff' : 'white',
+                        color: replyMode === 'all' ? '#7c3aed' : 'var(--muted)',
+                      }}>
+                      Reply All
+                    </button>
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div className="flex gap-2 mt-3">
+                  <button onClick={() => { setPreview(null); setReplyMode(null); }}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                    Back
+                  </button>
+                  <button onClick={confirmSend}
+                    disabled={!replyMode || !!sending}
+                    className="flex-1 px-3 py-1.5 text-xs font-semibold rounded-lg text-white transition-all"
+                    style={{ background: !replyMode ? '#94a3b8' : replyMode === 'all' ? '#7c3aed' : 'var(--accent)', opacity: sending ? 0.5 : 1 }}>
+                    {sending ? 'Sending...' : replyMode === 'all' ? 'Send to All & Archive' : 'Send & Archive'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -3116,17 +3209,26 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                     <button onClick={() => { setReplyAllTo(replyAllTo === item.id ? null : item.id); setReplyingTo(replyAllTo === item.id ? null : item.id); }}
                       className="px-3 py-1.5 text-xs font-semibold rounded-lg border" style={{ borderColor: 'var(--accent)', color: replyAllTo === item.id ? '#fff' : 'var(--accent)', background: replyAllTo === item.id ? '#7c3aed' : undefined }}>Reply All</button>
                     {!isChild && quickReplyTemplates.length > 0 && (
-                      <QuickReplyDropdown templates={quickReplyTemplates} onSend={async (body, label) => {
+                      <QuickReplyDropdown templates={quickReplyTemplates}
+                        senderEmail={item.sender_email} senderName={item.sender}
+                        cc={item.cc || item.to || ''} subject={item.subject}
+                        onSend={async (body, label, replyAll) => {
                         try {
                           const savedAccount = _currentAccount;
                           if (item.account_email && item.account_email !== _currentAccount) setCurrentAccount(item.account_email);
-                          const res = await gmailPost('reply', {
+                          const payload: Record<string, unknown> = {
                             to: item.sender_email, subject: item.subject, body,
                             threadId: item.thread_id, inReplyTo: item.message_id,
-                          });
+                          };
+                          if (replyAll) {
+                            const ccList = (item.cc || item.to || '').split(',').map((e: string) => e.trim())
+                              .filter((e: string) => e && !e.toLowerCase().includes(item.sender_email.toLowerCase()) && !(item.account_email && e.toLowerCase().includes(item.account_email.toLowerCase())));
+                            if (ccList.length > 0) payload.cc = ccList.join(', ');
+                          }
+                          const res = await gmailPost('reply', payload);
                           if (item.account_email) setCurrentAccount(savedAccount);
                           if (res.success) {
-                            showToast(`Quick reply sent: ${label}`, item.sender);
+                            showToast(`Quick reply sent${replyAll ? ' to all' : ''}: ${label}`, item.sender);
                             queueAction('archive', item.message_id, item.id, item.account_email);
                           } else { showToast('Failed to send', res.error); }
                         } catch (e) { showToast('Error', String(e)); }
