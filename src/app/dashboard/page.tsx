@@ -1646,7 +1646,7 @@ export default function Dashboard() {
     { id: 'reply-queue', label: 'Triage' },
     { id: 'follow-up', label: 'Follow Up' },
     { id: 'snoozed', label: 'Snoozed' },
-    { id: 'cleanup', label: 'Cleanup' },
+    { id: 'cleanup', label: 'Quick Clear Boxers' },
     { id: 'sent', label: 'Sent' },
     { id: 'inbox', label: 'All Mail' },
     ...(searchSelectionActive.length > 0 ? [{ id: 'search-reviews' as Tab, label: `Search Reviews (${searchSelectionActive.length})` }] : []),
