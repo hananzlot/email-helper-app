@@ -185,9 +185,16 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
       <div className="relative z-10 bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
-        {/* Modal header */}
-        <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <h3 className="text-lg font-bold truncate pr-4">{email?.subject || 'Loading...'}</h3>
+        {/* Modal header — subject + date/time side by side */}
+        <div className="flex items-start justify-between gap-3 p-4 border-b" style={{ borderColor: 'var(--border)' }}>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-lg font-bold truncate">{email?.subject || 'Loading...'}</h3>
+            {email?.date && (
+              <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+                {new Date(email.date).toLocaleString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}
+              </div>
+            )}
+          </div>
           <button onClick={onClose} className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-lg hover:bg-gray-100" style={{ color: 'var(--muted)' }}>&times;</button>
         </div>
 
@@ -208,9 +215,6 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
                   <div className="min-w-0">
                     <div className="font-semibold text-sm">{email.sender}</div>
                     <div className="text-xs" style={{ color: 'var(--muted)' }}>&lt;{email.senderEmail}&gt;</div>
-                  </div>
-                  <div className="ml-auto text-xs text-right flex-shrink-0" style={{ color: 'var(--muted)' }}>
-                    {new Date(email.date).toLocaleString([], { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}
                   </div>
                 </div>
                 {email.to && <div className="text-xs pl-12" style={{ color: 'var(--muted)' }}><span className="font-semibold">To:</span> {email.to}</div>}
