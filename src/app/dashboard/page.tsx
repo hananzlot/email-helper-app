@@ -764,8 +764,8 @@ export default function Dashboard() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'reply-queue', label: 'Inbox (Triage)' },
-    { id: 'inbox', label: 'All Mail' },
     { id: 'cleanup', label: 'Cleanup' },
+    { id: 'inbox', label: 'All Mail (Normal View)' },
     { id: 'priorities', label: 'My Priorities' },
     { id: 'accounts', label: 'Accounts' },
   ];
