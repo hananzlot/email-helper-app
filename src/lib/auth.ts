@@ -64,40 +64,47 @@ export async function signInOrCreateUser(email: string, name: string) {
   const admin = createSupabaseAdmin();
 
   // 1. Check if an auth user exists with this exact email
+  let existingUser = null;
   try {
     const { data: lookupData } = await admin.auth.admin.getUserByEmail(email);
-    if (lookupData?.user) {
-      const { data } = await admin.auth.admin.generateLink({ type: 'magiclink', email });
-      return { user: lookupData.user, isNew: false, token: data };
-    }
+    if (lookupData?.user) existingUser = lookupData.user;
   } catch {
-    // getUserByEmail throws when user not found — continue to check connected accounts
+    // getUserByEmail throws when user not found — continue
   }
 
-  // 2. Check if this email is already a connected Gmail account for an existing user
-  //    This prevents duplicate auth users when someone logs in with a secondary email
-  const { data: connectedAccount } = await admin
-    .from(TABLES.GMAIL_ACCOUNTS)
-    .select('user_id')
-    .eq('email', email)
-    .eq('status', 'connected')
-    .limit(1)
-    .single();
-
-  if (connectedAccount?.user_id) {
-    // Found an existing user who has this email connected — look up their auth user
+  // 2. If not found by email, check if this email is a connected Gmail account for an existing user
+  if (!existingUser) {
     try {
-      const { data: ownerData } = await admin.auth.admin.getUserById(connectedAccount.user_id);
-      if (ownerData?.user) {
-        const { data } = await admin.auth.admin.generateLink({ type: 'magiclink', email: ownerData.user.email! });
-        return { user: ownerData.user, isNew: false, token: data };
+      const { data: connectedAccount } = await admin
+        .from(TABLES.GMAIL_ACCOUNTS)
+        .select('user_id')
+        .eq('email', email)
+        .eq('status', 'connected')
+        .limit(1)
+        .single();
+
+      if (connectedAccount?.user_id) {
+        const { data: ownerData } = await admin.auth.admin.getUserById(connectedAccount.user_id);
+        if (ownerData?.user) existingUser = ownerData.user;
       }
     } catch {
-      // Owner auth user not found — fall through to create new user
+      // Not found in connected accounts either — continue to create
     }
   }
 
-  // 3. No existing user found — create a new one
+  // 3. Existing user found — return them (generate magic link for session)
+  if (existingUser) {
+    try {
+      const { data } = await admin.auth.admin.generateLink({ type: 'magiclink', email: existingUser.email! });
+      return { user: existingUser, isNew: false, token: data };
+    } catch (err) {
+      // generateLink can fail but user still exists — return user without token
+      console.error('generateLink failed (non-fatal):', err);
+      return { user: existingUser, isNew: false, token: null };
+    }
+  }
+
+  // 4. No existing user found — create a new one
   const { data, error } = await admin.auth.admin.createUser({
     email,
     email_confirm: true,
