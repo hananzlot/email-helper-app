@@ -1196,8 +1196,8 @@ export default function Dashboard() {
     return (
       <div className="max-w-md mx-auto px-4 py-20 text-center">
         <div className="flex items-center justify-center gap-2 mb-3">
-          <img src="/clearbox-logo.svg" alt="Clearbox" width={36} height={36} className="rounded-lg" />
-          <h1 className="text-2xl font-bold">Clearbox</h1>
+          <img src="/clearbox-logo.svg" alt="Clearbox" width={64} height={64} className="rounded-xl" />
+          <h1 className="text-3xl font-bold">Clearbox</h1>
         </div>
         <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>
           Your session has expired or you need to sign in.
@@ -1220,10 +1220,10 @@ export default function Dashboard() {
         {/* Header */}
         <div className="flex items-center justify-between mb-3 pt-2">
           <div className="flex items-center gap-2.5">
-            <img src="/clearbox-logo.svg" alt="Clearbox" width={36} height={36} className="rounded-lg" />
+            <img src="/clearbox-logo.svg" alt="Clearbox" width={64} height={64} className="rounded-xl" />
             <div>
-              <h1 className="text-xl font-bold leading-tight">Clearbox</h1>
-              <p className="text-xs" style={{ color: 'var(--muted)' }}>Your Inbox Command Center</p>
+              <h1 className="text-2xl font-bold leading-tight">Clearbox</h1>
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>Your Inbox Command Center</p>
             </div>
           </div>
           <div className="flex items-center gap-2">

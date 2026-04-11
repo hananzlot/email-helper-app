@@ -4,8 +4,8 @@ export default function Home() {
       <div className="max-w-md w-full mx-auto px-6 text-center">
         {/* Clearbox Logo */}
         <div className="flex items-center justify-center gap-3 mb-2">
-          <img src="/clearbox-logo.svg" alt="Clearbox" width={48} height={48} className="rounded-xl" />
-          <h1 className="text-3xl font-bold" style={{ color: 'var(--text)' }}>
+          <img src="/clearbox-logo.svg" alt="Clearbox" width={80} height={80} className="rounded-2xl" />
+          <h1 className="text-4xl font-bold" style={{ color: 'var(--text)' }}>
             Clearbox
           </h1>
         </div>
