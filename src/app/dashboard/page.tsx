@@ -143,6 +143,11 @@ export default function Dashboard() {
         gmailGet('profile'),
         gmailGet('inbox', { q: 'in:inbox', max: '50' }),
       ]);
+      // If not authenticated, redirect to login
+      if (!profileRes.success && (profileRes.error?.includes('Not authenticated') || profileRes.error?.includes('auth failed'))) {
+        window.location.href = '/api/emailHelperV2/auth/login';
+        return;
+      }
       if (profileRes.success) setProfile(profileRes.data);
       if (inboxRes.success && inboxRes.data?.messages) {
         setMessages(inboxRes.data.messages);
