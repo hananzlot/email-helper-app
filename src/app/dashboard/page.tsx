@@ -2641,6 +2641,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyAllTo, setReplyAllTo] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<string | null>(null);
   // Drag-and-drop reorder state
@@ -2939,8 +2940,10 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                     </div>
                   </div>
                   <div className="flex gap-2 mt-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => setReplyingTo(replyingTo === item.id ? null : item.id)}
-                      className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
+                    <button onClick={() => { setReplyingTo(replyingTo === item.id && !replyAllTo ? null : item.id); setReplyAllTo(null); }}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: replyingTo === item.id && !replyAllTo ? '#6366f1' : 'var(--accent)' }}>Reply</button>
+                    <button onClick={() => { setReplyAllTo(replyAllTo === item.id ? null : item.id); setReplyingTo(replyAllTo === item.id ? null : item.id); }}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg border" style={{ borderColor: 'var(--accent)', color: replyAllTo === item.id ? '#fff' : 'var(--accent)', background: replyAllTo === item.id ? '#7c3aed' : undefined }}>Reply All</button>
                     {!isChild && quickReplyTemplates.length > 0 && (
                       <QuickReplyDropdown templates={quickReplyTemplates} onSend={async (body, label) => {
                         try {
@@ -2971,8 +2974,10 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                         to={item.sender_email} subject={item.subject}
                         threadId={item.thread_id} messageId={item.message_id}
                         showToast={showToast} accountEmail={item.account_email}
-                        onSent={() => { setReplyingTo(null); queueAction('archive', item.message_id, item.id, item.account_email); }}
-                        onCancel={() => setReplyingTo(null)}
+                        replyAll={replyAllTo === item.id}
+                        cc={replyAllTo === item.id ? (item.cc || item.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(item.sender_email.toLowerCase()) && !(item.account_email && e.toLowerCase().includes(item.account_email.toLowerCase()))).join(', ') : undefined}
+                        onSent={() => { setReplyingTo(null); setReplyAllTo(null); queueAction('archive', item.message_id, item.id, item.account_email); }}
+                        onCancel={() => { setReplyingTo(null); setReplyAllTo(null); }}
                       />
                     </div>
                   )}
