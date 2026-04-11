@@ -92,22 +92,15 @@ export async function signInOrCreateUser(email: string, name: string) {
     }
   }
 
-  // 3. Existing user found — return them (generate magic link for session)
+  // 3. Existing user found — return them (no magic link needed, we use cookie auth)
   if (existingUser) {
-    try {
-      const { data } = await admin.auth.admin.generateLink({ type: 'magiclink', email: existingUser.email! });
-      return { user: existingUser, isNew: false, token: data };
-    } catch (err) {
-      // generateLink can fail but user still exists — return user without token
-      console.error('generateLink failed (non-fatal):', err);
-      return { user: existingUser, isNew: false, token: null };
-    }
+    return { user: existingUser, isNew: false, token: null };
   }
 
   // 4. No existing user found — create a new one
+  // email_confirm skipped — Google OAuth already verified the email, no Supabase mail service needed
   const { data, error } = await admin.auth.admin.createUser({
     email,
-    email_confirm: true,
     user_metadata: { full_name: name },
   });
   if (error) throw new Error(`Failed to create user: ${error.message}`);
