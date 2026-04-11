@@ -1363,6 +1363,19 @@ export default function Dashboard() {
     }
   }, [account, messages.length, loadAllTabCounts]);
 
+  // Run background cron on first load to populate follow-up cache & sender priorities
+  useEffect(() => {
+    if (accounts.length > 0) {
+      const cronRanKey = 'email_helper_cron_last';
+      const lastRun = localStorage.getItem(cronRanKey);
+      const eightHoursAgo = Date.now() - 8 * 60 * 60 * 1000;
+      if (!lastRun || Number(lastRun) < eightHoursAgo) {
+        localStorage.setItem(cronRanKey, String(Date.now()));
+        fetch('/api/emailHelperV2/cron').catch(() => {});
+      }
+    }
+  }, [accounts.length]);
+
   // Keyboard shortcuts: Cmd+K or / to focus search, Escape to close
   useEffect(() => {
     function handleKeydown(e: KeyboardEvent) {
@@ -1427,7 +1440,7 @@ export default function Dashboard() {
       {/* Sticky header + tabs */}
       <div className="sticky top-0 z-30 -mx-4 px-4 pb-0 pt-0" style={{ background: 'var(--bg, #f8fafc)' }}>
         {/* Header */}
-        <div className="flex items-center justify-between mb-3 pt-2">
+        <div className="flex items-start justify-between mb-3 pt-2">
           <div className="flex items-center gap-2.5">
             <img src="/clearbox-logo.svg" alt="Clearbox" width={64} height={64} className="rounded-xl" />
             <div>
@@ -1435,8 +1448,33 @@ export default function Dashboard() {
               <p className="text-sm" style={{ color: 'var(--muted)' }}>Your Inbox Command Center</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Layout toggle — hidden on mobile, auto-navigates to Inbox */}
+          {/* Right column: account, greeting, trust strip, controls */}
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex items-center gap-2">
+              {/* Account Switcher */}
+              {accounts.length > 1 ? (
+                <select
+                  value={unified ? '__unified__' : account}
+                  onChange={(e) => {
+                    if (e.target.value === '__unified__') switchToUnified();
+                    else switchAccount(e.target.value);
+                  }}
+                  className="text-xs px-2.5 py-1.5 rounded-lg border font-medium appearance-none cursor-pointer"
+                  style={{ background: unified ? '#ede9fe' : 'var(--normal-bg)', borderColor: unified ? '#8b5cf6' : 'var(--border)', color: unified ? '#5b21b6' : '#065f46' }}
+                >
+                  <option value="__unified__">All Accounts (Unified)</option>
+                  {accounts.map((a) => (
+                    <option key={a.email} value={a.email}>
+                      {a.email}{a.is_primary ? ' ★' : ''}
+                    </option>
+                  ))}
+                </select>
+              ) : profile ? (
+                <div className="text-xs px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--normal-bg)', color: '#065f46' }}>
+                  <strong>{profile.emailAddress}</strong>
+                </div>
+              ) : null}
+              {/* Layout toggle — hidden on mobile */}
             {!isMobile && <button
               onClick={() => setLayoutMode(layoutMode === 'cards' ? 'split' : 'cards')}
               className="w-9 h-9 rounded-lg border flex items-center justify-center transition-all hover:shadow-sm"
@@ -1519,6 +1557,41 @@ export default function Dashboard() {
                   </div>
                 </>
               )}
+            </div>
+            </div>{/* close controls row */}
+            {/* Greeting + motivation */}
+            <div className="text-right">
+              <span className="text-sm font-semibold">{(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })()}</span>
+              <span className="text-xs ml-1.5" style={{ color: 'var(--muted)' }}>
+                {(() => {
+                  const tc = tabCounts['reply-queue'] || 0;
+                  const cc = tabCounts['cleanup'] || 0;
+                  const total = tc + (tabCounts['follow-up'] || 0) + (tabCounts['snoozed'] || 0) + cc;
+                  return total === 0 ? 'Inbox zero — you\'re on top of it.' : tc === 0 && cc > 0 ? `Just ${cc} low-priority to clean up.` : `${tc} email${tc !== 1 ? 's' : ''} need${tc === 1 ? 's' : ''} your attention.`;
+                })()}
+              </span>
+            </div>
+            {/* Trust strip */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1 text-[10px] font-medium" style={{ color: '#64748b' }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Emails never stored
+              </div>
+              <div className="w-px h-2.5" style={{ background: '#cbd5e1' }} />
+              <div className="flex items-center gap-1 text-[10px] font-medium" style={{ color: '#64748b' }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                Every action undoable
+              </div>
+              <div className="w-px h-2.5" style={{ background: '#cbd5e1' }} />
+              <div className="flex items-center gap-1 text-[10px] font-medium" style={{ color: '#64748b' }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                {accounts.length} account{accounts.length !== 1 ? 's' : ''} connected
+              </div>
+              <div className="w-px h-2.5" style={{ background: '#cbd5e1' }} />
+              <div className="flex items-center gap-1 text-[10px] font-medium" style={{ color: '#16a34a' }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+                AES-256 encrypted
+              </div>
             </div>
           </div>
         </div>
@@ -1645,32 +1718,6 @@ export default function Dashboard() {
         </div>
         {/* Bottom shadow to visually separate sticky header from scrolling content */}
         <div style={{ height: 4, background: 'linear-gradient(to bottom, rgba(0,0,0,0.04), transparent)', marginBottom: 12 }} />
-      </div>
-
-      {/* Account switcher — left-aligned below tabs */}
-      <div className="flex items-center gap-3 mb-3">
-        {accounts.length > 1 ? (
-          <select
-            value={unified ? '__unified__' : account}
-            onChange={(e) => {
-              if (e.target.value === '__unified__') switchToUnified();
-              else switchAccount(e.target.value);
-            }}
-            className="text-sm px-3 py-1.5 rounded-lg border font-medium appearance-none cursor-pointer"
-            style={{ background: unified ? '#ede9fe' : 'var(--normal-bg)', borderColor: unified ? '#8b5cf6' : 'var(--border)', color: unified ? '#5b21b6' : '#065f46' }}
-          >
-            <option value="__unified__">All Accounts (Unified)</option>
-            {accounts.map((a) => (
-              <option key={a.email} value={a.email}>
-                {a.email}{a.is_primary ? ' ★' : ''}
-              </option>
-            ))}
-          </select>
-        ) : profile ? (
-          <div className="text-sm px-3 py-1.5 rounded-lg" style={{ background: 'var(--normal-bg)', color: '#065f46' }}>
-            <strong>{profile.emailAddress}</strong>
-          </div>
-        ) : null}
       </div>
 
       {/* Background task banner — visible across all tabs */}
@@ -1914,48 +1961,8 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
   const hasAccounts = accounts.length > 0;
   const [showGuide, setShowGuide] = useState(!hasAccounts);
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-
-  const totalActionable = triageCount + followUpCount + snoozedCount + cleanupCount;
-  // Dynamic motivating message based on inbox state
-  const motivationMsg = totalActionable === 0
-    ? 'Inbox zero — you\'re on top of it.'
-    : triageCount === 0 && cleanupCount > 0
-    ? `Just ${cleanupCount} low-priority emails to clean up.`
-    : `${triageCount} email${triageCount !== 1 ? 's' : ''} need${triageCount === 1 ? 's' : ''} your attention.`;
-
   return (
     <div>
-      {/* Daily briefing */}
-      <div className="mb-4">
-        <h2 className="text-xl font-bold mb-1">{greeting}</h2>
-        <p className="text-sm" style={{ color: 'var(--muted)' }}>{motivationMsg}</p>
-      </div>
-
-      {/* Trust strip — privacy & control at a glance */}
-      <div className="flex items-center gap-4 mb-5 py-2.5 px-4 rounded-lg" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-        <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: '#64748b' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          Emails never stored
-        </div>
-        <div className="w-px h-3" style={{ background: '#cbd5e1' }} />
-        <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: '#64748b' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-          Every action undoable
-        </div>
-        <div className="w-px h-3" style={{ background: '#cbd5e1' }} />
-        <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: '#64748b' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          {accounts.length} account{accounts.length !== 1 ? 's' : ''} connected
-        </div>
-        <div className="w-px h-3" style={{ background: '#cbd5e1' }} />
-        <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{ color: '#16a34a' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
-          AES-256 encrypted · zero risk
-        </div>
-      </div>
-
       {/* Stats cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <button onClick={() => onNavigate('reply-queue')}
