@@ -963,9 +963,10 @@ export default function Dashboard() {
           nextToken = pageRes.data.nextPageToken;
           // Save each page to cache as it loads
           saveToCacheBackground(account, pageMsgs);
-          const est = Math.min(estimatedTotal, MAX_MESSAGES);
-          const minutesLeft = Math.max(1, Math.ceil((est - totalLoaded) / 200 * 0.5));
-          setLoadingProgress({ loaded: totalLoaded, total: est, phase: `Loading emails... ~${minutesLeft} min remaining` });
+          // Gmail's resultSizeEstimate is often wrong — use the larger of estimate vs actual
+          const adjustedTotal = nextToken ? Math.max(estimatedTotal, totalLoaded + 200) : totalLoaded;
+          const minutesLeft = nextToken ? Math.max(1, Math.ceil((adjustedTotal - totalLoaded) / 200 * 0.5)) : 0;
+          setLoadingProgress({ loaded: totalLoaded, total: adjustedTotal, phase: nextToken ? `Loading emails... ~${minutesLeft} min remaining` : `Loaded ${totalLoaded.toLocaleString()} emails` });
         }
         setLoadingProgress(null);
       } else {
@@ -1083,9 +1084,9 @@ export default function Dashboard() {
           loaded += pageMsgs.length;
           grandTotal += pageMsgs.length;
           nextToken = pageRes.data.nextPageToken;
-          const remaining = Math.min(totalEstimate, MAX_PER_ACCOUNT * accounts.length) - grandTotal;
-          const minutesLeft = Math.max(1, Math.ceil(remaining / 200 * 0.5));
-          setLoadingProgress({ loaded: grandTotal, total: Math.min(totalEstimate, MAX_PER_ACCOUNT * accounts.length), phase: `Loading emails... ~${minutesLeft} min remaining` });
+          const adjustedTotal = nextToken ? Math.max(totalEstimate, grandTotal + 200) : grandTotal;
+          const minutesLeft = nextToken ? Math.max(1, Math.ceil((adjustedTotal - grandTotal) / 200 * 0.5)) : 0;
+          setLoadingProgress({ loaded: grandTotal, total: adjustedTotal, phase: nextToken ? `Loading emails... ~${minutesLeft} min remaining` : `Loaded ${grandTotal.toLocaleString()} emails` });
         }
       }
       setCurrentAccount(savedAccount);
