@@ -3,7 +3,7 @@ import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { getValidGmailToken } from '@/lib/auth';
 import { getGmailClient } from '@/lib/gmail';
 import { scanSentMail, computeFollowUps } from '@/lib/triage';
-import { cacheInboxMessages } from '@/lib/gmail';
+// Inbox caching is handled by the scheduled function via /inbox-cache/sync
 import { TABLES } from '@/lib/tables';
 
 /**
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ message: 'No active accounts', scanned: 0 });
     }
 
-    const results: { account: string; sendersFound: number; totalReplies: number; followUp?: { starred: number; awaiting: number }; inboxCached?: { cached: number; total: number }; error?: string }[] = [];
+    const results: { account: string; sendersFound: number; totalReplies: number; followUp?: { starred: number; awaiting: number }; error?: string }[] = [];
 
     // Process each account sequentially to avoid rate limits
     for (const account of accounts) {
@@ -56,20 +56,11 @@ export async function GET(request: NextRequest) {
         // Pre-compute follow-up cache
         const followUpResult = await computeFollowUps(gmail, account.user_id, account.email);
 
-        // Cache inbox messages (server-side, fast, no browser needed)
-        let inboxCacheResult;
-        try {
-          inboxCacheResult = await cacheInboxMessages(gmail, account.user_id, account.email);
-        } catch (cacheErr) {
-          console.error(`Inbox cache failed for ${account.email}:`, cacheErr);
-        }
-
         results.push({
           account: account.email,
           sendersFound: scanResult.sendersFound,
           totalReplies: scanResult.totalReplies,
           followUp: followUpResult,
-          inboxCached: inboxCacheResult,
         });
       } catch (err) {
         results.push({
