@@ -24,31 +24,41 @@ export default async () => {
     const accounts = await accountsRes.json().catch(() => []);
 
     for (const account of accounts) {
-      let pageToken: string | null = null;
       let pages = 0;
-      const maxPages = 50; // 50 pages x 200 = 10,000 messages per account per cron run
+      const maxPages = 100; // 100 pages x 200 = 20,000 messages per account per cron run
+      let nextToken: string | null = null;
+      let isFirstCall = true;
 
       do {
         try {
+          // First call: no pageToken = auto-resume from saved position
+          const syncBody: Record<string, string> = {
+            user_id: account.user_id,
+            account_email: account.email,
+          };
+          if (!isFirstCall && nextToken) {
+            syncBody.pageToken = nextToken;
+          }
+
           const syncRes = await fetch(`${appUrl}/api/emailHelperV2/inbox-cache/sync`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              user_id: account.user_id,
-              account_email: account.email,
-              pageToken,
-            }),
+            body: JSON.stringify(syncBody),
           });
           const syncData = await syncRes.json();
+          isFirstCall = false;
 
           if (!syncData.success) {
             console.log(`Sync error for ${account.email}:`, syncData.error);
             break;
           }
 
-          pageToken = syncData.data.nextPageToken;
+          nextToken = syncData.data.nextPageToken;
           pages++;
-          console.log(`${account.email}: page ${pages}, cached ${syncData.data.cachedThisPage} new, total ${syncData.data.totalCached}/${syncData.data.inboxTotal}`);
+
+          if (pages % 10 === 0 || syncData.data.cachedThisPage > 0) {
+            console.log(`${account.email}: page ${pages}, +${syncData.data.cachedThisPage} new, skipped ${syncData.data.skippedExisting}`);
+          }
 
           if (syncData.data.done) {
             console.log(`${account.email}: sync complete!`);
@@ -58,7 +68,9 @@ export default async () => {
           console.error(`Sync call failed for ${account.email}:`, e);
           break;
         }
-      } while (pageToken && pages < maxPages);
+      } while (nextToken && pages < maxPages);
+
+      console.log(`${account.email}: processed ${pages} pages`);
     }
   } catch (e) {
     console.error("Inbox sync failed:", e);

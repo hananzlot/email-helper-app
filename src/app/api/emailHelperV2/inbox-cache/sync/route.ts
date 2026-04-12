@@ -8,16 +8,19 @@ import { TABLES } from '@/lib/tables';
  * POST /api/emailHelperV2/inbox-cache/sync
  *
  * Processes ONE page of inbox messages (up to 200) and returns the next page token.
- * Designed to be called repeatedly until nextPageToken is null.
- * Each call fits within Netlify's 10s function timeout.
+ * Designed to be called repeatedly until done.
  *
- * Body: { user_id, account_email, pageToken?: string }
- * Returns: { cached, total, nextPageToken, done }
+ * Smart resume: if no pageToken provided, reads the saved resume_page_token
+ * from inbox_sync table so it skips already-cached pages automatically.
+ *
+ * Body: { user_id, account_email, pageToken?: string, resume?: boolean }
+ * Returns: { cachedThisPage, totalCached, inboxTotal, nextPageToken, done }
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { user_id, account_email, pageToken } = body;
+    const { user_id, account_email } = body;
+    let { pageToken } = body;
 
     if (!user_id || !account_email) {
       return NextResponse.json({ success: false, error: 'Missing user_id or account_email' }, { status: 400 });
@@ -27,8 +30,19 @@ export async function POST(request: NextRequest) {
     const accessToken = await getValidGmailToken(user_id, account_email);
     const gmail = getGmailClient(accessToken);
 
-    // Get existing cached IDs for this page (to skip duplicates)
-    const existingSet = new Set<string>();
+    // If no pageToken provided, try to resume from where we left off
+    if (!pageToken) {
+      const { data: syncData } = await admin
+        .from(TABLES.INBOX_SYNC)
+        .select('resume_page_token')
+        .eq('user_id', user_id)
+        .eq('account_email', account_email)
+        .single();
+
+      if (syncData?.resume_page_token) {
+        pageToken = syncData.resume_page_token;
+      }
+    }
 
     // Fetch one page of message IDs
     const listRes = await listMessages(gmail, {
@@ -38,7 +52,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (!listRes.messages?.length) {
-      // No more messages — update sync and return done
+      // No more messages — sync complete, clear resume token
       const { count } = await admin
         .from(TABLES.INBOX_CACHE)
         .select('gmail_id', { count: 'exact', head: true })
@@ -49,9 +63,10 @@ export async function POST(request: NextRequest) {
         user_id, account_email,
         last_synced_at: new Date().toISOString(),
         total_cached: count || 0,
+        resume_page_token: null, // Done — no resume needed
       }, { onConflict: 'user_id,account_email' });
 
-      return NextResponse.json({ success: true, data: { cached: 0, total: count || 0, nextPageToken: null, done: true } });
+      return NextResponse.json({ success: true, data: { cachedThisPage: 0, totalCached: count || 0, nextPageToken: null, done: true } });
     }
 
     const messageIds = listRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
@@ -64,13 +79,14 @@ export async function POST(request: NextRequest) {
       .eq('account_email', account_email)
       .in('gmail_id', messageIds);
 
+    const existingSet = new Set<string>();
     if (existing) existing.forEach((r: { gmail_id: string }) => existingSet.add(r.gmail_id));
 
     const newIds = messageIds.filter(id => !existingSet.has(id));
     let cachedThisPage = 0;
 
     if (newIds.length > 0) {
-      // Batch fetch metadata (parallel — 25 at a time to stay within timeout)
+      // Batch fetch metadata (25 parallel to stay within timeout)
       const messages = await batchGetMessageMetadata(gmail, newIds, 25);
 
       const rows = messages.map(m => ({
@@ -96,14 +112,19 @@ export async function POST(request: NextRequest) {
       cachedThisPage = rows.length;
     }
 
-    // Get total cached count
-    const { count: totalCached } = await admin
-      .from(TABLES.INBOX_CACHE)
-      .select('gmail_id', { count: 'exact', head: true })
-      .eq('user_id', user_id)
-      .eq('account_email', account_email);
+    const nextPageToken = listRes.nextPageToken || null;
 
-    // Get inbox total
+    // Save resume token so next call can skip to here
+    // Only save when we're in the uncached zone (actually caching new messages)
+    // or when we've passed through the cached zone
+    await admin.from(TABLES.INBOX_SYNC).upsert({
+      user_id, account_email,
+      last_synced_at: new Date().toISOString(),
+      total_cached: (existing?.length || 0) + cachedThisPage, // approximate, updated properly when done
+      resume_page_token: nextPageToken, // Resume from here next time
+    }, { onConflict: 'user_id,account_email' });
+
+    // Get inbox total (cheap single API call)
     let inboxTotal = 0;
     try {
       const labelInfo = await getLabelInfo(gmail, 'INBOX');
@@ -114,10 +135,11 @@ export async function POST(request: NextRequest) {
       success: true,
       data: {
         cachedThisPage,
-        totalCached: totalCached || 0,
+        skippedExisting: existingSet.size,
+        totalCached: null, // skip count query for speed — use sync table
         inboxTotal,
-        nextPageToken: listRes.nextPageToken || null,
-        done: !listRes.nextPageToken,
+        nextPageToken,
+        done: !nextPageToken,
       },
     });
   } catch (err) {
