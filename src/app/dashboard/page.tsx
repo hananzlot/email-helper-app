@@ -575,10 +575,11 @@ interface ConnectedAccount {
 }
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<Tab>(() => {
-    if (typeof window !== 'undefined' && localStorage.getItem('email_helper_visited')) return 'reply-queue';
-    return 'home';
-  });
+  const [activeTab, setActiveTab] = useState<Tab>('home');
+  // Returning users land on Top Tiers tab
+  useEffect(() => {
+    if (localStorage.getItem('email_helper_visited')) setActiveTab('reply-queue');
+  }, []);
   const [layoutMode, setLayoutMode] = useState<'cards' | 'split'>('split');
   const [isMobile, setIsMobile] = useState(false);
 
