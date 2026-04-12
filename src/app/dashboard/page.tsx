@@ -2596,14 +2596,15 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
   }
 
   // Returning user — dashboard view
-  const totalActionable = triageCount + followUpCount + snoozedCount + cleanupCount;
+  // Only count stable items (not cleanup which changes during pagination)
+  const priorityCount = triageCount + followUpCount + snoozedCount;
 
   return (
     <div>
-      {/* Summary banner */}
-      {totalActionable > 0 && (
+      {/* Summary banner — only shows stable priority count */}
+      {priorityCount > 0 && (
         <div className="p-4 rounded-xl mb-6" style={{ background: '#eef2ff', border: '1px solid #c7d2fe' }}>
-          <div className="text-lg font-bold" style={{ color: '#4338ca' }}>{totalActionable} emails need attention</div>
+          <div className="text-lg font-bold" style={{ color: '#4338ca' }}>{priorityCount} priority email{priorityCount !== 1 ? 's' : ''} need{priorityCount === 1 ? 's' : ''} attention</div>
           <div className="text-xs mt-1" style={{ color: '#6366f1' }}>Start with Top Tiers — your most important emails first</div>
         </div>
       )}
