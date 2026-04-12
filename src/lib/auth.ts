@@ -101,7 +101,7 @@ export async function signInOrCreateUser(email: string, name: string) {
   try {
     const { data, error } = await admin.auth.admin.createUser({
       email,
-      email_confirm: false,
+      email_confirm: true,  // true = "already confirmed" — skips sending confirmation email
       user_metadata: { full_name: name },
     });
     if (!error && data?.user) {
