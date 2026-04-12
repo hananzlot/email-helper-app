@@ -125,7 +125,7 @@ export async function signInOrCreateUser(email: string, name: string) {
       full_name: name,
       created_at: new Date().toISOString(),
     }, { onConflict: 'id' })
-    .then(({ error: e }) => { if (e) console.error('Profile upsert error:', e.message); });
+    .then(({ error: upsertErr }: { error: { message: string } | null }) => { if (upsertErr) console.error('Profile upsert error:', upsertErr.message); });
 
   return { user: { id: generatedId, email }, isNew: true, token: null };
 }
