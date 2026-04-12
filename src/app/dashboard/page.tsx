@@ -1309,16 +1309,17 @@ export default function Dashboard() {
     if (isFirstLoad) localStorage.setItem('email_helper_visited', '1');
   }, [account, unified, accounts.length]);
 
-  // Auto-refresh every 2 minutes with silent triage
+  // Auto-refresh: runs every 30s to resume incomplete caching, also serves as periodic refresh
+  const cachingStoppedRef = React.useRef(false);
   useEffect(() => {
     if (!account) return;
     const interval = setInterval(() => {
       if (unified && accounts.length > 1) {
-        loadUnifiedInbox(true);
+        loadUnifiedInbox(true, true);
       } else {
-        loadInbox(true);
+        loadInbox(true, true);
       }
-    }, 2 * 60 * 1000);
+    }, 30 * 1000);
     return () => clearInterval(interval);
   }, [account, unified, accounts.length, loadInbox, loadUnifiedInbox]);
 
