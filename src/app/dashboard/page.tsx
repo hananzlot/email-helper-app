@@ -27,6 +27,15 @@ const REVERSE_ACTIONS: Record<string, string> = {
   trash: 'untrash',
 };
 
+// ============ ADMIN SETTINGS ============
+function getMaxEmails(): number {
+  try {
+    const stored = localStorage.getItem('clearbox_admin_settings');
+    if (stored) return JSON.parse(stored).max_emails_per_account || 100000;
+  } catch {}
+  return 100000;
+}
+
 // ============ API HELPERS ============
 // All helpers append ?account= so the server always knows which Gmail account to use.
 
@@ -1012,7 +1021,7 @@ export default function Dashboard() {
           setLoading(false);
 
           // Resume pagination if cache didn't cover the full inbox
-          const MAX_MESSAGES = 20000;
+          const MAX_MESSAGES = getMaxEmails();
           const totalToLoad = Math.min(exactInboxTotal || cachedMsgCount, MAX_MESSAGES);
           if (cachedMsgCount < totalToLoad && inboxRes.data.nextPageToken) {
             setLoadingProgress({ loaded: cachedMsgCount, total: totalToLoad, phase: `Resuming... ${cachedMsgCount.toLocaleString()} cached, loading more...` });
@@ -1047,7 +1056,7 @@ export default function Dashboard() {
           setLoadingProgress({ loaded: freshMsgs.length, total: totalToLoad, phase: `Loading ${totalToLoad.toLocaleString()} emails...` });
           let nextToken = inboxRes.data.nextPageToken;
           let totalLoaded = freshMsgs.length;
-          const MAX_MESSAGES = 20000;
+          const MAX_MESSAGES = getMaxEmails();
           if (nextToken && totalToLoad > 200) {
             setLoading(false);
             setLoadingProgress({ loaded: totalLoaded, total: Math.min(totalToLoad, MAX_MESSAGES), phase: `Loading ${Math.min(totalToLoad, MAX_MESSAGES).toLocaleString()} emails...` });
@@ -1161,7 +1170,7 @@ export default function Dashboard() {
         // Resume pagination for accounts that have more uncached messages
         if (accountTokens.length > 0) {
           setLoadingProgress({ loaded: unifiedCacheCount, total: null, phase: `Resuming... ${unifiedCacheCount.toLocaleString()} cached, loading more...` });
-          const MAX_PER_ACCOUNT = 20000;
+          const MAX_PER_ACCOUNT = getMaxEmails();
           let grandTotal = unifiedCacheCount;
           for (const at of accountTokens) {
             let nextToken = at.nextPageToken;
@@ -1201,7 +1210,7 @@ export default function Dashboard() {
           setLoadingProgress(null);
         }
 
-        const MAX_PER_ACCOUNT = 20000;
+        const MAX_PER_ACCOUNT = getMaxEmails();
         let grandTotal = freshMessages.length;
         for (const at of accountTokens) {
           let nextToken = at.nextPageToken;
