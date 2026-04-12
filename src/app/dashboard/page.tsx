@@ -1664,6 +1664,8 @@ export default function Dashboard() {
           setTriageVersion(v => v + 1);
         } else if (action === 'markRead') {
           setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
+          setSearchResults(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
+          setSearchSelectionActive(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
           // Update cache flag — keeps in cache for search but hidden from tabs
           apiPut('inbox-cache', { gmail_ids: messageIds, updates: { is_unread: false } }).catch(() => {});
           for (const msgId of messageIds) {
@@ -1672,6 +1674,8 @@ export default function Dashboard() {
           setTriageVersion(v => v + 1);
         } else if (action === 'markUnread') {
           setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
+          setSearchResults(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
+          setSearchSelectionActive(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
           apiPut('inbox-cache', { gmail_ids: messageIds, updates: { is_unread: true } }).catch(() => {});
         }
       } else if (!res.error?.includes('Quota exceeded')) {
