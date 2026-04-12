@@ -2298,13 +2298,12 @@ export default function Dashboard() {
               >
                 {tab.label}
                 {count != null && count > 0 && (
-                  <span className="flex flex-col items-center leading-none px-1.5 py-0.5 rounded-md"
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
                     style={{
-                      background: isActive ? 'rgba(255,255,255,0.2)' : '#f1f5f9',
+                      background: isActive ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
                       color: isActive ? 'white' : '#64748b',
                     }}>
-                    <span className="text-[10px] font-bold">{count > 9999 ? `${Math.round(count / 1000)}k` : count.toLocaleString()}</span>
-                    <span className="text-[7px]" style={{ opacity: 0.7 }}>emails</span>
+                    {count > 9999 ? `${Math.round(count / 1000)}k` : count > 99 ? count.toLocaleString() : count}
                   </span>
                 )}
               </button>
@@ -4094,10 +4093,11 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
               <div className="flex items-center gap-3 p-4">
                 <input type="checkbox" checked={isGroupSelected} onChange={() => toggleGroup(group.email)}
                   className="rounded flex-shrink-0" style={{ accentColor: 'var(--accent)' }} />
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0 cursor-pointer"
+                <div className="w-10 h-10 rounded-lg flex flex-col items-center justify-center text-white flex-shrink-0 cursor-pointer"
                   onClick={() => setExpandedSender(isExpanded ? null : group.email)}
                   style={{ background: group.messages.length >= 5 ? 'var(--urgent)' : group.messages.length >= 3 ? 'var(--important)' : 'var(--accent)' }}>
-                  {group.messages.length}
+                  <span className="text-sm font-bold leading-none">{group.messages.length}</span>
+                  <span className="text-[7px] leading-none mt-0.5" style={{ opacity: 0.8 }}>emails</span>
                 </div>
                 <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedSender(isExpanded ? null : group.email)}>
                   <div className="font-semibold text-sm truncate">{group.name}</div>
