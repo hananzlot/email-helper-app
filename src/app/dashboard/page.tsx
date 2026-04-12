@@ -1673,11 +1673,22 @@ export default function Dashboard() {
           }
           setTriageVersion(v => v + 1);
         } else if (action === 'markUnread') {
-          setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
+          // If message is only in search results (not in main messages), add it so tabs can see it
+          setMessages(prev => {
+            const updated = prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m);
+            // Add messages from search that aren't in the main list
+            for (const msgId of messageIds) {
+              if (!updated.some(m => m.id === msgId)) {
+                const found = searchResults.find(m => m.id === msgId) || searchSelectionActive.find(m => m.id === msgId);
+                if (found) updated.push({ ...found, isUnread: true });
+              }
+            }
+            return updated;
+          });
           setSearchResults(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
           setSearchSelectionActive(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
           apiPut('inbox-cache', { gmail_ids: messageIds, updates: { is_unread: true } }).catch(() => {});
-          // Re-add to reply queue for tiered senders so it appears in Top Tiers
+          // Re-add to reply queue so it appears in the right tab (Top Tiers or Easy-Clear)
           for (const msgId of messageIds) {
             const msg = messages.find(m => m.id === msgId) || searchResults.find(m => m.id === msgId) || searchSelectionActive.find(m => m.id === msgId);
             if (msg) {
