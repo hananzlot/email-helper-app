@@ -1333,7 +1333,7 @@ export default function Dashboard() {
 
   // Continuous background sync — runs until all accounts are fully cached
   useEffect(() => {
-    if (accounts.length === 0) return;
+    if (accounts.length === 0 || !account) return;
     if (syncRunningRef.current) return;
     syncRunningRef.current = true;
 
@@ -1345,10 +1345,11 @@ export default function Dashboard() {
       const startTime = Date.now();
       let retries = 0;
 
-      // Get existing cached count: first sync call returns skippedExisting which tells us
-      // Use the first sync response to determine starting position
-      // For initial display, use in-memory message count as approximation
-      totalCached = messages.filter(m => m.accountEmail === acctEmail).length;
+      // Show initial "scanning" state immediately
+      setSyncProgress(prev => ({
+        ...prev,
+        [acctEmail]: { cached: 0, total: 0, done: false, speed: 0, eta: 'Starting...' },
+      }));
 
       while (!cancelled && retries < 10) {
         try {
@@ -1429,9 +1430,9 @@ export default function Dashboard() {
     }
 
     // Start after a short delay to let the UI load first
-    const timer = setTimeout(runAllSyncs, 5000);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [accounts.length]);
+    const timer = setTimeout(runAllSyncs, 3000);
+    return () => { cancelled = true; clearTimeout(timer); syncRunningRef.current = false; };
+  }, [accounts.length, account]);
 
   function showToast(title: string, subtitle?: string, undoAction?: () => void) {
     const expiresAt = undoAction ? Date.now() + 5000 : undefined;
@@ -2020,22 +2021,6 @@ export default function Dashboard() {
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
                 AES-256 encrypted
               </div>
-              {loadingProgress && (
-                <>
-                  <div className="w-px h-2.5" style={{ background: '#cbd5e1' }} />
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-3 h-3 border-[1.5px] border-t-transparent rounded-full animate-spin" style={{ borderColor: '#22c55e', borderTopColor: 'transparent' }} />
-                    <span className="text-[10px] font-medium" style={{ color: '#15803d' }}>
-                      {loadingProgress.loaded.toLocaleString()}{loadingProgress.total ? `/${loadingProgress.total.toLocaleString()}` : ''} emails
-                    </span>
-                    {loadingProgress.total && loadingProgress.total > 0 && (
-                      <div className="w-16 h-1 rounded-full overflow-hidden" style={{ background: '#dcfce7' }}>
-                        <div className="h-full rounded-full transition-all duration-500" style={{ background: '#22c55e', width: `${Math.min(100, (loadingProgress.loaded / loadingProgress.total) * 100)}%` }} />
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
             </div>
           </div>
         </div>
