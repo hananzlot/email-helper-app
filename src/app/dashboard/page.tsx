@@ -5051,6 +5051,8 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   const [showManualMerge, setShowManualMerge] = useState(false);
   const [mergePrimary, setMergePrimary] = useState('');
   const [mergeSecondary, setMergeSecondary] = useState('');
+  // Multi-select state
+  const [selectedSenders, setSelectedSenders] = useState<Set<string>>(new Set());
 
   useEffect(() => { loadData(); }, []);
 
@@ -5363,9 +5365,54 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
             {senders.length === 0 ? 'No sender data yet. Click "Scan Sent Mail" to learn who you reply to most.' : 'No senders in this tier.'}
           </p>
         ) : (
+          {/* Bulk action bar */}
+          {selectedSenders.size > 0 && (
+            <div className="mb-3 p-3 rounded-xl flex items-center justify-between gap-3 sticky top-0 z-10" style={{ background: '#eff6ff', border: '2px solid var(--accent)' }}>
+              <span className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>
+                {selectedSenders.size} sender{selectedSenders.size > 1 ? 's' : ''} selected
+              </span>
+              <div className="flex gap-2 items-center">
+                <span className="text-xs" style={{ color: 'var(--muted)' }}>Set tier:</span>
+                {['A', 'B', 'C', 'D'].map(t => (
+                  <button key={t} onClick={async () => {
+                    for (const email of selectedSenders) { await changeTier(email, t); }
+                    showToast(`${selectedSenders.size} senders → Tier ${t}`);
+                    setSelectedSenders(new Set());
+                  }}
+                    className="text-[10px] font-bold px-2.5 py-1 rounded-full"
+                    style={{ background: tierColors[t], color: tierText[t], border: `1px solid ${tierText[t]}40` }}>
+                    {t}
+                  </button>
+                ))}
+                <div className="w-px h-4 mx-1" style={{ background: '#cbd5e1' }} />
+                <button onClick={async () => {
+                  if (!confirm(`Delete ${selectedSenders.size} sender(s)?`)) return;
+                  for (const email of selectedSenders) { await removeSender(email); }
+                  setSelectedSenders(new Set());
+                }}
+                  className="px-3 py-1 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
+                  Delete
+                </button>
+                <button onClick={() => setSelectedSenders(new Set())}
+                  className="px-3 py-1 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
           <div style={{ maxHeight: 400, overflowY: 'auto' }}>
             <table className="w-full text-sm">
               <thead><tr className="text-xs uppercase" style={{ color: 'var(--muted)' }}>
+                <th className="p-2 w-8">
+                  <input type="checkbox"
+                    checked={selectedSenders.size === filteredSenders.length && filteredSenders.length > 0}
+                    onChange={() => {
+                      if (selectedSenders.size === filteredSenders.length) setSelectedSenders(new Set());
+                      else setSelectedSenders(new Set(filteredSenders.map((s: any) => s.sender_email)));
+                    }}
+                    className="rounded" style={{ accentColor: 'var(--accent)' }} />
+                </th>
                 <th className="text-left p-2">Sender</th><th className="p-2 text-center">Emails Sent</th><th className="p-2">Tier</th><th className="p-2 text-center" title="Auto-archive update-only messages from this sender">Auto-Clean</th><th className="p-2"></th>
               </tr></thead>
               <tbody>
@@ -5373,7 +5420,12 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
                   const isExpanded = expandedSender === s.sender_email;
                   return (
                     <React.Fragment key={s.sender_email}>
-                      <tr className="border-t cursor-pointer hover:bg-gray-50" style={{ borderColor: 'var(--border)' }}>
+                      <tr className="border-t cursor-pointer hover:bg-gray-50" style={{ borderColor: 'var(--border)', background: selectedSenders.has(s.sender_email) ? '#eff6ff' : undefined }}>
+                        <td className="p-2 w-8">
+                          <input type="checkbox" checked={selectedSenders.has(s.sender_email)}
+                            onChange={() => setSelectedSenders(prev => { const next = new Set(prev); next.has(s.sender_email) ? next.delete(s.sender_email) : next.add(s.sender_email); return next; })}
+                            className="rounded" style={{ accentColor: 'var(--accent)' }} />
+                        </td>
                         <td className="p-2" onClick={() => loadSenderEmails(s.sender_email)}>
                           <div className="flex items-center gap-1">
                             <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{isExpanded ? '▼' : '▶'}</span>
@@ -5424,7 +5476,7 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
                         </td>
                       </tr>
                       {isExpanded && (
-                        <tr><td colSpan={5} className="p-0">
+                        <tr><td colSpan={6} className="p-0">
                           <div className="px-4 py-3" style={{ background: '#f8fafc', borderBottom: '1px solid var(--border)' }}>
                             {senderEmailsLoading ? (
                               <div className="text-xs py-3 text-center" style={{ color: 'var(--muted)' }}>Loading recent emails...</div>
