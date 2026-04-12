@@ -5380,6 +5380,7 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
             {senders.length === 0 ? 'No sender data yet. Click "Scan Sent Mail" to learn who you reply to most.' : 'No senders in this tier.'}
           </p>
         ) : (
+          <>
           {/* Bulk action bar */}
           {selectedSenders.size > 0 && (
             <div className="mb-3 p-3 rounded-xl flex items-center justify-between gap-3 sticky top-0 z-10" style={{ background: '#eff6ff', border: '2px solid var(--accent)' }}>
@@ -5524,6 +5525,7 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
