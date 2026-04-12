@@ -2298,12 +2298,13 @@ export default function Dashboard() {
               >
                 {tab.label}
                 {count != null && count > 0 && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
+                  <span className="flex flex-col items-center leading-none px-1.5 py-0.5 rounded-md"
                     style={{
-                      background: isActive ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
+                      background: isActive ? 'rgba(255,255,255,0.2)' : '#f1f5f9',
                       color: isActive ? 'white' : '#64748b',
                     }}>
-                    {count > 99 ? '99+' : count}
+                    <span className="text-[10px] font-bold">{count > 9999 ? `${Math.round(count / 1000)}k` : count.toLocaleString()}</span>
+                    <span className="text-[7px]" style={{ opacity: 0.7 }}>emails</span>
                   </span>
                 )}
               </button>
