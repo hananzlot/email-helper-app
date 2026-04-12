@@ -72,6 +72,32 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Clean inbox cache: remove entries for messages that were trashed/archived/deleted/read
+    let cacheCleanedCount = 0;
+    try {
+      const { data: actions } = await admin
+        .from(TABLES.ACTION_HISTORY)
+        .select('message_ids')
+        .in('action', ['trash', 'archive', 'delete', 'markRead'])
+        .eq('undone', false);
+
+      if (actions && actions.length > 0) {
+        const allIds = new Set<string>();
+        for (const row of actions) {
+          for (const mid of (row.message_ids || [])) allIds.add(mid);
+        }
+        const idsArray = Array.from(allIds);
+        // Delete in batches of 100
+        for (let i = 0; i < idsArray.length; i += 100) {
+          const batch = idsArray.slice(i, i + 100);
+          await admin.from(TABLES.INBOX_CACHE).delete().in('gmail_id', batch);
+        }
+        cacheCleanedCount = idsArray.length;
+      }
+    } catch (e) {
+      console.error('Cache cleanup failed:', e);
+    }
+
     const totalSenders = results.reduce((sum, r) => sum + r.sendersFound, 0);
     const totalReplies = results.reduce((sum, r) => sum + r.totalReplies, 0);
 
@@ -80,6 +106,7 @@ export async function GET(request: NextRequest) {
       accountsProcessed: accounts.length,
       totalSenders,
       totalReplies,
+      cacheCleanedCount,
       results,
     });
   } catch (err) {
