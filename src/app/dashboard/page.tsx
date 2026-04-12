@@ -4025,7 +4025,21 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 
 function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name'>('tier');
+  const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name' | 'domain'>('tier');
+  const [visibleGroups, setVisibleGroups] = useState(50);
+  // Auto-load more on scroll
+  const listRef = React.useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
+        setVisibleGroups(prev => Math.min(prev + 50, groups.length));
+      }
+    };
+    el.addEventListener('scroll', handleScroll);
+    return () => el.removeEventListener('scroll', handleScroll);
+  });
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
   const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
@@ -4093,12 +4107,37 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
   // Report count to parent
   useEffect(() => { reportCount?.(cleanupMessages.length); }, [cleanupMessages.length]);
 
-  // Group filtered messages by sender email
+  // Common email providers — don't group these by domain
+  const commonDomains = new Set(['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com', 'icloud.com', 'me.com', 'live.com', 'msn.com', 'protonmail.com', 'mail.com']);
+
+  // Group filtered messages — by sender email normally, or by domain when sorted by domain
   const senderGroups: Record<string, { name: string; email: string; messages: GmailMessage[] }> = {};
   for (const msg of cleanupMessages) {
-    const key = msg.senderEmail.toLowerCase();
+    let key: string;
+    let groupName: string;
+    let groupEmail: string;
+
+    if (sortBy === 'domain') {
+      const domain = (msg.senderEmail.split('@')[1] || '').toLowerCase();
+      if (commonDomains.has(domain)) {
+        // Common domains — group by individual sender
+        key = msg.senderEmail.toLowerCase();
+        groupName = msg.sender;
+        groupEmail = msg.senderEmail;
+      } else {
+        // Unique domains — group all senders from same domain
+        key = `@${domain}`;
+        groupName = domain;
+        groupEmail = `@${domain}`;
+      }
+    } else {
+      key = msg.senderEmail.toLowerCase();
+      groupName = msg.sender;
+      groupEmail = msg.senderEmail;
+    }
+
     if (!senderGroups[key]) {
-      senderGroups[key] = { name: msg.sender, email: msg.senderEmail, messages: [] };
+      senderGroups[key] = { name: groupName, email: groupEmail, messages: [] };
     }
     senderGroups[key].messages.push(msg);
   }
@@ -4124,6 +4163,11 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
       const rcA = senderReplyCounts[a.email.toLowerCase()] || 0;
       const rcB = senderReplyCounts[b.email.toLowerCase()] || 0;
       return rcB - rcA;
+    });
+  } else if (sortBy === 'domain') {
+    groups.sort((a, b) => {
+      if (b.messages.length !== a.messages.length) return b.messages.length - a.messages.length;
+      return a.name.localeCompare(b.name);
     });
   } else {
     groups.sort((a, b) => a.name.localeCompare(b.name));
@@ -4243,6 +4287,11 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
             style={{ background: sortBy === 'name' ? 'var(--accent)' : 'transparent', color: sortBy === 'name' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
             A→Z
           </button>
+          <button onClick={() => setSortBy('domain')}
+            className="px-3 py-1 text-xs rounded-full border font-medium"
+            style={{ background: sortBy === 'domain' ? 'var(--accent)' : 'transparent', color: sortBy === 'domain' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
+            By Domain
+          </button>
         </div>
       </div>
 
@@ -4274,9 +4323,9 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
         </div>
       )}
 
-      {/* Sender list */}
-      <div className="flex flex-col gap-2">
-        {groups.map(group => {
+      {/* Sender list — infinite scroll */}
+      <div ref={listRef} className="flex flex-col gap-2" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+        {groups.slice(0, visibleGroups).map(group => {
           const isExpanded = expandedSender === group.email;
           const isGroupSelected = selectedGroups.has(group.email);
           const allIds = group.messages.map(m => m.id);
@@ -4380,6 +4429,13 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
           );
         })}
       </div>
+
+      {/* Loading indicator for infinite scroll */}
+      {groups.length > visibleGroups && (
+        <div className="text-center py-2">
+          <span className="text-[10px]" style={{ color: 'var(--muted)' }}>Scroll for more — {groups.length - visibleGroups} senders below</span>
+        </div>
+      )}
 
       {/* Delete All confirmation */}
       {confirmDeleteAll && (
