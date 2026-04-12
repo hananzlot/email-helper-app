@@ -2043,35 +2043,28 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Sync progress widget — shows while accounts are being cached */}
+        {/* Sync progress — compact inline widget */}
         {Object.keys(syncProgress).length > 0 && !Object.values(syncProgress).every(s => s.done) && (
-          <div className="mb-2 px-3 py-2 rounded-lg" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-1.5">
-                <div className="w-3 h-3 border-[1.5px] border-t-transparent rounded-full animate-spin" style={{ borderColor: '#22c55e', borderTopColor: 'transparent' }} />
-                <span className="text-[10px] font-semibold" style={{ color: '#166534' }}>Syncing your inbox</span>
-              </div>
-              <span className="text-[10px]" style={{ color: '#15803d' }}>
-                {(() => {
-                  const totalCached = Object.values(syncProgress).reduce((s, p) => s + p.cached, 0);
-                  const totalInbox = Object.values(syncProgress).reduce((s, p) => s + p.total, 0);
-                  const display = Math.min(totalCached, totalInbox);
-                  return `${display.toLocaleString()} / ${totalInbox.toLocaleString()} emails`;
-                })()}
-              </span>
-            </div>
-            {Object.entries(syncProgress).filter(([, s]) => !s.done).map(([email, s]) => (
-              <div key={email} className="flex items-center gap-2 mt-1">
-                <span className="text-[9px] truncate" style={{ color: '#15803d', maxWidth: 140 }}>{email.split('@')[0]}</span>
-                <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: '#dcfce7' }}>
-                  <div className="h-full rounded-full transition-all duration-1000" style={{ background: '#22c55e', width: `${s.total > 0 ? Math.min(100, (s.cached / s.total) * 100) : 0}%` }} />
+          <div className="mb-1.5 flex items-center gap-2 px-2 py-1 rounded-md" style={{ background: '#f0fdf4' }}>
+            <div className="w-2.5 h-2.5 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#22c55e', borderTopColor: 'transparent' }} />
+            <div className="flex-1 flex items-center gap-2 min-w-0">
+              {Object.entries(syncProgress).filter(([, s]) => !s.done).map(([email, s]) => (
+                <div key={email} className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-[9px] truncate" style={{ color: '#15803d', maxWidth: 80 }}>{email.split('@')[0]}</span>
+                  <div className="w-12 h-0.5 rounded-full overflow-hidden flex-shrink-0" style={{ background: '#dcfce7' }}>
+                    <div className="h-full rounded-full transition-all duration-1000" style={{ background: '#22c55e', width: `${s.total > 0 ? Math.min(100, (s.cached / s.total) * 100) : 0}%` }} />
+                  </div>
+                  <span className="text-[8px] whitespace-nowrap" style={{ color: '#15803d' }}>{s.eta}</span>
                 </div>
-                <span className="text-[9px] whitespace-nowrap" style={{ color: '#15803d' }}>
-                  {s.done ? 'Done' : s.eta || `${Math.round(s.total > 0 ? (s.cached / s.total) * 100 : 0)}%`}
-                </span>
-              </div>
-            ))}
-            <p className="text-[8px] mt-1" style={{ color: '#86efac' }}>Runs in background — you can keep working</p>
+              ))}
+            </div>
+            <span className="text-[8px] whitespace-nowrap flex-shrink-0" style={{ color: '#86efac' }}>
+              {(() => {
+                const totalCached = Object.values(syncProgress).reduce((sum, p) => sum + p.cached, 0);
+                const totalInbox = Object.values(syncProgress).reduce((sum, p) => sum + p.total, 0);
+                return `${Math.min(totalCached, totalInbox).toLocaleString()}/${totalInbox.toLocaleString()}`;
+              })()}
+            </span>
           </div>
         )}
 
