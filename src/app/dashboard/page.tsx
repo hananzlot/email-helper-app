@@ -1466,6 +1466,24 @@ export default function Dashboard() {
     } catch (e) { console.error('Failed to load quick reply templates:', e); }
   }, []);
 
+  // Advance split preview to next item (used by snooze and other non-handleAction paths)
+  function advancePreview(messageId: string) {
+    if (splitPreviewId && splitPreviewId === messageId) {
+      const container = splitContainerRef.current;
+      if (container) {
+        const allPreviews = Array.from(container.querySelectorAll('[data-preview-id]')) as HTMLElement[];
+        const currentIdx = allPreviews.findIndex(el => el.getAttribute('data-preview-id') === messageId);
+        const next = allPreviews[currentIdx + 1] || allPreviews[currentIdx - 1];
+        if (next) {
+          setSplitPreviewId(next.getAttribute('data-preview-id') || null);
+          setSplitPreviewAccount(next.getAttribute('data-preview-account') || undefined);
+        } else {
+          setSplitPreviewId(null);
+        }
+      }
+    }
+  }
+
   async function handleAction(action: string, messageIds: string[], label?: string, overrideAccount?: string) {
     setActionLoading(messageIds[0]);
 
@@ -1505,19 +1523,8 @@ export default function Dashboard() {
     }).catch(() => {});
 
     // Advance split preview to next message if current one is being removed
-    if (splitPreviewId && messageIds.includes(splitPreviewId) && ['archive', 'trash', 'delete', 'markRead'].includes(action)) {
-      const container = splitContainerRef.current;
-      if (container) {
-        const allPreviews = Array.from(container.querySelectorAll('[data-preview-id]')) as HTMLElement[];
-        const currentIdx = allPreviews.findIndex(el => el.getAttribute('data-preview-id') === splitPreviewId);
-        const next = allPreviews[currentIdx + 1] || allPreviews[currentIdx - 1];
-        if (next) {
-          setSplitPreviewId(next.getAttribute('data-preview-id') || null);
-          setSplitPreviewAccount(next.getAttribute('data-preview-account') || undefined);
-        } else {
-          setSplitPreviewId(null);
-        }
-      }
+    if (['archive', 'trash', 'delete', 'markRead'].includes(action)) {
+      for (const id of messageIds) advancePreview(id);
     }
 
     // For undoable actions (archive/trash), animate out immediately but delay the API call
@@ -2303,7 +2310,7 @@ export default function Dashboard() {
                 <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
                   onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} onDialogPreview={openDialogPreview} />
               )}
-              {activeTab === 'reply-queue' && <ReplyQueueTab key={`triage-${account}-${unified}`} onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} />}
+              {activeTab === 'reply-queue' && <ReplyQueueTab key={`triage-${account}-${unified}`} onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} onAdvancePreview={advancePreview} />}
               {activeTab === 'follow-up' && <FollowUpTab key={`followup-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
               {activeTab === 'snoozed' && <SnoozedTab key={`snoozed-${account}-${unified}`} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
               {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
@@ -3370,7 +3377,7 @@ function QuickReplyDropdown({ templates, onSend, senderEmail, senderName, cc, su
 
 // ============ REPLY QUEUE TAB ============
 
-function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPreview, reportCount, quickReplyTemplates }: {
+function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPreview, reportCount, quickReplyTemplates, onAdvancePreview }: {
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
   reloadKey: number;
@@ -3378,6 +3385,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
   onDialogPreview?: (messageId: string, accountEmail?: string) => void;
   reportCount?: (count: number) => void;
   quickReplyTemplates: { id: string; label: string; body: string }[];
+  onAdvancePreview?: (messageId: string) => void;
 }) {
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -3440,6 +3448,9 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 
   function snoozeItem(id: string, hours: number, label: string) {
     const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+    // Find the message_id for this queue item to advance preview
+    const item = queue.find(q => q.id === id);
+    if (item?.message_id) onAdvancePreview?.(item.message_id);
     updateStatus(id, 'snoozed', until);
     showToast(`Snoozed`, `Will reappear ${label}`);
   }
