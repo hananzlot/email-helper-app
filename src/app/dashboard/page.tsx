@@ -1619,7 +1619,7 @@ export default function Dashboard() {
         showToast('Undone', `${messageIds.length} message${messageIds.length > 1 ? 's' : ''} restored`);
       };
 
-      setPendingUndo({ key: undoKey, timer, action: () => {} });
+      setPendingUndo({ key: undoKey, timer, action: async () => {} });
       // Remove from inbox cache
       apiDelete('inbox-cache', { account_email: overrideAccount || _currentAccount, gmail_ids: messageIds }).catch(() => {});
       showToast(
