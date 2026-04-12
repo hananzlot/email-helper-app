@@ -36,6 +36,12 @@ Home | Triage | Follow Up | Snoozed | Cleanup | Sent | All Mail
 
 ## Important Rules
 
+### CRITICAL: Tabs Only Show Unread Emails
+All tabs (Top Tiers, Easy-Clear, Follow Up, Snoozed, Sent, All Mail) MUST only display **unread** emails.
+Read emails are excluded from all tab views and tab counts.
+Read emails can ONLY be found via the **global search box**.
+This is a core UX rule — do not change without explicit instruction.
+
 ### CRITICAL: User Data Isolation
 All features and updates MUST ensure full user isolation at all times:
 - Every Supabase query MUST filter by `user_id` — never return or modify another user's data

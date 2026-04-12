@@ -1778,6 +1778,7 @@ export default function Dashboard() {
         const noReply = ['noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster'];
         const auto = ['notification', 'newsletter', 'digest', 'updates@', 'info@', 'support@', 'hello@', 'team@', 'news@', 'marketing@', 'promo'];
         const cleanupCount = messages.filter(m => {
+          if (!m.isUnread) return false;
           const lower = m.senderEmail.toLowerCase();
           const tier = tiers[lower];
           if (tier === 'A' || tier === 'B' || tier === 'C') return false;
@@ -2307,7 +2308,7 @@ export default function Dashboard() {
                 />
               )}
               {activeTab === 'inbox' && (
-                <InboxTab messages={messages} loading={loading} actionLoading={actionLoading}
+                <InboxTab messages={messages.filter(m => m.isUnread)} loading={loading} actionLoading={actionLoading}
                   onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} onDialogPreview={openDialogPreview} />
               )}
               {activeTab === 'reply-queue' && <ReplyQueueTab key={`triage-${account}-${unified}`} onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} onAdvancePreview={advancePreview} />}
@@ -3847,7 +3848,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
   }
 
   // Filter messages to only noise senders
-  const cleanupMessages = tiersLoaded ? messages.filter(m => isNoiseSender(m.senderEmail)) : [];
+  const cleanupMessages = tiersLoaded ? messages.filter(m => m.isUnread && isNoiseSender(m.senderEmail)) : [];
 
   // Report count to parent
   useEffect(() => { reportCount?.(cleanupMessages.length); }, [cleanupMessages.length]);
