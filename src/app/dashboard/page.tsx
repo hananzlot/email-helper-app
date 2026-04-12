@@ -1369,12 +1369,19 @@ export default function Dashboard() {
             totalCached += (cachedThisPage || 0);
           }
 
-          // Calculate speed and ETA
+          // Calculate speed and ETA based on THIS session's throughput
           const elapsed = (Date.now() - startTime) / 1000;
-          const speed = elapsed > 5 ? Math.round(messagesThisRun / elapsed * 60) : 0;
           const remaining = Math.max(0, (inboxTotal || 0) - totalCached);
-          const etaMinutes = speed > 0 ? Math.ceil(remaining / speed) : (remaining > 0 ? Math.ceil(remaining / 200) : 0);
-          const eta = done ? 'Synced' : etaMinutes === 0 ? 'Calculating...' : etaMinutes < 60 ? `~${etaMinutes}m remaining` : `~${Math.floor(etaMinutes / 60)}h ${etaMinutes % 60}m remaining`;
+          // Speed: messages cached per minute in this session (only count after a few seconds)
+          const speed = elapsed > 5 && messagesThisRun > 0 ? Math.round(messagesThisRun / elapsed * 60) : 0;
+          // If speed is known, use it. If still scanning cached pages (speed=0), estimate based on ~200 msgs/page, ~3s/page
+          const etaMinutes = remaining === 0 ? 0 : speed > 0 ? Math.ceil(remaining / speed) : Math.ceil(remaining / 200 * 3 / 60);
+          const pct = (inboxTotal || 0) > 0 ? Math.round((totalCached / (inboxTotal || 1)) * 100) : 0;
+          const eta = done ? 'Synced' :
+            remaining === 0 ? 'Almost done...' :
+            speed === 0 ? `${pct}% — scanning...` :
+            etaMinutes < 60 ? `${pct}% — ~${etaMinutes}m remaining` :
+            `${pct}% — ~${Math.floor(etaMinutes / 60)}h ${etaMinutes % 60}m remaining`;
 
           setSyncProgress(prev => ({
             ...prev,
