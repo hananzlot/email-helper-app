@@ -1376,23 +1376,23 @@ export default function Dashboard() {
             totalCached += (cachedThisPage || 0);
           }
 
-          // Calculate speed and ETA based on THIS session's throughput
+          // Calculate speed and ETA
           const elapsed = (Date.now() - startTime) / 1000;
+          // Cap display: cached can exceed inbox total if old messages were archived/deleted
+          const displayCached = Math.min(totalCached, inboxTotal || totalCached);
           const remaining = Math.max(0, (inboxTotal || 0) - totalCached);
-          // Speed: messages cached per minute in this session (only count after a few seconds)
+          const isSynced = done || totalCached >= (inboxTotal || 0);
           const speed = elapsed > 5 && messagesThisRun > 0 ? Math.round(messagesThisRun / elapsed * 60) : 0;
-          // If speed is known, use it. If still scanning cached pages (speed=0), estimate based on ~200 msgs/page, ~3s/page
-          const etaMinutes = remaining === 0 ? 0 : speed > 0 ? Math.ceil(remaining / speed) : Math.ceil(remaining / 200 * 3 / 60);
-          const pct = (inboxTotal || 0) > 0 ? Math.round((totalCached / (inboxTotal || 1)) * 100) : 0;
-          const eta = done ? 'Synced' :
-            remaining === 0 ? 'Almost done...' :
+          const etaMinutes = remaining <= 0 ? 0 : speed > 0 ? Math.ceil(remaining / speed) : Math.ceil(remaining / 200 * 3 / 60);
+          const pct = (inboxTotal || 0) > 0 ? Math.min(100, Math.round((totalCached / (inboxTotal || 1)) * 100)) : 0;
+          const eta = isSynced ? 'Synced' :
             speed === 0 ? `${pct}% — scanning...` :
             etaMinutes < 60 ? `${pct}% — ~${etaMinutes}m remaining` :
             `${pct}% — ~${Math.floor(etaMinutes / 60)}h ${etaMinutes % 60}m remaining`;
 
           setSyncProgress(prev => ({
             ...prev,
-            [acctEmail]: { cached: totalCached, total: inboxTotal || 0, done: !!done, speed, eta },
+            [acctEmail]: { cached: displayCached, total: inboxTotal || 0, done: isSynced, speed, eta },
           }));
 
           if (done) break;
@@ -2055,7 +2055,8 @@ export default function Dashboard() {
                 {(() => {
                   const totalCached = Object.values(syncProgress).reduce((s, p) => s + p.cached, 0);
                   const totalInbox = Object.values(syncProgress).reduce((s, p) => s + p.total, 0);
-                  return `${totalCached.toLocaleString()} / ${totalInbox.toLocaleString()} emails`;
+                  const display = Math.min(totalCached, totalInbox);
+                  return `${display.toLocaleString()} / ${totalInbox.toLocaleString()} emails`;
                 })()}
               </span>
             </div>
