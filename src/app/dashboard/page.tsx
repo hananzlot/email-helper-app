@@ -1771,8 +1771,7 @@ export default function Dashboard() {
     setTabCounts(prev => prev[tabId] === count ? prev : { ...prev, [tabId]: count });
   }, []);
 
-  // All Mail tab: no count badge — its count doesn't align with
-  // the categorised tabs (Triage, Cleanup, etc.) and confuses users.
+  // All Mail tab: shows total Gmail inbox count from labels.get
 
   // Load all tab counts upfront (not just when each tab is visited)
   const loadAllTabCounts = useCallback(async () => {
@@ -1818,6 +1817,24 @@ export default function Dashboard() {
         const followUpCount = (followUpRes.data.starred_count || 0) + (followUpRes.data.awaiting_count || 0);
         reportTabCount('follow-up', followUpCount);
       }
+
+      // Fetch total Gmail inbox count for All Mail tab
+      try {
+        if (unified && accounts.length > 1) {
+          let totalInbox = 0;
+          const savedAcct = _currentAccount;
+          for (const acct of accounts) {
+            setCurrentAccount(acct.email);
+            const labelRes = await gmailGet('labelInfo', { labelId: 'INBOX' });
+            if (labelRes.success) totalInbox += labelRes.data.messagesTotal || 0;
+          }
+          setCurrentAccount(savedAcct);
+          reportTabCount('inbox', totalInbox);
+        } else {
+          const labelRes = await gmailGet('labelInfo', { labelId: 'INBOX' });
+          if (labelRes.success) reportTabCount('inbox', labelRes.data.messagesTotal || 0);
+        }
+      } catch {}
     } catch (e) {
       console.error('Failed to load tab counts:', e);
     }
