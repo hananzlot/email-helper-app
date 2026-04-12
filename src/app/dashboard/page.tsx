@@ -4026,20 +4026,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name' | 'domain'>('tier');
-  const [visibleGroups, setVisibleGroups] = useState(50);
-  // Auto-load more on scroll
-  const listRef = React.useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    const handleScroll = () => {
-      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
-        setVisibleGroups(prev => Math.min(prev + 50, groups.length));
-      }
-    };
-    el.addEventListener('scroll', handleScroll);
-    return () => el.removeEventListener('scroll', handleScroll);
-  });
+  const [visibleGroups, setVisibleGroups] = useState(30);
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
   const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
@@ -4323,8 +4310,8 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
         </div>
       )}
 
-      {/* Sender list — infinite scroll */}
-      <div ref={listRef} className="flex flex-col gap-2" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+      {/* Sender list */}
+      <div className="flex flex-col gap-2">
         {groups.slice(0, visibleGroups).map(group => {
           const isExpanded = expandedSender === group.email;
           const isGroupSelected = selectedGroups.has(group.email);
@@ -4430,10 +4417,14 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
         })}
       </div>
 
-      {/* Loading indicator for infinite scroll */}
+      {/* Show more */}
       {groups.length > visibleGroups && (
-        <div className="text-center py-2">
-          <span className="text-[10px]" style={{ color: 'var(--muted)' }}>Scroll for more — {groups.length - visibleGroups} senders below</span>
+        <div className="text-center py-3">
+          <button onClick={() => setVisibleGroups(prev => Math.min(prev + 30, groups.length))}
+            className="px-6 py-2 text-xs font-medium rounded-lg border hover:shadow-sm"
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+            Show {Math.min(30, groups.length - visibleGroups)} more of {groups.length - visibleGroups} senders
+          </button>
         </div>
       )}
 
