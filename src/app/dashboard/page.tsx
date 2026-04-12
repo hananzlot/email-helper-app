@@ -1662,6 +1662,8 @@ export default function Dashboard() {
           setTriageVersion(v => v + 1);
         } else if (action === 'markRead') {
           setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
+          // Remove from cache — tabs only show unread, so read messages shouldn't come back
+          apiDelete('inbox-cache', { account_email: overrideAccount || _currentAccount, gmail_ids: messageIds }).catch(() => {});
           for (const msgId of messageIds) {
             apiPut('queue', { message_id: msgId, status: 'done' }).catch(() => {});
           }
@@ -2048,7 +2050,7 @@ export default function Dashboard() {
             </div>{/* close controls row */}
             {/* Greeting + motivation */}
             <div className="text-right">
-              <span className="text-sm font-semibold" suppressHydrationWarning>{(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })()}</span>
+              <span className="text-sm font-semibold" suppressHydrationWarning>{typeof window !== 'undefined' ? (() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })() : 'Welcome'}</span>
               <span className="text-xs ml-1.5" style={{ color: 'var(--muted)' }} suppressHydrationWarning>
                 {(() => {
                   const tc = tabCounts['reply-queue'] || 0;
