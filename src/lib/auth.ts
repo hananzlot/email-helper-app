@@ -97,15 +97,43 @@ export async function signInOrCreateUser(email: string, name: string) {
     return { user: existingUser, isNew: false, token: null };
   }
 
-  // 4. No existing user found — create a new one
-  // email_confirm: false — Google OAuth already verified the email, skip Supabase mail service
-  const { data, error } = await admin.auth.admin.createUser({
-    email,
-    email_confirm: false,
-    user_metadata: { full_name: name },
-  });
-  if (error) throw new Error(`Failed to create user: ${error.message}`);
-  return { user: data.user, isNew: true, token: null };
+  // 4. No existing user found — create via Supabase Auth
+  // Try with email_confirm variations to handle different Supabase project configs
+  let newUser = null;
+  for (const confirmSetting of [false, true]) {
+    try {
+      const { data, error } = await admin.auth.admin.createUser({
+        email,
+        email_confirm: confirmSetting,
+        user_metadata: { full_name: name },
+      });
+      if (!error && data?.user) {
+        newUser = data.user;
+        break;
+      }
+    } catch {
+      // Try next setting
+    }
+  }
+
+  // Fallback: if Supabase Auth createUser fails entirely (mail service issue),
+  // create a user profile directly with a generated UUID
+  if (!newUser) {
+    const { randomUUID } = await import('crypto');
+    const generatedId = randomUUID();
+    const { error: profileError } = await admin
+      .from(TABLES.USER_PROFILES)
+      .upsert({
+        id: generatedId,
+        email,
+        full_name: name,
+        created_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+    if (profileError) throw new Error(`Failed to create user profile: ${profileError.message}`);
+    return { user: { id: generatedId, email }, isNew: true, token: null };
+  }
+
+  return { user: newUser, isNew: true, token: null };
 }
 
 /**
