@@ -1525,7 +1525,8 @@ export default function Dashboard() {
     }
 
     // Advance split preview to next message if current one is being removed
-    if (['archive', 'trash', 'delete', 'markRead'].includes(action)) {
+    // Don't advance for markRead/markUnread — email stays visible, just changes status
+    if (['archive', 'trash', 'delete'].includes(action)) {
       for (const id of messageIds) advancePreview(id);
     }
 
