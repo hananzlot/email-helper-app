@@ -660,47 +660,48 @@ export default function Dashboard() {
     }
     setSearchLoading(true);
     const q = query.toLowerCase();
+    const seenIds = new Set<string>();
 
-    // Step 1: Instant results from in-memory messages (already loaded)
+    // Step 1: Instant results from in-memory messages
     const localResults = messages.filter(m =>
       m.sender?.toLowerCase().includes(q) ||
       m.senderEmail?.toLowerCase().includes(q) ||
       m.subject?.toLowerCase().includes(q) ||
       m.snippet?.toLowerCase().includes(q)
     );
+    localResults.forEach(m => seenIds.add(m.id));
     if (localResults.length > 0) {
       setSearchResults(localResults.slice(0, 50));
     }
 
-    // Step 2: Search Supabase cache for messages not in memory
+    // Step 2: Search Supabase cache for messages not already found
     try {
       const cacheRes = await apiGet('inbox-cache');
       if (cacheRes.success && cacheRes.data?.messages?.length > 0) {
-        const localIds = new Set(localResults.map(m => m.id));
         const cacheMatches = cacheRes.data.messages
-          .filter((m: { sender: string; sender_email: string; subject: string; snippet: string }) =>
-            m.sender?.toLowerCase().includes(q) ||
-            m.sender_email?.toLowerCase().includes(q) ||
-            m.subject?.toLowerCase().includes(q) ||
-            m.snippet?.toLowerCase().includes(q)
+          .filter((m: { sender: string; sender_email: string; subject: string; snippet: string; gmail_id: string }) =>
+            !seenIds.has(m.gmail_id) && (
+              m.sender?.toLowerCase().includes(q) ||
+              m.sender_email?.toLowerCase().includes(q) ||
+              m.subject?.toLowerCase().includes(q) ||
+              m.snippet?.toLowerCase().includes(q)
+            )
           )
-          .filter((m: { gmail_id: string }) => !localIds.has(m.gmail_id))
           .map((m: { gmail_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; is_unread: boolean; label_ids: string[]; account_email: string }) => ({
             id: m.gmail_id, threadId: m.thread_id, sender: m.sender, senderEmail: m.sender_email,
             subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.is_unread,
             labelIds: m.label_ids, accountEmail: m.account_email, body: '', bodyHtml: '', to: '', cc: '',
           } as GmailMessage));
+        cacheMatches.forEach((m: GmailMessage) => seenIds.add(m.id));
         if (cacheMatches.length > 0) {
-          const merged = [...localResults, ...cacheMatches].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setSearchResults(merged.slice(0, 100));
+          setSearchResults(prev => [...prev, ...cacheMatches].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 100));
         }
       }
     } catch {}
 
-    // Step 3: Also search Gmail API for messages not in cache (e.g. archived, older)
+    // Step 3: Also search Gmail API for messages not found locally or in cache
     try {
       const gmailQuery = `{from:${query} subject:${query}}`;
-      const existingIds = new Set(localResults.map(m => m.id));
       const gmailResults: GmailMessage[] = [];
 
       if (unified && accounts.length > 1) {
@@ -711,9 +712,9 @@ export default function Dashboard() {
             const res = await gmailGet('search', { q: gmailQuery, max: '20' });
             if (res.success && res.data?.messages) {
               for (const msg of res.data.messages) {
-                if (!existingIds.has(msg.id)) {
+                if (!seenIds.has(msg.id)) {
                   gmailResults.push({ ...msg, accountEmail: acct.email });
-                  existingIds.add(msg.id);
+                  seenIds.add(msg.id);
                 }
               }
             }
@@ -724,9 +725,9 @@ export default function Dashboard() {
         const res = await gmailGet('search', { q: gmailQuery, max: '30' });
         if (res.success && res.data?.messages) {
           for (const msg of res.data.messages) {
-            if (!existingIds.has(msg.id)) {
+            if (!seenIds.has(msg.id)) {
               gmailResults.push({ ...msg, accountEmail: _currentAccount });
-              existingIds.add(msg.id);
+              seenIds.add(msg.id);
             }
           }
         }
@@ -1516,6 +1517,22 @@ export default function Dashboard() {
       // Store the removed messages so we can restore on undo
       const removedMessages = messages.filter(m => messageIds.includes(m.id));
 
+      // Advance split preview to next message if current one is being removed
+      if (splitPreviewId && messageIds.includes(splitPreviewId)) {
+        const container = splitContainerRef.current;
+        if (container) {
+          const allPreviews = Array.from(container.querySelectorAll('[data-preview-id]')) as HTMLElement[];
+          const currentIdx = allPreviews.findIndex(el => el.getAttribute('data-preview-id') === splitPreviewId);
+          const next = allPreviews[currentIdx + 1] || allPreviews[currentIdx - 1];
+          if (next) {
+            setSplitPreviewId(next.getAttribute('data-preview-id') || null);
+            setSplitPreviewAccount(next.getAttribute('data-preview-account') || undefined);
+          } else {
+            setSplitPreviewId(null);
+          }
+        }
+      }
+
       setTimeout(() => {
         setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
         setAnimatingOut(prev => {
@@ -1768,8 +1785,9 @@ export default function Dashboard() {
         reportTabCount('priorities', sendersRes.data.length);
       }
 
-      // Fetch follow-up count from Supabase cache (not live Gmail — avoids flicker)
-      const followUpRes = await apiGet('follow-ups');
+      // Fetch follow-up count — unified mode gets all accounts, single gets one
+      const followUpUrl = unified ? '/api/emailHelperV2/follow-ups' : withAccount('/api/emailHelperV2/follow-ups');
+      const followUpRes = await fetch(followUpUrl).then(r => r.json());
       if (followUpRes.success && followUpRes.data) {
         const followUpCount = (followUpRes.data.starred_count || 0) + (followUpRes.data.awaiting_count || 0);
         reportTabCount('follow-up', followUpCount);
@@ -4604,7 +4622,9 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
   // Load follow-ups from Supabase cache only — heavy thread-checking runs in cron, not live
   async function loadFromCache() {
     try {
-      const cacheRes = await apiGet('follow-ups');
+      // In unified mode, fetch all accounts (no account filter)
+      const url = unified ? '/api/emailHelperV2/follow-ups' : withAccount('/api/emailHelperV2/follow-ups');
+      const cacheRes = await fetch(url).then(r => r.json());
       if (cacheRes.success && cacheRes.data?.items?.length > 0) {
         const items = cacheRes.data.items as { message_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; account_email: string; type: string }[];
         const starred = items.filter(i => i.type === 'starred').map(i => ({
