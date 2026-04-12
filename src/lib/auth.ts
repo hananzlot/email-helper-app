@@ -98,42 +98,36 @@ export async function signInOrCreateUser(email: string, name: string) {
   }
 
   // 4. No existing user found — create via Supabase Auth
-  // Try with email_confirm variations to handle different Supabase project configs
-  let newUser = null;
-  for (const confirmSetting of [false, true]) {
-    try {
-      const { data, error } = await admin.auth.admin.createUser({
-        email,
-        email_confirm: confirmSetting,
-        user_metadata: { full_name: name },
-      });
-      if (!error && data?.user) {
-        newUser = data.user;
-        break;
-      }
-    } catch {
-      // Try next setting
+  try {
+    const { data, error } = await admin.auth.admin.createUser({
+      email,
+      email_confirm: false,
+      user_metadata: { full_name: name },
+    });
+    if (!error && data?.user) {
+      return { user: data.user, isNew: true, token: null };
     }
+    // If createUser returned an error, fall through to fallback
+    console.error('createUser returned error:', error?.message);
+  } catch (e) {
+    console.error('createUser threw:', e);
   }
 
-  // Fallback: if Supabase Auth createUser fails entirely (mail service issue),
-  // create a user profile directly with a generated UUID
-  if (!newUser) {
-    const { randomUUID } = await import('crypto');
-    const generatedId = randomUUID();
-    const { error: profileError } = await admin
-      .from(TABLES.USER_PROFILES)
-      .upsert({
-        id: generatedId,
-        email,
-        full_name: name,
-        created_at: new Date().toISOString(),
-      }, { onConflict: 'id' });
-    if (profileError) throw new Error(`Failed to create user profile: ${profileError.message}`);
-    return { user: { id: generatedId, email }, isNew: true, token: null };
-  }
+  // Fallback: Supabase Auth unavailable (mail service, rate limit, etc.)
+  // Generate a UUID and create user profile directly — cookie auth only needs an ID
+  const crypto = await import('crypto');
+  const generatedId = crypto.randomUUID();
+  await admin
+    .from(TABLES.USER_PROFILES)
+    .upsert({
+      id: generatedId,
+      email,
+      full_name: name,
+      created_at: new Date().toISOString(),
+    }, { onConflict: 'id' })
+    .then(({ error: e }) => { if (e) console.error('Profile upsert error:', e.message); });
 
-  return { user: newUser, isNew: true, token: null };
+  return { user: { id: generatedId, email }, isNew: true, token: null };
 }
 
 /**
