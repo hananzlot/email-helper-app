@@ -1565,6 +1565,7 @@ export default function Dashboard() {
       }
       setCurrentAccount(savedAccount);
       showToast('Scan complete', `Found ${totalSenders} senders, ${totalReplies} replies`);
+      setTriageVersion(v => v + 1); // Reload Priorities + Triage tabs
     } catch (err) {
       showToast('Scan failed', String(err));
     } finally {
@@ -2131,7 +2132,7 @@ export default function Dashboard() {
               {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
               {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} />}
-              {activeTab === 'priorities' && <PrioritiesTab onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
+              {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${triageVersion}`} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
               {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
             </>
           );
@@ -4784,7 +4785,10 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [senderEmails, setSenderEmails] = useState<any[]>([]);
   const [senderEmailsLoading, setSenderEmailsLoading] = useState(false);
-  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('email_helper_dismissed_dupes') || '[]')); }
+    catch { return new Set(); }
+  });
   const [merging, setMerging] = useState<string | null>(null);
   // Manual merge state
   const [showManualMerge, setShowManualMerge] = useState(false);
@@ -5083,7 +5087,7 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
                             className="px-4 py-2 text-xs font-semibold rounded-lg text-white transition-all active:scale-95" style={{ background: isMerging ? 'var(--muted)' : '#16a34a' }}>
                             {isMerging ? 'Merging...' : `Merge ${c.others.length === 1 ? '2' : c.others.length + 1} into 1`}
                           </button>
-                          <button onClick={() => setDismissedSuggestions(prev => new Set([...prev, clusterKey]))}
+                          <button onClick={() => setDismissedSuggestions(prev => { const next = new Set([...prev, clusterKey]); localStorage.setItem('email_helper_dismissed_dupes', JSON.stringify([...next])); return next; })}
                             className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
                             Not same
                           </button>
