@@ -2111,6 +2111,31 @@ export default function Dashboard() {
         </div>
 
 
+        {/* Sync alert banner — prominent when sync is incomplete */}
+        {Object.keys(syncProgress).length > 0 && !Object.values(syncProgress).every(s => s.done) && (() => {
+          const totalCached = Object.values(syncProgress).reduce((s, p) => s + p.cached, 0);
+          const totalInbox = Object.values(syncProgress).reduce((s, p) => s + p.total, 0);
+          const pct = totalInbox > 0 ? Math.min(100, Math.round((totalCached / totalInbox) * 100)) : 0;
+          const displayCached = Math.min(totalCached, totalInbox).toLocaleString();
+          const displayTotal = totalInbox.toLocaleString();
+          return (
+            <div className="mb-2 px-3 py-2 rounded-lg flex items-center gap-3" style={{ background: '#fefce8', border: '1px solid #fde68a' }}>
+              <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold" style={{ color: '#92400e' }}>
+                  Syncing your inbox — {displayCached} of {displayTotal} emails ({pct}%)
+                </div>
+                <div className="text-[10px]" style={{ color: '#b45309' }}>
+                  Your data is still loading. Some emails may not appear yet. Sync continues in the background even when you close this tab.
+                </div>
+              </div>
+              <div className="w-24 h-1.5 rounded-full overflow-hidden flex-shrink-0" style={{ background: '#fef3c7' }}>
+                <div className="h-full rounded-full transition-all duration-1000" style={{ background: '#f59e0b', width: `${pct}%` }} />
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Global Search Bar */}
         <div className="relative mb-2">
           <div className="flex items-center gap-2">
