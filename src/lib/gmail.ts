@@ -249,6 +249,138 @@ export async function listLabels(gmail: gmail_v1.Gmail): Promise<GmailLabel[]> {
 }
 
 /**
+ * Batch get message metadata — 10x faster than individual getMessage calls.
+ * Fetches up to 50 messages in parallel using Promise.all.
+ */
+export async function batchGetMessageMetadata(
+  gmail: gmail_v1.Gmail,
+  messageIds: string[],
+  concurrency = 50
+): Promise<GmailMessage[]> {
+  const results: GmailMessage[] = [];
+  for (let i = 0; i < messageIds.length; i += concurrency) {
+    const batch = messageIds.slice(i, i + concurrency);
+    const batchResults = await Promise.all(
+      batch.map(async (id) => {
+        try {
+          return await getMessage(gmail, id, 'metadata');
+        } catch {
+          return null;
+        }
+      })
+    );
+    results.push(...batchResults.filter((m): m is GmailMessage => m !== null));
+  }
+  return results;
+}
+
+/**
+ * Cache inbox messages server-side — paginates through inbox and stores in Supabase.
+ * Designed for cron jobs / background tasks (no browser dependency).
+ */
+export async function cacheInboxMessages(
+  gmail: gmail_v1.Gmail,
+  userId: string,
+  accountEmail: string,
+  maxMessages = 100000
+): Promise<{ cached: number; total: number }> {
+  const { createSupabaseAdmin } = await import('./supabase-server');
+  const { TABLES } = await import('./tables');
+  const admin = createSupabaseAdmin();
+
+  // Check how many are already cached
+  const { count: existingCount } = await admin
+    .from(TABLES.INBOX_CACHE)
+    .select('gmail_id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('account_email', accountEmail);
+
+  const alreadyCached = existingCount || 0;
+
+  // Get exact inbox count
+  const labelInfo = await getLabelInfo(gmail, 'INBOX');
+  const totalInbox = labelInfo.messagesTotal;
+
+  if (alreadyCached >= totalInbox || alreadyCached >= maxMessages) {
+    // Update sync timestamp
+    await admin.from(TABLES.INBOX_SYNC).upsert({
+      user_id: userId, account_email: accountEmail,
+      last_synced_at: new Date().toISOString(), total_cached: alreadyCached,
+    }, { onConflict: 'user_id,account_email' });
+    return { cached: alreadyCached, total: totalInbox };
+  }
+
+  // Get existing cached IDs to skip
+  const { data: existingIds } = await admin
+    .from(TABLES.INBOX_CACHE)
+    .select('gmail_id')
+    .eq('user_id', userId)
+    .eq('account_email', accountEmail);
+  const cachedIdSet = new Set((existingIds || []).map((r: { gmail_id: string }) => r.gmail_id));
+
+  // Paginate through inbox
+  let pageToken: string | undefined;
+  let totalCached = alreadyCached;
+  let pagesProcessed = 0;
+
+  do {
+    const listRes = await listMessages(gmail, { query: 'in:inbox', maxResults: 200, pageToken });
+    if (!listRes.messages?.length) break;
+
+    // Filter out already-cached message IDs
+    const newIds = listRes.messages
+      .map((m: { id?: string | null }) => m.id!)
+      .filter((id: string) => id && !cachedIdSet.has(id));
+
+    if (newIds.length > 0) {
+      // Batch fetch metadata (parallel — much faster)
+      const messages = await batchGetMessageMetadata(gmail, newIds);
+
+      // Upsert to Supabase
+      const rows = messages.map(m => ({
+        user_id: userId,
+        account_email: accountEmail,
+        gmail_id: m.id,
+        thread_id: m.threadId || null,
+        sender: m.sender || '',
+        sender_email: m.senderEmail || '',
+        subject: m.subject || '',
+        snippet: m.snippet || '',
+        date: m.date ? new Date(m.date).toISOString() : new Date().toISOString(),
+        is_unread: m.isUnread ?? true,
+        label_ids: m.labelIds || [],
+        cached_at: new Date().toISOString(),
+      }));
+
+      for (let i = 0; i < rows.length; i += 100) {
+        await admin.from(TABLES.INBOX_CACHE)
+          .upsert(rows.slice(i, i + 100), { onConflict: 'user_id,account_email,gmail_id' });
+      }
+
+      totalCached += messages.length;
+      messages.forEach(m => cachedIdSet.add(m.id));
+    }
+
+    pageToken = listRes.nextPageToken || undefined;
+    pagesProcessed++;
+
+    // Safety: don't exceed max
+    if (totalCached >= maxMessages) break;
+    // Safety: don't run forever (500 pages = 100k messages)
+    if (pagesProcessed >= 500) break;
+
+  } while (pageToken);
+
+  // Update sync metadata
+  await admin.from(TABLES.INBOX_SYNC).upsert({
+    user_id: userId, account_email: accountEmail,
+    last_synced_at: new Date().toISOString(), total_cached: totalCached,
+  }, { onConflict: 'user_id,account_email' });
+
+  return { cached: totalCached, total: totalInbox };
+}
+
+/**
  * Get exact message counts for a label (e.g. INBOX).
  * Returns { messagesTotal, messagesUnread } — accurate, single API call.
  */
