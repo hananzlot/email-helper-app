@@ -1363,7 +1363,7 @@ export default function Dashboard() {
       // Show initial "scanning" state immediately
       setSyncProgress(prev => ({
         ...prev,
-        [acctEmail]: { cached: 0, total: 0, done: false, speed: 0, eta: 'Starting...' },
+        [acctEmail]: { cached: 0, total: 0, done: false, speed: 0, eta: 'Syncing...' },
       }));
 
       while (!cancelled && retries < 10) {
@@ -1376,6 +1376,11 @@ export default function Dashboard() {
 
           if (!res.success) {
             retries++;
+            if (retries >= 5) {
+              // Give up after 5 failures — mark as done to stop spinning
+              setSyncProgress(prev => ({ ...prev, [acctEmail]: { ...prev[acctEmail], done: true, eta: 'Retry later' } }));
+              break;
+            }
             await new Promise(r => setTimeout(r, 5000 * retries));
             continue;
           }
