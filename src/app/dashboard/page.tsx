@@ -1756,7 +1756,7 @@ export default function Dashboard() {
       const queueRes = await apiGet('queue');
       if (queueRes.success) {
         const items = queueRes.data || [];
-        const activeSignal = items.filter((q: any) => q.status === 'active' && q.priority !== 'low').length;
+        const activeSignal = items.filter((q: any) => q.status === 'active' && q.priority !== 'low' && ['A', 'B', 'C'].includes(q.tier)).length;
         const snoozed = items.filter((q: any) => q.status === 'snoozed').length;
         reportTabCount('reply-queue', activeSignal);
         reportTabCount('snoozed', snoozed);
