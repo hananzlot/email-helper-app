@@ -3024,6 +3024,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   const [loading, setLoading] = useState(true);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyAllMode, setReplyAllMode] = useState(false);
+  const [isUnread, setIsUnread] = useState(true);
 
   const iframeRef = useCallback((node: HTMLIFrameElement | null) => {
     if (node && (email?.bodyHtml || email?.body)) {
@@ -3072,6 +3073,7 @@ document.querySelectorAll('img').forEach(function(img) {
       if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
       if (res.success) {
         setEmail(res.data);
+        setIsUnread(res.data.isUnread ?? true);
       } else {
         setEmail(null);
       }
@@ -3119,6 +3121,15 @@ document.querySelectorAll('img').forEach(function(img) {
         </button>
         <button onClick={() => { onAction('archive', [messageId], undefined, accountEmail || _currentAccount); showToast('Archived'); }}
           className="px-3 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
+        <button onClick={() => {
+            const action = isUnread ? 'markRead' : 'markUnread';
+            onAction(action, [messageId], undefined, accountEmail || _currentAccount);
+            setIsUnread(!isUnread);
+            showToast(isUnread ? 'Marked read' : 'Marked unread');
+          }}
+          className="px-3 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+          {isUnread ? 'Mark Read' : 'Mark Unread'}
+        </button>
         <button onClick={() => { onAction('star', [messageId], undefined, accountEmail || _currentAccount); showToast('Starred'); }}
           className="px-3 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
         <button onClick={() => { onAction('trash', [messageId], undefined, accountEmail || _currentAccount); showToast('Trashed'); }}
