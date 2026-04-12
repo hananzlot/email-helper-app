@@ -1582,21 +1582,34 @@ export default function Dashboard() {
 
       const undoKey = `${action}-${Date.now()}`;
 
-      // The actual API call — delayed 5 seconds
-      const executeAction = async () => {
-        const savedAccount = _currentAccount;
-        if (overrideAccount && overrideAccount !== _currentAccount) setCurrentAccount(overrideAccount);
-        await gmailPost(action, { action, messageIds });
-        if (overrideAccount) setCurrentAccount(savedAccount);
-        setPendingUndo(prev => prev?.key === undoKey ? null : prev);
-      };
+      // Execute Gmail action IMMEDIATELY (don't delay — prevents lost actions on logout/refresh)
+      const savedAccount = _currentAccount;
+      if (overrideAccount && overrideAccount !== _currentAccount) setCurrentAccount(overrideAccount);
+      gmailPost(action, { action, messageIds }).catch(() => {});
+      if (overrideAccount) setCurrentAccount(savedAccount);
 
-      const timer = setTimeout(() => { executeAction(); }, 5000);
+      // Undo window: 5 seconds to reverse the action
+      const timer = setTimeout(() => { setPendingUndo(prev => prev?.key === undoKey ? null : prev); }, 5000);
 
       const undoFn = () => {
         clearTimeout(timer);
         // Restore messages to the list
         setMessages(prev => [...removedMessages, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        // Reverse the Gmail action (move back to inbox)
+        const undoSavedAccount = _currentAccount;
+        if (overrideAccount && overrideAccount !== _currentAccount) setCurrentAccount(overrideAccount);
+        if (action === 'trash') {
+          // Untrash: remove from trash, add back to inbox
+          gmailPost('addLabel', { action: 'addLabel', messageIds, labelId: 'INBOX' }).catch(() => {});
+        } else if (action === 'archive') {
+          // Unarchive: add inbox label back
+          gmailPost('addLabel', { action: 'addLabel', messageIds, labelId: 'INBOX' }).catch(() => {});
+        }
+        if (overrideAccount) setCurrentAccount(undoSavedAccount);
+        // Re-add to cache
+        for (const msg of removedMessages) {
+          apiPost('inbox-cache', { account_email: msg.accountEmail || overrideAccount || _currentAccount, messages: [{ id: msg.id, threadId: msg.threadId, sender: msg.sender, senderEmail: msg.senderEmail, subject: msg.subject, snippet: msg.snippet, date: msg.date, isUnread: msg.isUnread, labelIds: msg.labelIds }] }).catch(() => {});
+        }
         // Re-activate queue items
         for (const msgId of messageIds) {
           apiPut('queue', { message_id: msgId, status: 'active' }).catch(() => {});
@@ -1606,7 +1619,7 @@ export default function Dashboard() {
         showToast('Undone', `${messageIds.length} message${messageIds.length > 1 ? 's' : ''} restored`);
       };
 
-      setPendingUndo({ key: undoKey, timer, action: executeAction });
+      setPendingUndo({ key: undoKey, timer, action: () => {} });
       // Remove from inbox cache
       apiDelete('inbox-cache', { account_email: overrideAccount || _currentAccount, gmail_ids: messageIds }).catch(() => {});
       showToast(
