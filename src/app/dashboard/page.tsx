@@ -2933,6 +2933,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   const [email, setEmail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [replyOpen, setReplyOpen] = useState(false);
+  const [replyAllMode, setReplyAllMode] = useState(false);
 
   const iframeRef = useCallback((node: HTMLIFrameElement | null) => {
     if (node && (email?.bodyHtml || email?.body)) {
@@ -2960,6 +2961,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   useEffect(() => {
     setLoading(true);
     setReplyOpen(false);
+    setReplyAllMode(false);
     const savedAccount = _currentAccount;
     if (accountEmail && accountEmail !== _currentAccount) setCurrentAccount(accountEmail);
     gmailGet('message', { id: messageId, format: 'full' }).then(res => {
@@ -2994,8 +2996,15 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
 
       {/* Action bar */}
       <div className="px-4 py-2 border-b flex gap-1.5 flex-wrap" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
-        <button onClick={() => setReplyOpen(!replyOpen)} className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
-          {replyOpen ? 'Cancel' : 'Reply'}
+        <button onClick={() => { setReplyOpen(!replyOpen || replyAllMode); setReplyAllMode(false); }}
+          className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white"
+          style={{ background: replyOpen && !replyAllMode ? '#6366f1' : 'var(--accent)' }}>
+          {replyOpen && !replyAllMode ? 'Cancel' : 'Reply'}
+        </button>
+        <button onClick={() => { setReplyAllMode(true); setReplyOpen(!replyOpen || !replyAllMode); }}
+          className="px-3 py-1.5 text-xs font-semibold rounded-lg border"
+          style={{ borderColor: 'var(--accent)', color: replyOpen && replyAllMode ? '#fff' : 'var(--accent)', background: replyOpen && replyAllMode ? '#7c3aed' : undefined }}>
+          {replyOpen && replyAllMode ? 'Cancel' : 'Reply All'}
         </button>
         <button onClick={() => { onAction('archive', [messageId], undefined, accountEmail || _currentAccount); showToast('Archived'); }}
           className="px-3 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
@@ -3015,8 +3024,10 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
             messageId={email.id}
             showToast={showToast}
             accountEmail={accountEmail}
-            onSent={() => { setReplyOpen(false); showToast('Reply sent'); }}
-            onCancel={() => setReplyOpen(false)}
+            replyAll={replyAllMode}
+            cc={replyAllMode ? (email.cc || email.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(email.senderEmail.toLowerCase()) && !(accountEmail && e.toLowerCase().includes(accountEmail.toLowerCase()))).join(', ') : undefined}
+            onSent={() => { setReplyOpen(false); setReplyAllMode(false); showToast(`Reply${replyAllMode ? ' all' : ''} sent`); }}
+            onCancel={() => { setReplyOpen(false); setReplyAllMode(false); }}
           />
         </div>
       )}
