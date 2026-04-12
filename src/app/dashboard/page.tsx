@@ -536,6 +536,48 @@ function MarkReadButton({ isUnread, messageId, accountEmail, onAction, size = 's
   );
 }
 
+function ArchiveButton({ messageId, accountEmail, onAction, onDone, size = 'sm' }: {
+  messageId: string; accountEmail?: string;
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
+  onDone?: () => void; size?: 'sm' | 'xs';
+}) {
+  return (
+    <button onClick={(e) => { e.stopPropagation(); onAction('archive', [messageId], undefined, accountEmail || _currentAccount); onDone?.(); }}
+      className={`${size === 'xs' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1.5 text-xs'} font-medium rounded-lg border`}
+      style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+      Archive
+    </button>
+  );
+}
+
+function TrashButton({ messageId, accountEmail, onAction, onDone, size = 'sm' }: {
+  messageId: string; accountEmail?: string;
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
+  onDone?: () => void; size?: 'sm' | 'xs';
+}) {
+  return (
+    <button onClick={(e) => { e.stopPropagation(); onAction('trash', [messageId], undefined, accountEmail || _currentAccount); onDone?.(); }}
+      className={`${size === 'xs' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1.5 text-xs'} font-medium rounded-lg border text-red-500`}
+      style={{ borderColor: 'var(--border)' }}>
+      Trash
+    </button>
+  );
+}
+
+function StarButton({ messageId, accountEmail, onAction, size = 'sm' }: {
+  messageId: string; accountEmail?: string;
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
+  size?: 'sm' | 'xs';
+}) {
+  return (
+    <button onClick={(e) => { e.stopPropagation(); onAction('star', [messageId], undefined, accountEmail || _currentAccount); }}
+      className={`${size === 'xs' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1.5 text-xs'} font-medium rounded-lg border`}
+      style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+      Star
+    </button>
+  );
+}
+
 function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
   currentTier: string;
   senderEmail: string;
@@ -3209,17 +3251,14 @@ document.querySelectorAll('img').forEach(function(img) {
           style={{ borderColor: 'var(--accent)', color: replyOpen && replyAllMode ? '#fff' : 'var(--accent)', background: replyOpen && replyAllMode ? '#7c3aed' : undefined }}>
           {replyOpen && replyAllMode ? 'Cancel' : 'Reply All'}
         </button>
-        <button onClick={() => { onAction('archive', [messageId], undefined, accountEmail || _currentAccount); showToast('Archived'); }}
-          className="px-3 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
+        <ArchiveButton messageId={messageId} accountEmail={accountEmail} onAction={onAction} onDone={() => showToast('Archived')} />
         <MarkReadButton isUnread={isUnread} messageId={messageId} accountEmail={accountEmail} onAction={(action, ids, label, acct) => {
           onAction(action, ids, label, acct);
           setIsUnread(!isUnread);
           showToast(isUnread ? 'Marked read' : 'Marked unread');
         }} />
-        <button onClick={() => { onAction('star', [messageId], undefined, accountEmail || _currentAccount); showToast('Starred'); }}
-          className="px-3 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
-        <button onClick={() => { onAction('trash', [messageId], undefined, accountEmail || _currentAccount); showToast('Trashed'); }}
-          className="px-3 py-1.5 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+        <StarButton messageId={messageId} accountEmail={accountEmail} onAction={onAction} />
+        <TrashButton messageId={messageId} accountEmail={accountEmail} onAction={onAction} onDone={() => showToast('Trashed')} />
       </div>
 
       {/* Reply composer */}
@@ -3348,10 +3387,10 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                 />
                 <button onClick={() => { setReplyingTo(replyingTo === msg.id ? null : msg.id); }}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
-                <button onClick={() => onAction('archive', [msg.id], undefined, msg.accountEmail)} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
+                <ArchiveButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
-                <button onClick={() => onAction('star', [msg.id], undefined, msg.accountEmail)} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
-                <button onClick={() => onAction('trash', [msg.id], undefined, msg.accountEmail)} className="px-2 py-1.5 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                <StarButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
+                <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <button onClick={() => setConfirmAction({ ids: [msg.id], count: 1 })}
                   className="px-2 py-1.5 text-xs rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
               </div>
@@ -4158,7 +4197,12 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
   const selectedIds = getSelectedIds();
   const selectedCount = selectedIds.length;
 
-  if (!tiersLoaded) return <div className="text-center py-16" style={{ color: 'var(--muted)' }}>Loading cleanup data...</div>;
+  if (!tiersLoaded || messages.length === 0) return (
+    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+      <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+      <p className="text-sm">Loading your emails...</p>
+    </div>
+  );
 
   if (cleanupMessages.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
@@ -4324,8 +4368,8 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
                         <div className="flex gap-1 flex-shrink-0 items-center">
                           <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                           <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
-                          <button onClick={() => onAction('archive', [msg.id], undefined, msg.accountEmail)} className="px-2 py-0.5 rounded border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
-                          <button onClick={() => onAction('trash', [msg.id], undefined, msg.accountEmail)} className="px-2 py-0.5 rounded border text-[10px] text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                          <ArchiveButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
+                          <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
                         </div>
                       </div>
                     );
@@ -5872,11 +5916,9 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                   showToast('Snoozed', `Will reappear ${label}`);
                   onRemove(msg.id);
                 }} />
-                <button onClick={() => { onAction('archive', [msg.id], undefined, msg.accountEmail); onRemove(msg.id); }}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                <ArchiveButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} onDone={() => onRemove(msg.id)} />
                 <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
-                <button onClick={() => { onAction('trash', [msg.id], undefined, msg.accountEmail); onRemove(msg.id); }}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} onDone={() => onRemove(msg.id)} />
                 <button onClick={() => setConfirmDelete(msg.id + '::' + (msg.accountEmail || ''))}
                   className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
               </div>
