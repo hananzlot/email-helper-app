@@ -2432,6 +2432,7 @@ export default function Dashboard() {
               <div className="flex-1 overflow-y-auto" style={{ background: 'var(--card)' }}>
                 {splitPreviewId ? (
                   <InlinePreview
+                    key={`${splitPreviewId}-${splitPreviewAccount}`}
                     messageId={splitPreviewId}
                     accountEmail={splitPreviewAccount}
                     onAction={handleAction}
@@ -3071,9 +3072,11 @@ document.querySelectorAll('img').forEach(function(img) {
       if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
       if (res.success) {
         setEmail(res.data);
+      } else {
+        setEmail(null);
       }
       setLoading(false);
-    });
+    }).catch(() => { setEmail(null); setLoading(false); });
   }, [messageId, accountEmail]);
 
   if (loading) return (
@@ -3082,7 +3085,12 @@ document.querySelectorAll('img').forEach(function(img) {
     </div>
   );
 
-  if (!email) return <div className="p-6 text-sm" style={{ color: 'var(--muted)' }}>Could not load email</div>;
+  if (!email) return (
+    <div className="flex flex-col items-center justify-center h-full gap-2 p-6" style={{ color: 'var(--muted)' }}>
+      <p className="text-sm">This email is no longer available</p>
+      <p className="text-[10px]">It may have been deleted or moved. Click another email to preview.</p>
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-full">
