@@ -991,7 +991,7 @@ export default function Dashboard() {
     // Send sequentially in small chunks to avoid Netlify timeout + payload limits
     for (let i = 0; i < batch.length; i += 100) {
       try {
-        const res = await fetch(withAccount('/api/emailHelperV2/inbox-cache'), {
+        const res = await fetch('/api/emailHelperV2/inbox-cache', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ account_email: acctEmail, messages: batch.slice(i, i + 100) }),
