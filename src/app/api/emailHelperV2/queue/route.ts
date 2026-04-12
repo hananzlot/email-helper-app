@@ -23,26 +23,27 @@ export async function GET(request: NextRequest) {
       .order('priority_score', { ascending: false }),
     admin
       .from(TABLES.SENDER_PRIORITIES)
-      .select('sender_email, reply_count')
+      .select('sender_email, reply_count, tier')
       .eq('user_id', userId),
   ]);
 
   if (queueResult.error) return apiError(queueResult.error.message, 500);
 
-  // Build lookups by sender email
+  // Build lookups by sender email (lowercase for case-insensitive matching)
   const replyCountMap: Record<string, number> = {};
   const tierMap: Record<string, string> = {};
   if (sendersResult.data) {
     for (const s of sendersResult.data) {
-      replyCountMap[s.sender_email] = s.reply_count || 0;
-      tierMap[s.sender_email] = s.tier || '';
+      const key = (s.sender_email || '').toLowerCase();
+      replyCountMap[key] = s.reply_count || 0;
+      if (s.tier) tierMap[key] = s.tier;
     }
   }
 
   // Decrypt sensitive fields and enrich with reply_count + tier from sender_priorities
   const enriched = (queueResult.data || []).map((item: Record<string, unknown>) => {
     const decrypted = decryptFields(item, [...ENCRYPTED_FIELDS.REPLY_QUEUE], userId);
-    const senderEmail = item.sender_email as string;
+    const senderEmail = ((item.sender_email as string) || '').toLowerCase();
     return {
       ...decrypted,
       reply_count: replyCountMap[senderEmail] || 0,
