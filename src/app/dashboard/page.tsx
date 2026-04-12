@@ -3557,24 +3557,29 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     </div>
   );
 
-  // Count emails per tier for badges
-  const tierCounts = { A: 0, B: 0, C: 0 };
+  // Count emails per tier for badges (include untiered)
+  const tierCounts: Record<string, number> = { A: 0, B: 0, C: 0, other: 0 };
   active.forEach(q => {
-    const t = q.tier as 'A' | 'B' | 'C';
-    if (t in tierCounts) tierCounts[t]++;
+    const t = q.tier as string;
+    if (t === 'A' || t === 'B' || t === 'C') tierCounts[t]++;
+    else tierCounts.other++;
   });
 
-  const filteredActive = tierFilter ? sortedActive.filter(g => g.lead.tier === tierFilter) : sortedActive;
+  const filteredActive = tierFilter === 'other'
+    ? sortedActive.filter(g => !g.lead.tier || !['A', 'B', 'C'].includes(g.lead.tier))
+    : tierFilter ? sortedActive.filter(g => g.lead.tier === tierFilter)
+    : sortedActive;
 
   return (
     <div>
       {/* Tier filter badges */}
       <div className="flex gap-2 mb-4">
         {([
-          { tier: null, label: 'All', bg: '#f3f4f6', color: '#374151', border: '#d1d5db', activeBg: '#374151', activeColor: '#fff' },
+          { tier: null, label: `All (${active.length})`, bg: '#f3f4f6', color: '#374151', border: '#d1d5db', activeBg: '#374151', activeColor: '#fff' },
           { tier: 'A', label: `Tier A (${tierCounts.A})`, bg: '#dcfce7', color: '#166534', border: '#86efac', activeBg: '#166534', activeColor: '#fff' },
           { tier: 'B', label: `Tier B (${tierCounts.B})`, bg: '#fef3c7', color: '#92400e', border: '#fbbf24', activeBg: '#92400e', activeColor: '#fff' },
           { tier: 'C', label: `Tier C (${tierCounts.C})`, bg: '#e0f2fe', color: '#075985', border: '#7dd3fc', activeBg: '#075985', activeColor: '#fff' },
+          ...(tierCounts.other > 0 ? [{ tier: 'other' as string | null, label: `Untiered (${tierCounts.other})`, bg: '#f1f5f9', color: '#64748b', border: '#cbd5e1', activeBg: '#64748b', activeColor: '#fff' }] : []),
         ] as const).map(b => {
           const isActive = tierFilter === b.tier;
           return (
