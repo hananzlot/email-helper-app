@@ -1309,8 +1309,7 @@ export default function Dashboard() {
     if (isFirstLoad) localStorage.setItem('email_helper_visited', '1');
   }, [account, unified, accounts.length]);
 
-  // Auto-refresh: runs every 30s to resume incomplete caching, also serves as periodic refresh
-  const cachingStoppedRef = React.useRef(false);
+  // Auto-refresh every 2 minutes for inbox data
   useEffect(() => {
     if (!account) return;
     const interval = setInterval(() => {
@@ -1319,9 +1318,105 @@ export default function Dashboard() {
       } else {
         loadInbox(true, true);
       }
-    }, 30 * 1000);
+    }, 2 * 60 * 1000);
     return () => clearInterval(interval);
   }, [account, unified, accounts.length, loadInbox, loadUnifiedInbox]);
+
+  // Background sync state — tracks server-side inbox caching progress
+  const [syncProgress, setSyncProgress] = useState<Record<string, { cached: number; total: number; done: boolean; speed: number; eta: string }>>({});
+  const syncRunningRef = React.useRef(false);
+
+  // Continuous background sync — runs until all accounts are fully cached
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    if (syncRunningRef.current) return;
+    syncRunningRef.current = true;
+
+    let cancelled = false;
+
+    async function syncAccount(acctEmail: string) {
+      let totalCached = 0;
+      let messagesThisRun = 0;
+      const startTime = Date.now();
+      let retries = 0;
+
+      // Get initial cached count from messages already loaded
+      totalCached = messages.filter(m => m.accountEmail === acctEmail).length;
+
+      while (!cancelled && retries < 10) {
+        try {
+          const res = await fetch(withAccount('/api/emailHelperV2/inbox-cache/sync'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: undefined, account_email: acctEmail }),
+          }).then(r => r.json());
+
+          if (!res.success) {
+            retries++;
+            await new Promise(r => setTimeout(r, 5000 * retries));
+            continue;
+          }
+          retries = 0; // Reset on success
+
+          const { cachedThisPage, skippedExisting, inboxTotal, done } = res.data;
+          messagesThisRun += (cachedThisPage || 0);
+          totalCached += (cachedThisPage || 0);
+          // If we're skipping cached pages, count those too
+          if (skippedExisting > 0 && totalCached < (skippedExisting * 10)) {
+            totalCached = Math.max(totalCached, skippedExisting * 10); // rough estimate
+          }
+
+          // Calculate speed and ETA
+          const elapsed = (Date.now() - startTime) / 1000;
+          const speed = elapsed > 5 ? Math.round(messagesThisRun / elapsed * 60) : 0;
+          const remaining = Math.max(0, (inboxTotal || 0) - totalCached);
+          const etaMinutes = speed > 0 ? Math.ceil(remaining / speed) : (remaining > 0 ? Math.ceil(remaining / 200) : 0);
+          const eta = done ? 'Synced' : etaMinutes === 0 ? 'Calculating...' : etaMinutes < 60 ? `~${etaMinutes}m remaining` : `~${Math.floor(etaMinutes / 60)}h ${etaMinutes % 60}m remaining`;
+
+          setSyncProgress(prev => ({
+            ...prev,
+            [acctEmail]: { cached: totalCached, total: inboxTotal || 0, done: !!done, speed, eta },
+          }));
+
+          if (done) break;
+          await new Promise(r => setTimeout(r, 500));
+        } catch {
+          retries++;
+          await new Promise(r => setTimeout(r, 5000 * retries));
+        }
+      }
+    }
+
+    async function runAllSyncs() {
+      // Sync accounts sequentially
+      for (const acct of accounts) {
+        if (cancelled) break;
+        await syncAccount(acct.email);
+      }
+      syncRunningRef.current = false;
+
+      // After initial sync completes, keep checking for new messages every 5 minutes
+      if (!cancelled) {
+        const keepAlive = setInterval(async () => {
+          for (const acct of accounts) {
+            // Fetch newest page (no resume token = page 1) to catch new emails
+            try {
+              await fetch(withAccount('/api/emailHelperV2/inbox-cache/sync'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ account_email: acct.email, pageToken: null }),
+              });
+            } catch {}
+          }
+        }, 5 * 60 * 1000);
+        return () => clearInterval(keepAlive);
+      }
+    }
+
+    // Start after a short delay to let the UI load first
+    const timer = setTimeout(runAllSyncs, 5000);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [accounts.length]);
 
   function showToast(title: string, subtitle?: string, undoAction?: () => void) {
     const expiresAt = undoAction ? Date.now() + 5000 : undefined;
@@ -1929,6 +2024,37 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {/* Sync progress widget — shows while accounts are being cached */}
+        {Object.keys(syncProgress).length > 0 && !Object.values(syncProgress).every(s => s.done) && (
+          <div className="mb-2 px-3 py-2 rounded-lg" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 border-[1.5px] border-t-transparent rounded-full animate-spin" style={{ borderColor: '#22c55e', borderTopColor: 'transparent' }} />
+                <span className="text-[10px] font-semibold" style={{ color: '#166534' }}>Syncing your inbox</span>
+              </div>
+              <span className="text-[10px]" style={{ color: '#15803d' }}>
+                {(() => {
+                  const totalCached = Object.values(syncProgress).reduce((s, p) => s + p.cached, 0);
+                  const totalInbox = Object.values(syncProgress).reduce((s, p) => s + p.total, 0);
+                  return `${totalCached.toLocaleString()} / ${totalInbox.toLocaleString()} emails`;
+                })()}
+              </span>
+            </div>
+            {Object.entries(syncProgress).filter(([, s]) => !s.done).map(([email, s]) => (
+              <div key={email} className="flex items-center gap-2 mt-1">
+                <span className="text-[9px] truncate" style={{ color: '#15803d', maxWidth: 140 }}>{email.split('@')[0]}</span>
+                <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: '#dcfce7' }}>
+                  <div className="h-full rounded-full transition-all duration-1000" style={{ background: '#22c55e', width: `${s.total > 0 ? Math.min(100, (s.cached / s.total) * 100) : 0}%` }} />
+                </div>
+                <span className="text-[9px] whitespace-nowrap" style={{ color: '#15803d' }}>
+                  {s.done ? 'Done' : s.eta || `${Math.round(s.total > 0 ? (s.cached / s.total) * 100 : 0)}%`}
+                </span>
+              </div>
+            ))}
+            <p className="text-[8px] mt-1" style={{ color: '#86efac' }}>Runs in background — you can keep working</p>
+          </div>
+        )}
 
         {/* Global Search Bar */}
         <div className="relative mb-2">

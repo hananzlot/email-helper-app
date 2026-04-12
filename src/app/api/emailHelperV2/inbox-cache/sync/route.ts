@@ -19,8 +19,15 @@ import { TABLES } from '@/lib/tables';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { user_id, account_email } = body;
+    const { account_email } = body;
     let { pageToken } = body;
+    // user_id can come from body (cron) or from cookie (client)
+    let user_id = body.user_id;
+    if (!user_id) {
+      const { getRequestContext } = await import('@/lib/api-helpers');
+      const ctx = getRequestContext(request);
+      user_id = ctx.userId;
+    }
 
     if (!user_id || !account_email) {
       return NextResponse.json({ success: false, error: 'Missing user_id or account_email' }, { status: 400 });
@@ -30,8 +37,9 @@ export async function POST(request: NextRequest) {
     const accessToken = await getValidGmailToken(user_id, account_email);
     const gmail = getGmailClient(accessToken);
 
-    // If no pageToken provided, try to resume from where we left off
-    if (!pageToken) {
+    // If pageToken is undefined (not provided), try to resume from where we left off
+    // If pageToken is explicitly null, start from page 1 (check for new messages)
+    if (pageToken === undefined) {
       const { data: syncData } = await admin
         .from(TABLES.INBOX_SYNC)
         .select('resume_page_token')
