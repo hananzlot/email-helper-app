@@ -3405,8 +3405,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     if (res.success) {
       setQueue(res.data);
       const items = res.data || [];
-      // Only count active signal items (exclude low priority — those go to Cleanup)
-      const activeSignalCount = items.filter((q: any) => q.status === 'active' && q.priority !== 'low').length;
+      // Only count active tiered items (A/B/C) — untiered and low-priority go to Quick Clear Boxers
+      const activeSignalCount = items.filter((q: any) => q.status === 'active' && q.priority !== 'low' && ['A', 'B', 'C'].includes(q.tier)).length;
       reportCount?.(activeSignalCount);
     }
     setLoading(false);
@@ -3494,8 +3494,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     setDragOverId(null);
   }
 
-  // Filter out low-priority items — those belong in Cleanup, not here
-  const signalQueue = queue.filter(q => q.priority !== 'low');
+  // Filter to only tiered items (A/B/C) — untiered and low-priority belong in Quick Clear Boxers
+  const signalQueue = queue.filter(q => q.priority !== 'low' && ['A', 'B', 'C'].includes(q.tier));
   const active = signalQueue.filter(q => q.status === 'active');
   const snoozed = signalQueue.filter(q => q.status === 'snoozed');
 
@@ -3557,18 +3557,14 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     </div>
   );
 
-  // Count emails per tier for badges (include untiered)
-  const tierCounts: Record<string, number> = { A: 0, B: 0, C: 0, other: 0 };
+  // Count emails per tier for badges
+  const tierCounts: Record<string, number> = { A: 0, B: 0, C: 0 };
   active.forEach(q => {
     const t = q.tier as string;
-    if (t === 'A' || t === 'B' || t === 'C') tierCounts[t]++;
-    else tierCounts.other++;
+    if (t in tierCounts) tierCounts[t]++;
   });
 
-  const filteredActive = tierFilter === 'other'
-    ? sortedActive.filter(g => !g.lead.tier || !['A', 'B', 'C'].includes(g.lead.tier))
-    : tierFilter ? sortedActive.filter(g => g.lead.tier === tierFilter)
-    : sortedActive;
+  const filteredActive = tierFilter ? sortedActive.filter(g => g.lead.tier === tierFilter) : sortedActive;
 
   return (
     <div>
@@ -3579,7 +3575,6 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
           { tier: 'A', label: `Tier A (${tierCounts.A})`, bg: '#dcfce7', color: '#166534', border: '#86efac', activeBg: '#166534', activeColor: '#fff' },
           { tier: 'B', label: `Tier B (${tierCounts.B})`, bg: '#fef3c7', color: '#92400e', border: '#fbbf24', activeBg: '#92400e', activeColor: '#fff' },
           { tier: 'C', label: `Tier C (${tierCounts.C})`, bg: '#e0f2fe', color: '#075985', border: '#7dd3fc', activeBg: '#075985', activeColor: '#fff' },
-          ...(tierCounts.other > 0 ? [{ tier: 'other' as string | null, label: `Untiered (${tierCounts.other})`, bg: '#f1f5f9', color: '#64748b', border: '#cbd5e1', activeBg: '#64748b', activeColor: '#fff' }] : []),
         ] as const).map(b => {
           const isActive = tierFilter === b.tier;
           return (
