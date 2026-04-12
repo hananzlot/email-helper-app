@@ -100,6 +100,35 @@ export async function POST(request: NextRequest) {
 }
 
 /**
+ * PUT /api/emailHelperV2/inbox-cache
+ * Update cache entries (e.g. mark as read/unread).
+ * Body: { gmail_ids: string[], updates: { is_unread?: boolean } }
+ */
+export async function PUT(request: NextRequest) {
+  const { userId } = getRequestContext(request);
+  if (!userId) return apiError('Not authenticated', 401);
+
+  try {
+    const body = await request.json();
+    const { gmail_ids, updates } = body;
+
+    if (!gmail_ids?.length || !updates) return apiError('Missing gmail_ids or updates');
+
+    const admin = createSupabaseAdmin();
+    const { error } = await admin
+      .from(TABLES.INBOX_CACHE)
+      .update(updates)
+      .eq('user_id', userId)
+      .in('gmail_id', gmail_ids);
+
+    if (error) return apiError(error.message, 500);
+    return apiSuccess({ updated: gmail_ids.length });
+  } catch (err) {
+    return apiError(`Failed: ${err}`, 500);
+  }
+}
+
+/**
  * DELETE /api/emailHelperV2/inbox-cache
  * Remove specific messages from cache (when archived/trashed/deleted).
  * Body: { account_email: string, gmail_ids: string[] }

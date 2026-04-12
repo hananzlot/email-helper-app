@@ -1555,8 +1555,8 @@ export default function Dashboard() {
       }
     }).catch(() => {});
 
-    // Mark as actioned so sync doesn't re-cache them
-    if (['archive', 'trash', 'delete', 'markRead'].includes(action)) {
+    // Mark as actioned so sync doesn't re-cache them (not markRead — those stay in cache)
+    if (['archive', 'trash', 'delete'].includes(action)) {
       markAsActioned(messageIds);
     }
 
@@ -1681,14 +1681,15 @@ export default function Dashboard() {
           setTriageVersion(v => v + 1);
         } else if (action === 'markRead') {
           setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
-          // Remove from cache — tabs only show unread, so read messages shouldn't come back
-          apiDelete('inbox-cache', { account_email: overrideAccount || _currentAccount, gmail_ids: messageIds }).catch(() => {});
+          // Update cache flag — keeps in cache for search but hidden from tabs
+          apiPut('inbox-cache', { gmail_ids: messageIds, updates: { is_unread: false } }).catch(() => {});
           for (const msgId of messageIds) {
             apiPut('queue', { message_id: msgId, status: 'done' }).catch(() => {});
           }
           setTriageVersion(v => v + 1);
         } else if (action === 'markUnread') {
           setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
+          apiPut('inbox-cache', { gmail_ids: messageIds, updates: { is_unread: true } }).catch(() => {});
         }
       } else {
         showToast('Error', res.error);

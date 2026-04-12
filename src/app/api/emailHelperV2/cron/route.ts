@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
       const { data: actions } = await admin
         .from(TABLES.ACTION_HISTORY)
         .select('message_ids')
-        .in('action', ['trash', 'archive', 'delete', 'markRead'])
+        .in('action', ['trash', 'archive', 'delete'])
         .eq('undone', false);
 
       if (actions && actions.length > 0) {
