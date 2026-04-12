@@ -13,6 +13,21 @@ export async function GET(request: NextRequest) {
 
   const admin = createSupabaseAdmin();
 
+  // Get actioned message IDs from history (trash/archive/delete) to exclude from results
+  const { data: actions } = await admin
+    .from(TABLES.ACTION_HISTORY)
+    .select('message_ids')
+    .eq('user_id', userId)
+    .in('action', ['trash', 'archive', 'delete'])
+    .eq('undone', false);
+
+  const actionedIds = new Set<string>();
+  if (actions) {
+    for (const row of actions) {
+      for (const mid of (row.message_ids || [])) actionedIds.add(mid);
+    }
+  }
+
   // Get sync metadata
   const syncQuery = admin
     .from(TABLES.INBOX_SYNC)
@@ -33,8 +48,11 @@ export async function GET(request: NextRequest) {
 
   if (error) return apiError(error.message, 500);
 
+  // Filter out actioned messages server-side
+  const filtered = (messages || []).filter((m: { gmail_id: string }) => !actionedIds.has(m.gmail_id));
+
   return apiSuccess({
-    messages: messages || [],
+    messages: filtered,
     sync: syncData || [],
     cached: true,
   });
