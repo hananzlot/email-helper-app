@@ -2302,14 +2302,11 @@ export default function Dashboard() {
                         className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors"
                         style={{ borderBottom: '1px solid var(--border)', background: isSelected ? '#eff6ff' : undefined }}
                         onClick={() => {
-                          if (layoutMode === 'split' && !isMobile && splitSupportedTabs.includes(activeTab)) {
-                            setSplitPreviewId(msg.id);
-                            setSplitPreviewAccount(msg.accountEmail);
-                          } else {
-                            setPreviewMessageId(msg.id);
-                            setPreviewAccount(msg.accountEmail);
-                          }
-                          closeSearch();
+                          setSearchSelectionActive([msg]);
+                          setActiveTab('search-reviews');
+                          setSearchOpen(false);
+                          setSearchQuery('');
+                          setSearchSelectedIds(new Set());
                         }}>
                         <input type="checkbox" checked={isSelected}
                           onClick={(e) => e.stopPropagation()}
