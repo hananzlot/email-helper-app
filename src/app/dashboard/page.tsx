@@ -1021,7 +1021,7 @@ export default function Dashboard() {
           subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.is_unread,
           labelIds: m.label_ids, accountEmail: m.account_email, body: '', bodyHtml: '', to: '', cc: '',
         } as GmailMessage));
-        setMessages(cachedMsgs);
+        setMessages(cachedMsgs.filter((m: GmailMessage) => !actionedIdsRef.current.has(m.id)));
         setLoading(false);
         cacheHit = true;
         cachedMsgCount = cachedMsgs.length;
@@ -1056,10 +1056,9 @@ export default function Dashboard() {
           setMessages(prev => {
             prev.forEach(m => cachedIds.add(m.id));
             freshMsgs.forEach((m: GmailMessage) => cachedIds.add(m.id));
-            const newMsgs = freshMsgs.filter((m: GmailMessage) => !cachedIds.has(m.id) || !prev.some(p => p.id === m.id));
-            // Always save fresh first page to cache
-            if (newMsgs.length === 0) return prev;
-            return [...newMsgs, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            const newMsgs = freshMsgs.filter((m: GmailMessage) => !actionedIdsRef.current.has(m.id) && (!cachedIds.has(m.id) || !prev.some(p => p.id === m.id)));
+            if (newMsgs.length === 0) return prev.filter(m => !actionedIdsRef.current.has(m.id));
+            return [...newMsgs, ...prev].filter(m => !actionedIdsRef.current.has(m.id)).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           });
           setLoading(false);
 
@@ -1166,7 +1165,7 @@ export default function Dashboard() {
           labelIds: m.label_ids, accountEmail: m.account_email, body: '', bodyHtml: '', to: '', cc: '',
         } as GmailMessage));
         cachedMsgs.sort((a: GmailMessage, b: GmailMessage) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        setMessages(cachedMsgs);
+        setMessages(cachedMsgs.filter((m: GmailMessage) => !actionedIdsRef.current.has(m.id)));
         setLoading(false);
         unifiedCacheHit = true;
         unifiedCacheCount = cachedMsgs.length;
@@ -1213,9 +1212,9 @@ export default function Dashboard() {
         setMessages(prev => {
           prev.forEach(m => cachedIds.add(m.id));
           freshMessages.forEach(m => cachedIds.add(m.id));
-          const newMsgs = freshMessages.filter(m => !prev.some(p => p.id === m.id));
-          if (newMsgs.length === 0) return prev;
-          return [...newMsgs, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          const newMsgs = freshMessages.filter(m => !actionedIdsRef.current.has(m.id) && !prev.some(p => p.id === m.id));
+          if (newMsgs.length === 0) return prev.filter(m => !actionedIdsRef.current.has(m.id));
+          return [...newMsgs, ...prev].filter(m => !actionedIdsRef.current.has(m.id)).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         });
         setCurrentAccount(savedAccount);
         setLoading(false);

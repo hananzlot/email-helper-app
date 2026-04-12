@@ -90,7 +90,21 @@ export async function POST(request: NextRequest) {
     const existingSet = new Set<string>();
     if (existing) existing.forEach((r: { gmail_id: string }) => existingSet.add(r.gmail_id));
 
-    const newIds = messageIds.filter(id => !existingSet.has(id));
+    // Also exclude messages that were actioned (trashed/archived/deleted) per action history
+    const { data: actionedRows } = await admin
+      .from(TABLES.ACTION_HISTORY)
+      .select('message_ids')
+      .eq('user_id', user_id)
+      .in('action', ['trash', 'archive', 'delete'])
+      .eq('undone', false);
+    const actionedSet = new Set<string>();
+    if (actionedRows) {
+      for (const row of actionedRows) {
+        for (const mid of (row.message_ids || [])) actionedSet.add(mid);
+      }
+    }
+
+    const newIds = messageIds.filter(id => !existingSet.has(id) && !actionedSet.has(id));
     let cachedThisPage = 0;
 
     if (newIds.length > 0) {
