@@ -950,15 +950,24 @@ export default function Dashboard() {
   }
 
   // Save messages to Supabase cache in background (fire-and-forget)
-  function saveToCacheBackground(acctEmail: string, msgs: GmailMessage[]) {
+  async function saveToCacheBackground(acctEmail: string, msgs: GmailMessage[]) {
     if (!msgs.length) return;
     const batch = msgs.map(m => ({
       id: m.id, threadId: m.threadId, sender: m.sender, senderEmail: m.senderEmail,
       subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.isUnread, labelIds: m.labelIds,
     }));
-    // Send in chunks of 500 to avoid payload limits
-    for (let i = 0; i < batch.length; i += 500) {
-      apiPost('inbox-cache', { account_email: acctEmail, messages: batch.slice(i, i + 500) }).catch(() => {});
+    // Send sequentially in small chunks to avoid Netlify timeout + payload limits
+    for (let i = 0; i < batch.length; i += 100) {
+      try {
+        const res = await fetch(withAccount('/api/emailHelperV2/inbox-cache'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account_email: acctEmail, messages: batch.slice(i, i + 100) }),
+        }).then(r => r.json());
+        if (!res.success) console.error('Cache save failed:', res.error);
+      } catch (err) {
+        console.error('Cache save error:', err);
+      }
     }
   }
 

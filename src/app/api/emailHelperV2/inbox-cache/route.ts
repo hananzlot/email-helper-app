@@ -73,8 +73,8 @@ export async function POST(request: NextRequest) {
       cached_at: new Date().toISOString(),
     }));
 
-    for (let i = 0; i < rows.length; i += 500) {
-      const chunk = rows.slice(i, i + 500);
+    for (let i = 0; i < rows.length; i += 100) {
+      const chunk = rows.slice(i, i + 100);
       const { error } = await admin
         .from(TABLES.INBOX_CACHE)
         .upsert(chunk, { onConflict: 'user_id,account_email,gmail_id' });
