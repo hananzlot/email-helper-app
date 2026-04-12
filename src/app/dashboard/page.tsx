@@ -975,10 +975,8 @@ export default function Dashboard() {
 
   function markAsActioned(messageIds: string[]) {
     messageIds.forEach(id => actionedIdsRef.current.add(id));
-    // Auto-clear after 2 minutes (Gmail should have processed by then)
-    setTimeout(() => {
-      messageIds.forEach(id => actionedIdsRef.current.delete(id));
-    }, 2 * 60 * 1000);
+    // Never auto-clear — keep for the entire session to prevent re-caching
+    // The IDs reset naturally on page reload
   }
 
   async function saveToCacheBackground(acctEmail: string, msgs: GmailMessage[]) {
@@ -3539,6 +3537,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     queue.forEach(q => {
       if (q.status === 'snoozed' && q.snoozed_until && q.snoozed_until <= now) {
         updateStatus(q.id, 'active');
+        // Mark as unread so it appears in tabs
+        if (q.message_id) onAction('markUnread', [q.message_id], undefined, q.account_email);
       }
     });
   }, [queue]);
@@ -4607,10 +4607,15 @@ function SnoozedTab({ onAction, showToast, onPreview, onDialogPreview, reloadKey
   }
 
   async function reactivate(id: string) {
+    const item = snoozedItems.find(q => q.id === id);
     const res = await apiPut('queue', { id, status: 'active' });
     if (res.success) {
+      // Mark as unread in Gmail + cache so it appears in the right tab
+      if (item?.message_id) {
+        onAction('markUnread', [item.message_id], undefined, item.account_email);
+      }
       setSnoozedItems(prev => prev.filter(q => q.id !== id));
-      showToast('Reactivated', 'Moved back to Triage');
+      showToast('Reactivated', 'Marked unread — will appear in the right tab');
       reportCount?.(snoozedItems.length - 1);
     }
   }
