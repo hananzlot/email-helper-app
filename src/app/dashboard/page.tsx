@@ -1040,11 +1040,16 @@ export default function Dashboard() {
             while (nextToken && totalLoaded < MAX_MESSAGES) {
               let pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
               // Retry on failure (Gmail rate limit / transient errors)
+              let retryFailed = false;
               for (let retry = 0; retry < 3 && !pageRes.success; retry++) {
                 await new Promise(r => setTimeout(r, 5000 * (retry + 1)));
                 pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
               }
-              if (!pageRes.success || !pageRes.data?.messages?.length) break;
+              if (!pageRes.success || !pageRes.data?.messages?.length) {
+                // Try smaller batch to get past problematic page
+                pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '50', pageToken: nextToken });
+                if (!pageRes.success || !pageRes.data?.messages?.length) break;
+              }
               const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
               // Filter out messages already in cache
               const newPageMsgs = pageMsgs.filter((m: GmailMessage) => !cachedIds.has(m.id));
@@ -1193,11 +1198,16 @@ export default function Dashboard() {
               setCurrentAccount(at.email);
               let pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
               // Retry on failure (Gmail rate limit / transient errors)
+              let retryFailed = false;
               for (let retry = 0; retry < 3 && !pageRes.success; retry++) {
                 await new Promise(r => setTimeout(r, 5000 * (retry + 1)));
                 pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
               }
-              if (!pageRes.success || !pageRes.data?.messages?.length) break;
+              if (!pageRes.success || !pageRes.data?.messages?.length) {
+                // Try smaller batch to get past problematic page
+                pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '50', pageToken: nextToken });
+                if (!pageRes.success || !pageRes.data?.messages?.length) break;
+              }
               const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: at.email }));
               const newPageMsgs = pageMsgs.filter((m: GmailMessage) => !cachedIds.has(m.id));
               if (newPageMsgs.length > 0) {
