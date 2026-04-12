@@ -15,4 +15,5 @@ export const TABLES = {
   ACTION_HISTORY: 'emailHelperV2_action_history',
   INBOX_CACHE: 'emailHelperV2_inbox_cache',
   INBOX_SYNC: 'emailHelperV2_inbox_sync',
+  SYNC_QUEUE: 'emailHelperV2_sync_queue',
 } as const;
