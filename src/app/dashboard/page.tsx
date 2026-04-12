@@ -532,6 +532,10 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
       const res = await apiPut('senders', { sender_email: senderEmail, tier: newTier, display_name: senderName || senderEmail });
       if (res.success) {
         onTierChanged(newTier);
+        // If promoted to A/B/C, trigger a triage refresh to add their messages to the queue
+        if (['A', 'B', 'C'].includes(newTier)) {
+          apiPost('triage', { action: 'triage' }).catch(() => {});
+        }
       }
     } catch (e) {
       console.error('Failed to change tier:', e);
@@ -2313,7 +2317,7 @@ export default function Dashboard() {
               {activeTab === 'reply-queue' && <ReplyQueueTab key={`triage-${account}-${unified}`} onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} onAdvancePreview={advancePreview} />}
               {activeTab === 'follow-up' && <FollowUpTab key={`followup-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
               {activeTab === 'snoozed' && <SnoozedTab key={`snoozed-${account}-${unified}`} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
-              {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} />}
+              {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
               {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} />}
               {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${triageVersion}`} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
@@ -3782,7 +3786,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview, reportCount }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; }) {
+function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name'>('tier');
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
@@ -4043,8 +4047,9 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
                     senderName={group.name}
                     onTierChanged={(newTier) => {
                       setSenderTiers(prev => ({ ...prev, [group.email.toLowerCase()]: newTier }));
-                      if (newTier === 'A' || newTier === 'B') {
-                        showToast(`Promoted to Tier ${newTier}`, `${group.name} will appear in Inbox (Triage)`);
+                      if (newTier === 'A' || newTier === 'B' || newTier === 'C') {
+                        showToast(`Promoted to Tier ${newTier}`, `${group.name} will appear in Top Tiers after triage runs`);
+                        onTierPromoted?.();
                       } else {
                         showToast(`Updated to Tier ${newTier}`, group.name);
                       }
