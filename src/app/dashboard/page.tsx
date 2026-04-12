@@ -4154,6 +4154,8 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
                     for (const m of group.messages) {
                       apiPost('queue', { message_id: m.id, account_email: m.accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: group.name, sender_email: group.email, subject: m.subject });
                     }
+                    // Mark as read to remove from Easy-Clear (unread-only) and update cache
+                    actionByAccount('markRead', allIds);
                     showToast('Snoozed', `${group.messages.length} message${group.messages.length > 1 ? 's' : ''} will reappear ${label}`);
                   }} />
                   <button onClick={() => actionByAccount('archive', allIds)}
