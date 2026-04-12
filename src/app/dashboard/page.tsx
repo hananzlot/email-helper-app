@@ -188,11 +188,25 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
         doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>
           body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #1a1a1a; margin: 0; padding: 16px; word-wrap: break-word; overflow-wrap: break-word; }
           img { max-width: 100%; height: auto; }
+          img.broken-img { display: inline-block; padding: 6px 10px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 11px; color: #4f46e5; font-family: system-ui; }
           a { color: #2563eb; }
           table { max-width: 100%; }
           pre, code { white-space: pre-wrap; word-wrap: break-word; }
           blockquote { border-left: 3px solid #d1d5db; margin: 8px 0; padding-left: 12px; color: #6b7280; }
-        </style></head><body>${displayContent}</body></html>`);
+        </style></head><body>${displayContent}<script>
+document.querySelectorAll('img').forEach(function(img) {
+  img.onerror = function() {
+    var src = this.src;
+    var el = document.createElement('span');
+    el.className = 'broken-img';
+    el.textContent = '🖼 View image';
+    el.title = src;
+    el.onclick = function() { window.open(src, '_blank'); };
+    this.parentNode.replaceChild(el, this);
+  };
+  if (img.complete && img.naturalWidth === 0 && img.src) img.onerror();
+});
+</script></body></html>`);
         doc.close();
         const resize = () => {
           if (node.contentDocument?.body) {
@@ -2954,8 +2968,22 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
         doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>
           body { font-family: -apple-system, system-ui, sans-serif; font-size: 14px; line-height: 1.6; color: #1e293b; padding: 16px; margin: 0; word-wrap: break-word; }
           a { color: #2563eb; } img { max-width: 100%; height: auto; }
+          img.broken-img { display: inline-block; padding: 6px 10px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 11px; color: #4f46e5; font-family: system-ui; }
           blockquote { border-left: 3px solid #e2e8f0; margin: 8px 0; padding-left: 12px; color: #64748b; }
-        </style></head><body>${displayContent}</body></html>`);
+        </style></head><body>${displayContent}<script>
+document.querySelectorAll('img').forEach(function(img) {
+  img.onerror = function() {
+    var src = this.src;
+    var el = document.createElement('span');
+    el.className = 'broken-img';
+    el.textContent = '🖼 View image';
+    el.title = src;
+    el.onclick = function() { window.open(src, '_blank'); };
+    this.parentNode.replaceChild(el, this);
+  };
+  if (img.complete && img.naturalWidth === 0 && img.src) img.onerror();
+});
+</script></body></html>`);
         doc.close();
         setTimeout(() => {
           if (node.contentDocument?.body) {
