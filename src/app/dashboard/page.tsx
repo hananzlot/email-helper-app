@@ -3183,6 +3183,12 @@ document.querySelectorAll('img').forEach(function(img) {
             const action = isUnread ? 'markRead' : 'markUnread';
             onAction(action, [messageId], undefined, accountEmail || _currentAccount);
             setIsUnread(!isUnread);
+            // Update in-memory cache so returning to this email shows correct state
+            const cacheKey = `${messageId}:${accountEmail || ''}`;
+            const cached = emailContentCache.get(cacheKey);
+            if (cached) {
+              emailContentCache.set(cacheKey, { data: { ...(cached.data as Record<string, unknown>), isUnread: !isUnread }, timestamp: cached.timestamp });
+            }
             showToast(isUnread ? 'Marked read' : 'Marked unread');
           }}
           className="px-3 py-1.5 text-xs font-medium rounded-lg border"
