@@ -1433,13 +1433,13 @@ export default function Dashboard() {
   }, [accounts.length, account]);
 
   function showToast(title: string, subtitle?: string, undoAction?: () => void) {
-    const expiresAt = undoAction ? Date.now() + 5000 : undefined;
+    const expiresAt = undoAction ? Date.now() + 3000 : undefined;
     setToast({ title, subtitle, undoAction, expiresAt });
     setTimeout(() => setToast(prev => {
       // Only clear if this is still the same toast
       if (prev?.title === title && prev?.subtitle === subtitle) return null;
       return prev;
-    }), undoAction ? 5500 : 3500);
+    }), undoAction ? 3500 : 3000);
   }
 
   // Load quick reply templates from localStorage on mount
@@ -1565,14 +1565,25 @@ export default function Dashboard() {
 
       const undoKey = `${action}-${Date.now()}`;
 
-      // Execute Gmail action IMMEDIATELY (don't delay — prevents lost actions on logout/refresh)
-      const savedAccount = _currentAccount;
-      if (overrideAccount && overrideAccount !== _currentAccount) setCurrentAccount(overrideAccount);
-      gmailPost(action, { action, messageIds }).catch(() => {});
-      if (overrideAccount) setCurrentAccount(savedAccount);
+      // Execute Gmail action with silent retry on quota errors
+      const executeGmailAction = async (attempt = 0): Promise<void> => {
+        const sa = _currentAccount;
+        if (overrideAccount && overrideAccount !== _currentAccount) setCurrentAccount(overrideAccount);
+        try {
+          const res = await gmailPost(action, { action, messageIds });
+          if (!res.success && res.error?.includes('Quota exceeded') && attempt < 5) {
+            // Quota error — retry silently after exponential backoff
+            await new Promise(r => setTimeout(r, (attempt + 1) * 15000));
+            if (overrideAccount) setCurrentAccount(sa);
+            return executeGmailAction(attempt + 1);
+          }
+        } catch {}
+        if (overrideAccount) setCurrentAccount(sa);
+      };
+      executeGmailAction();
 
       // Undo window: 5 seconds to reverse the action
-      const timer = setTimeout(() => { setPendingUndo(prev => prev?.key === undoKey ? null : prev); }, 5000);
+      const timer = setTimeout(() => { setPendingUndo(prev => prev?.key === undoKey ? null : prev); }, 3000);
 
       const undoFn = () => {
         clearTimeout(timer);
@@ -1614,7 +1625,7 @@ export default function Dashboard() {
       return;
     }
 
-    // Non-undoable actions: execute immediately
+    // Non-undoable actions: execute with silent retry on quota errors
     try {
       const params: Record<string, unknown> = { action, messageIds };
       if (label) params.labelId = label;
@@ -1622,7 +1633,15 @@ export default function Dashboard() {
       if (overrideAccount && overrideAccount !== _currentAccount) {
         setCurrentAccount(overrideAccount);
       }
-      const res = await gmailPost(action, params);
+      let res = await gmailPost(action, params);
+      // Silent retry on quota errors
+      if (!res.success && res.error?.includes('Quota exceeded')) {
+        for (let retry = 0; retry < 3; retry++) {
+          await new Promise(r => setTimeout(r, (retry + 1) * 15000));
+          res = await gmailPost(action, params);
+          if (res.success || !res.error?.includes('Quota exceeded')) break;
+        }
+      }
       if (overrideAccount) setCurrentAccount(savedAccount);
       if (res.success) {
         showToast(actionLabels[action] || action, `${messageIds.length} message${messageIds.length > 1 ? 's' : ''}`);
@@ -1655,11 +1674,13 @@ export default function Dashboard() {
           setMessages(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
           apiPut('inbox-cache', { gmail_ids: messageIds, updates: { is_unread: true } }).catch(() => {});
         }
-      } else {
+      } else if (!res.error?.includes('Quota exceeded')) {
         showToast('Error', res.error);
       }
+      // Quota errors are silently retried — don't show to user
     } catch (err) {
-      showToast('Error', String(err));
+      const errStr = String(err);
+      if (!errStr.includes('Quota exceeded')) showToast('Error', errStr);
     } finally {
       setActionLoading(null);
     }
@@ -3532,6 +3553,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 
   // Queue action: perform Gmail action and remove from queue view
   async function queueAction(action: string, messageId: string, queueId: string, accountEmail: string) {
+    // Advance preview BEFORE removing from list
+    onAdvancePreview?.(messageId);
     onAction(action, [messageId], undefined, accountEmail);
     // Remove from queue display and mark as done
     if (['trash', 'delete', 'archive', 'markRead'].includes(action)) {
