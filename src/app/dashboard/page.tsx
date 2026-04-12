@@ -1861,7 +1861,7 @@ export default function Dashboard() {
     { id: 'reply-queue', label: 'Top Tiers' },
     { id: 'follow-up', label: 'Follow Up' },
     { id: 'snoozed', label: 'Snoozed' },
-    { id: 'cleanup', label: 'Quick Clear Boxers' },
+    { id: 'cleanup', label: 'Easy-Clear' },
     { id: 'sent', label: 'Sent' },
     { id: 'inbox', label: 'All Mail' },
     ...(searchSelectionActive.length > 0 ? [{ id: 'search-reviews' as Tab, label: `Search Reviews (${searchSelectionActive.length})` }] : []),
@@ -2655,7 +2655,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
           <div className="text-xs font-medium mt-1" style={{ color: cleanupCount > 5 ? '#ef4444' : 'var(--muted)' }}>
             {cleanupCount === 0 ? 'Inbox clean!' : 'Low-priority emails'}
           </div>
-          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Quick Clear</div>
+          <div className="text-[10px] mt-0.5" style={{ color: 'var(--muted)' }}>Easy-Clear</div>
         </button>
       </div>
 
@@ -2675,7 +2675,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
         <button onClick={() => onNavigate('cleanup')}
           className="px-4 py-2.5 text-xs font-semibold rounded-lg border transition-all hover:shadow-md active:scale-95"
           style={{ borderColor: 'var(--border)', color: '#64748b' }}>
-          Quick Clear Noise
+          Easy-Clear Noise
         </button>
       </div>
 
@@ -2738,7 +2738,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
                   <span className="text-[10px] px-2 py-1 rounded-full font-bold" style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>Tier D — Low priority</span>
                 </div>
                 <p className="text-xs mt-2 leading-relaxed" style={{ color: '#475569' }}>
-                  Tiers A, B, and C go to <strong>Top Tiers</strong> (emails that need your attention). Tier D and unknown senders go to <strong>Quick Clear Boxers</strong> (newsletters, notifications, noise).
+                  Tiers A, B, and C go to <strong>Top Tiers</strong> (emails that need your attention). Tier D and unknown senders go to <strong>Easy-Clear</strong> (newsletters, notifications, noise).
                   You can change any sender&apos;s tier at any time.
                 </p>
               </div>
@@ -2786,7 +2786,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
               <div>
                 <div className="font-semibold text-sm mb-1">Batch-clean the noise</div>
                 <p className="text-xs leading-relaxed" style={{ color: '#475569' }}>
-                  The <button onClick={() => onNavigate('cleanup')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Quick Clear Boxers</button> tab
+                  The <button onClick={() => onNavigate('cleanup')} className="font-semibold underline" style={{ color: 'var(--accent)' }}>Easy-Clear</button> tab
                   groups all low-priority email by sender. Select entire senders and archive or trash dozens of messages in one click.
                   If a sender is showing up here that shouldn&apos;t be, change their tier to promote them to Top Tiers.
                 </p>
@@ -3413,7 +3413,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     if (res.success) {
       setQueue(res.data);
       const items = res.data || [];
-      // Only count active tiered items (A/B/C) — untiered and low-priority go to Quick Clear Boxers
+      // Only count active tiered items (A/B/C) — untiered and low-priority go to Easy-Clear
       const activeSignalCount = items.filter((q: any) => q.status === 'active' && q.priority !== 'low' && ['A', 'B', 'C'].includes(q.tier)).length;
       reportCount?.(activeSignalCount);
     }
@@ -3505,7 +3505,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     setDragOverId(null);
   }
 
-  // Filter to only tiered items (A/B/C) — untiered and low-priority belong in Quick Clear Boxers
+  // Filter to only tiered items (A/B/C) — untiered and low-priority belong in Easy-Clear
   const signalQueue = queue.filter(q => q.priority !== 'low' && ['A', 'B', 'C'].includes(q.tier));
   const active = signalQueue.filter(q => q.status === 'active');
   const snoozed = signalQueue.filter(q => q.status === 'snoozed');
@@ -3602,7 +3602,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
         })}
       </div>
 
-      {/* Active items grouped by priority + thread — low priority goes to Quick Clear Boxers tab */}
+      {/* Active items grouped by priority + thread — low priority goes to Easy-Clear tab */}
       {['urgent', 'important', 'normal'].map(priority => {
         const groups = filteredActive.filter(g => g.lead.priority === priority);
         if (groups.length === 0) return null;
