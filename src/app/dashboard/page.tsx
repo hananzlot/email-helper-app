@@ -4842,6 +4842,10 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                         className="px-2 py-1 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
                         Trash
                       </button>
+                      <button onClick={(e) => { e.stopPropagation(); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length) + (awaitingReply.length - 1)); showToast('Dismissed from follow-up'); }}
+                        className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: '#fbbf24', color: '#92400e' }}>
+                        Dismiss
+                      </button>
                     </div>
                   </div>
                 </div>
