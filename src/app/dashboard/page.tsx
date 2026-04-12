@@ -504,6 +504,38 @@ document.querySelectorAll('img').forEach(function(img) {
 
 // ============ TIER DROPDOWN ============
 
+// ============ SHARED ACTION BUTTONS ============
+// Single source of truth for mark read/unread button — used across all tabs and pane
+
+function MarkReadButton({ isUnread, messageId, accountEmail, onAction, size = 'sm' }: {
+  isUnread: boolean;
+  messageId: string;
+  accountEmail?: string;
+  onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
+  size?: 'sm' | 'xs';
+}) {
+  return (
+    <button onClick={(e) => {
+      e.stopPropagation();
+      onAction(isUnread ? 'markRead' : 'markUnread', [messageId], undefined, accountEmail || _currentAccount);
+      // Update preview cache
+      const cacheKey = `${messageId}:${accountEmail || ''}`;
+      const cached = emailContentCache.get(cacheKey);
+      if (cached) {
+        emailContentCache.set(cacheKey, { data: { ...(cached.data as Record<string, unknown>), isUnread: !isUnread }, timestamp: cached.timestamp });
+      }
+    }}
+      className={`${size === 'xs' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1.5 text-xs'} font-medium rounded-lg border transition-all`}
+      style={{
+        borderColor: isUnread ? 'var(--border)' : '#3b82f6',
+        color: isUnread ? 'var(--muted)' : '#3b82f6',
+        background: isUnread ? undefined : '#eff6ff',
+      }}>
+      {isUnread ? 'Mark Read' : 'Mark Unread'}
+    </button>
+  );
+}
+
 function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
   currentTier: string;
   senderEmail: string;
@@ -3179,22 +3211,11 @@ document.querySelectorAll('img').forEach(function(img) {
         </button>
         <button onClick={() => { onAction('archive', [messageId], undefined, accountEmail || _currentAccount); showToast('Archived'); }}
           className="px-3 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
-        <button onClick={() => {
-            const action = isUnread ? 'markRead' : 'markUnread';
-            onAction(action, [messageId], undefined, accountEmail || _currentAccount);
-            setIsUnread(!isUnread);
-            // Update in-memory cache so returning to this email shows correct state
-            const cacheKey = `${messageId}:${accountEmail || ''}`;
-            const cached = emailContentCache.get(cacheKey);
-            if (cached) {
-              emailContentCache.set(cacheKey, { data: { ...(cached.data as Record<string, unknown>), isUnread: !isUnread }, timestamp: cached.timestamp });
-            }
-            showToast(isUnread ? 'Marked read' : 'Marked unread');
-          }}
-          className="px-3 py-1.5 text-xs font-medium rounded-lg border"
-          style={{ borderColor: isUnread ? 'var(--border)' : '#3b82f6', color: isUnread ? 'var(--muted)' : '#3b82f6', background: isUnread ? undefined : '#eff6ff' }}>
-          {isUnread ? 'Mark Read' : 'Mark Unread'}
-        </button>
+        <MarkReadButton isUnread={isUnread} messageId={messageId} accountEmail={accountEmail} onAction={(action, ids, label, acct) => {
+          onAction(action, ids, label, acct);
+          setIsUnread(!isUnread);
+          showToast(isUnread ? 'Marked read' : 'Marked unread');
+        }} />
         <button onClick={() => { onAction('star', [messageId], undefined, accountEmail || _currentAccount); showToast('Starred'); }}
           className="px-3 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
         <button onClick={() => { onAction('trash', [messageId], undefined, accountEmail || _currentAccount); showToast('Trashed'); }}
@@ -3328,11 +3349,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                 <button onClick={() => { setReplyingTo(replyingTo === msg.id ? null : msg.id); }}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
                 <button onClick={() => onAction('archive', [msg.id], undefined, msg.accountEmail)} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
-                <button onClick={() => onAction(msg.isUnread ? 'markRead' : 'markUnread', [msg.id], undefined, msg.accountEmail)}
-                  className="px-2 py-1.5 text-xs rounded-lg border"
-                  style={{ borderColor: msg.isUnread ? 'var(--border)' : '#3b82f6', color: msg.isUnread ? undefined : '#3b82f6', background: msg.isUnread ? undefined : '#eff6ff' }}>
-                  {msg.isUnread ? 'Mark Read' : 'Mark Unread'}
-                </button>
+                <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <button onClick={() => onAction('star', [msg.id], undefined, msg.accountEmail)} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
                 <button onClick={() => onAction('trash', [msg.id], undefined, msg.accountEmail)} className="px-2 py-1.5 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                 <button onClick={() => setConfirmAction({ ids: [msg.id], count: 1 })}
@@ -3909,7 +3926,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                     )}
                     <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(item.id, hours, label)} />
                     <button onClick={() => queueAction('archive', item.message_id, item.id, item.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
-                    <button onClick={() => queueAction('markRead', item.message_id, item.id, item.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Mark Read</button>
+                    <MarkReadButton isUnread={true} messageId={item.message_id} accountEmail={item.account_email} onAction={(action, ids, label, acct) => { queueAction(action, item.message_id, item.id, acct || item.account_email); }} />
                     <button onClick={() => queueAction('trash', item.message_id, item.id, item.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                     <button onClick={() => setConfirmDelete(item.id + '::' + item.message_id + '::' + item.account_email)}
                       className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
@@ -4306,7 +4323,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
                         </div>
                         <div className="flex gap-1 flex-shrink-0 items-center">
                           <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
-                          <button onClick={() => onAction('markRead', [msg.id], undefined, msg.accountEmail)} className="px-2 py-0.5 rounded border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Read</button>
+                          <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
                           <button onClick={() => onAction('archive', [msg.id], undefined, msg.accountEmail)} className="px-2 py-0.5 rounded border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
                           <button onClick={() => onAction('trash', [msg.id], undefined, msg.accountEmail)} className="px-2 py-0.5 rounded border text-[10px] text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                         </div>
@@ -5857,11 +5874,7 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                 }} />
                 <button onClick={() => { onAction('archive', [msg.id], undefined, msg.accountEmail); onRemove(msg.id); }}
                   className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
-                <button onClick={() => { onAction(msg.isUnread ? 'markRead' : 'markUnread', [msg.id], undefined, msg.accountEmail); }}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg border"
-                  style={{ borderColor: msg.isUnread ? 'var(--border)' : '#3b82f6', color: msg.isUnread ? 'var(--muted)' : '#3b82f6', background: msg.isUnread ? undefined : '#eff6ff' }}>
-                  {msg.isUnread ? 'Mark Read' : 'Mark Unread'}
-                </button>
+                <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <button onClick={() => { onAction('trash', [msg.id], undefined, msg.accountEmail); onRemove(msg.id); }}
                   className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                 <button onClick={() => setConfirmDelete(msg.id + '::' + (msg.accountEmail || ''))}
