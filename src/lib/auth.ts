@@ -98,9 +98,10 @@ export async function signInOrCreateUser(email: string, name: string) {
   }
 
   // 4. No existing user found — create a new one
-  // email_confirm skipped — Google OAuth already verified the email, no Supabase mail service needed
+  // email_confirm: false — Google OAuth already verified the email, skip Supabase mail service
   const { data, error } = await admin.auth.admin.createUser({
     email,
+    email_confirm: false,
     user_metadata: { full_name: name },
   });
   if (error) throw new Error(`Failed to create user: ${error.message}`);

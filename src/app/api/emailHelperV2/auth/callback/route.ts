@@ -79,21 +79,8 @@ export async function GET(request: NextRequest) {
           .eq('email', gmailProfile.email);
       }
 
-      // Generate session token (non-fatal if it fails — cookie-based auth is primary)
-      let sessionToken = '';
-      try {
-        const { data: linkData } = await admin.auth.admin.generateLink({
-          type: 'magiclink',
-          email: userInfo.email,
-        });
-        sessionToken = linkData.properties?.hashed_token || '';
-      } catch (e) {
-        console.error('generateLink failed (non-fatal):', e);
-      }
-
-      // Redirect to dashboard with session info
+      // Redirect to dashboard (cookie-based auth, no session token needed)
       const redirectUrl = new URL('/dashboard', origin);
-      redirectUrl.searchParams.set('session_token', sessionToken);
       redirectUrl.searchParams.set('account', gmailProfile.email);
 
       // Set a cookie with the user ID for immediate use
