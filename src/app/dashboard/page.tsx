@@ -770,11 +770,11 @@ export default function Dashboard() {
   const [splitPreviewAccount, setSplitPreviewAccount] = useState<string | undefined>(undefined);
 
   // Draggable split pane width (percentage of container), persisted in localStorage
-  const [splitLeftPct, setSplitLeftPct] = useState<number>(() => {
-    if (typeof window === 'undefined') return 40;
-    try { const saved = localStorage.getItem('clearbox_split_pct'); return saved ? Number(saved) : 40; }
-    catch { return 40; }
-  });
+  const [splitLeftPct, setSplitLeftPct] = useState<number>(40);
+  useEffect(() => {
+    try { const saved = localStorage.getItem('clearbox_split_pct'); if (saved) setSplitLeftPct(Number(saved)); }
+    catch {}
+  }, []);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
 
@@ -1858,8 +1858,8 @@ export default function Dashboard() {
             </div>{/* close controls row */}
             {/* Greeting + motivation */}
             <div className="text-right">
-              <span className="text-sm font-semibold">{(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })()}</span>
-              <span className="text-xs ml-1.5" style={{ color: 'var(--muted)' }}>
+              <span className="text-sm font-semibold" suppressHydrationWarning>{(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; })()}</span>
+              <span className="text-xs ml-1.5" style={{ color: 'var(--muted)' }} suppressHydrationWarning>
                 {(() => {
                   const tc = tabCounts['reply-queue'] || 0;
                   const cc = tabCounts['cleanup'] || 0;
