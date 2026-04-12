@@ -3048,6 +3048,11 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
 
 // ============ INLINE PREVIEW (for split view) ============
 
+// In-memory email content cache — client-side only, clears on page close
+// No sensitive data leaves the browser
+const emailContentCache = new Map<string, { data: unknown; timestamp: number }>();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   messageId: string;
   accountEmail?: string;
@@ -3098,9 +3103,21 @@ document.querySelectorAll('img').forEach(function(img) {
   }, [email]);
 
   useEffect(() => {
-    setLoading(true);
     setReplyOpen(false);
     setReplyAllMode(false);
+
+    // Check in-memory cache first (instant, no server call)
+    const cacheKey = `${messageId}:${accountEmail || ''}`;
+    const cached = emailContentCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+      setEmail(cached.data);
+      setIsUnread((cached.data as { isUnread?: boolean })?.isUnread ?? true);
+      setLoading(false);
+      return;
+    }
+
+    // Not cached — fetch from Gmail
+    setLoading(true);
     const savedAccount = _currentAccount;
     if (accountEmail && accountEmail !== _currentAccount) setCurrentAccount(accountEmail);
     gmailGet('message', { id: messageId, format: 'full' }).then(res => {
@@ -3108,6 +3125,8 @@ document.querySelectorAll('img').forEach(function(img) {
       if (res.success) {
         setEmail(res.data);
         setIsUnread(res.data.isUnread ?? true);
+        // Cache in memory for instant access next time
+        emailContentCache.set(cacheKey, { data: res.data, timestamp: Date.now() });
       } else {
         setEmail(null);
       }
