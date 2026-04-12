@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     .select('gmail_id, thread_id, sender, sender_email, subject, snippet, date, is_unread, label_ids, account_email')
     .eq('user_id', userId)
     .order('date', { ascending: false })
-    .limit(20000);
+    .limit(100000);
   if (account) cacheQuery.eq('account_email', account);
   const { data: messages, error } = await cacheQuery;
 
