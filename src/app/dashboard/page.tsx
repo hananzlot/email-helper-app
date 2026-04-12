@@ -2039,34 +2039,34 @@ export default function Dashboard() {
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
                 AES-256 encrypted
               </div>
+              {/* Sync status — inline after encrypted badge */}
+              {Object.keys(syncProgress).length > 0 && (
+                <>
+                  <div className="w-px h-2.5" style={{ background: '#cbd5e1' }} />
+                  {Object.values(syncProgress).every(s => s.done) ? (
+                    <div className="flex items-center gap-1 text-[10px] font-medium" style={{ color: '#16a34a' }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                      Synced
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 border-[1.5px] border-t-transparent rounded-full animate-spin" style={{ borderColor: '#22c55e', borderTopColor: 'transparent' }} />
+                      {Object.entries(syncProgress).filter(([, s]) => !s.done).map(([email, s]) => (
+                        <div key={email} className="flex items-center gap-1">
+                          <div className="w-10 h-0.5 rounded-full overflow-hidden" style={{ background: '#dcfce7' }}>
+                            <div className="h-full rounded-full transition-all duration-1000" style={{ background: '#22c55e', width: `${s.total > 0 ? Math.min(100, (s.cached / s.total) * 100) : 0}%` }} />
+                          </div>
+                          <span className="text-[8px] whitespace-nowrap" style={{ color: '#15803d' }}>{s.eta}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Sync progress — compact inline widget */}
-        {Object.keys(syncProgress).length > 0 && !Object.values(syncProgress).every(s => s.done) && (
-          <div className="mb-1.5 flex items-center gap-2 px-2 py-1 rounded-md" style={{ background: '#f0fdf4' }}>
-            <div className="w-2.5 h-2.5 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#22c55e', borderTopColor: 'transparent' }} />
-            <div className="flex-1 flex items-center gap-2 min-w-0">
-              {Object.entries(syncProgress).filter(([, s]) => !s.done).map(([email, s]) => (
-                <div key={email} className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-[9px] truncate" style={{ color: '#15803d', maxWidth: 80 }}>{email.split('@')[0]}</span>
-                  <div className="w-12 h-0.5 rounded-full overflow-hidden flex-shrink-0" style={{ background: '#dcfce7' }}>
-                    <div className="h-full rounded-full transition-all duration-1000" style={{ background: '#22c55e', width: `${s.total > 0 ? Math.min(100, (s.cached / s.total) * 100) : 0}%` }} />
-                  </div>
-                  <span className="text-[8px] whitespace-nowrap" style={{ color: '#15803d' }}>{s.eta}</span>
-                </div>
-              ))}
-            </div>
-            <span className="text-[8px] whitespace-nowrap flex-shrink-0" style={{ color: '#86efac' }}>
-              {(() => {
-                const totalCached = Object.values(syncProgress).reduce((sum, p) => sum + p.cached, 0);
-                const totalInbox = Object.values(syncProgress).reduce((sum, p) => sum + p.total, 0);
-                return `${Math.min(totalCached, totalInbox).toLocaleString()}/${totalInbox.toLocaleString()}`;
-              })()}
-            </span>
-          </div>
-        )}
 
         {/* Global Search Bar */}
         <div className="relative mb-2">
