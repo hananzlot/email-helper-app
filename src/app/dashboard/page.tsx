@@ -4025,7 +4025,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 
 function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name' | 'domain'>('tier');
+  const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name' | 'domain'>('domain');
   const [visibleGroups, setVisibleGroups] = useState(30);
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
@@ -4259,25 +4259,25 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
         </div>
         <div className="flex gap-2 items-center">
           <span className="text-xs" style={{ color: 'var(--muted)' }}>Sort:</span>
-          <button onClick={() => setSortBy('tier')}
+          <button onClick={() => setSortBy('domain')}
             className="px-3 py-1 text-xs rounded-full border font-medium"
-            style={{ background: sortBy === 'tier' ? 'var(--accent)' : 'transparent', color: sortBy === 'tier' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
-            By Tier
+            style={{ background: sortBy === 'domain' ? 'var(--accent)' : 'transparent', color: sortBy === 'domain' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
+            By Domain
           </button>
           <button onClick={() => setSortBy('count')}
             className="px-3 py-1 text-xs rounded-full border font-medium"
             style={{ background: sortBy === 'count' ? 'var(--accent)' : 'transparent', color: sortBy === 'count' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
             Most emails
           </button>
+          <button onClick={() => setSortBy('tier')}
+            className="px-3 py-1 text-xs rounded-full border font-medium"
+            style={{ background: sortBy === 'tier' ? 'var(--accent)' : 'transparent', color: sortBy === 'tier' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
+            By Tier
+          </button>
           <button onClick={() => setSortBy('name')}
             className="px-3 py-1 text-xs rounded-full border font-medium"
             style={{ background: sortBy === 'name' ? 'var(--accent)' : 'transparent', color: sortBy === 'name' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
             A→Z
-          </button>
-          <button onClick={() => setSortBy('domain')}
-            className="px-3 py-1 text-xs rounded-full border font-medium"
-            style={{ background: sortBy === 'domain' ? 'var(--accent)' : 'transparent', color: sortBy === 'domain' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
-            By Domain
           </button>
         </div>
       </div>
