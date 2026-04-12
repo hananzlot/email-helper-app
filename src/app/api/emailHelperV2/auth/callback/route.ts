@@ -35,6 +35,23 @@ export async function GET(request: NextRequest) {
     if (isAddAccount) {
       // Adding another Gmail account to an existing user
       userId = state!.split(':')[1];
+
+      // Guard: check if this email is already connected to a DIFFERENT user
+      const admin = createSupabaseAdmin();
+      const { data: existingAccount } = await admin
+        .from(TABLES.GMAIL_ACCOUNTS)
+        .select('user_id')
+        .eq('email', gmailProfile.email)
+        .eq('status', 'connected')
+        .neq('user_id', userId)
+        .limit(1)
+        .single();
+
+      if (existingAccount) {
+        return NextResponse.redirect(
+          new URL(`/dashboard?error=${encodeURIComponent(`${gmailProfile.email} is already connected to another account. Please disconnect it there first.`)}`, origin)
+        );
+      }
     } else {
       // Primary login flow — sign in or create user
       const { user } = await signInOrCreateUser(userInfo.email, userInfo.name);

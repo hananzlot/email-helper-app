@@ -901,6 +901,11 @@ export default function Dashboard() {
         showToast('Account connected', added);
         window.history.replaceState({}, '', '/dashboard');
       }
+      const dashError = params.get('error');
+      if (dashError) {
+        showToast('Error', dashError);
+        window.history.replaceState({}, '', '/dashboard');
+      }
       const cookies = document.cookie.split(';').reduce((acc, c) => {
         const [k, v] = c.trim().split('=');
         if (k && v) acc[k] = decodeURIComponent(v);
