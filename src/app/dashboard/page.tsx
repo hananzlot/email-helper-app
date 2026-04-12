@@ -1340,7 +1340,9 @@ export default function Dashboard() {
       const startTime = Date.now();
       let retries = 0;
 
-      // Get initial cached count from messages already loaded
+      // Get existing cached count: first sync call returns skippedExisting which tells us
+      // Use the first sync response to determine starting position
+      // For initial display, use in-memory message count as approximation
       totalCached = messages.filter(m => m.accountEmail === acctEmail).length;
 
       while (!cancelled && retries < 10) {
@@ -1358,12 +1360,13 @@ export default function Dashboard() {
           }
           retries = 0; // Reset on success
 
-          const { cachedThisPage, skippedExisting, inboxTotal, done } = res.data;
+          const { cachedThisPage, totalCached: serverCachedCount, inboxTotal, done } = res.data;
           messagesThisRun += (cachedThisPage || 0);
-          totalCached += (cachedThisPage || 0);
-          // If we're skipping cached pages, count those too
-          if (skippedExisting > 0 && totalCached < (skippedExisting * 10)) {
-            totalCached = Math.max(totalCached, skippedExisting * 10); // rough estimate
+          // Use the accurate count from server
+          if (serverCachedCount && serverCachedCount > 0) {
+            totalCached = serverCachedCount;
+          } else {
+            totalCached += (cachedThisPage || 0);
           }
 
           // Calculate speed and ETA

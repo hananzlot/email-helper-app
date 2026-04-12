@@ -122,14 +122,19 @@ export async function POST(request: NextRequest) {
 
     const nextPageToken = listRes.nextPageToken || null;
 
-    // Save resume token so next call can skip to here
-    // Only save when we're in the uncached zone (actually caching new messages)
-    // or when we've passed through the cached zone
+    // Get actual total cached count (efficient count query, no data transfer)
+    const { count: actualCachedCount } = await admin
+      .from(TABLES.INBOX_CACHE)
+      .select('gmail_id', { count: 'exact', head: true })
+      .eq('user_id', user_id)
+      .eq('account_email', account_email);
+
+    // Save resume token + accurate count
     await admin.from(TABLES.INBOX_SYNC).upsert({
       user_id, account_email,
       last_synced_at: new Date().toISOString(),
-      total_cached: (existing?.length || 0) + cachedThisPage, // approximate, updated properly when done
-      resume_page_token: nextPageToken, // Resume from here next time
+      total_cached: actualCachedCount || 0,
+      resume_page_token: nextPageToken,
     }, { onConflict: 'user_id,account_email' });
 
     // Get inbox total (cheap single API call)
@@ -144,7 +149,7 @@ export async function POST(request: NextRequest) {
       data: {
         cachedThisPage,
         skippedExisting: existingSet.size,
-        totalCached: null, // skip count query for speed — use sync table
+        totalCached: actualCachedCount || 0,
         inboxTotal,
         nextPageToken,
         done: !nextPageToken,
