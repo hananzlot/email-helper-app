@@ -1689,21 +1689,28 @@ export default function Dashboard() {
           setSearchResults(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
           setSearchSelectionActive(prev => prev.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
           apiPut('inbox-cache', { gmail_ids: messageIds, updates: { is_unread: true } }).catch(() => {});
-          // Re-add to reply queue so it appears in the right tab (Top Tiers or Easy-Clear)
+          // Re-add to reply queue so it appears in the right tab
+          // First try PUT (update existing done → active), then POST (create new)
           for (const msgId of messageIds) {
             const msg = messages.find(m => m.id === msgId) || searchResults.find(m => m.id === msgId) || searchSelectionActive.find(m => m.id === msgId);
             if (msg) {
-              apiPost('queue', {
-                message_id: msg.id,
-                thread_id: msg.threadId || null,
-                account_email: overrideAccount || msg.accountEmail || _currentAccount,
-                status: 'active',
-                sender: msg.sender || '',
-                sender_email: msg.senderEmail || '',
-                subject: msg.subject || '',
-                summary: msg.snippet || '',
-                priority: 'normal',
-                priority_score: 5,
+              // Try to reactivate existing queue entry
+              apiPut('queue', { message_id: msg.id, status: 'active' }).then(res => {
+                if (!res.success) {
+                  // No existing entry — create new one
+                  apiPost('queue', {
+                    message_id: msg.id,
+                    thread_id: msg.threadId || null,
+                    account_email: overrideAccount || msg.accountEmail || _currentAccount,
+                    status: 'active',
+                    sender: msg.sender || '',
+                    sender_email: msg.senderEmail || '',
+                    subject: msg.subject || '',
+                    summary: msg.snippet || '',
+                    priority: 'normal',
+                    priority_score: 5,
+                  }).catch(() => {});
+                }
               }).catch(() => {});
             }
           }

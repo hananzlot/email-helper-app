@@ -29,20 +29,25 @@ export async function GET(request: NextRequest) {
 
   if (queueResult.error) return apiError(queueResult.error.message, 500);
 
-  // Build lookup of reply counts by sender email
+  // Build lookups by sender email
   const replyCountMap: Record<string, number> = {};
+  const tierMap: Record<string, string> = {};
   if (sendersResult.data) {
     for (const s of sendersResult.data) {
       replyCountMap[s.sender_email] = s.reply_count || 0;
+      tierMap[s.sender_email] = s.tier || '';
     }
   }
 
-  // Decrypt sensitive fields and enrich with reply_count
+  // Decrypt sensitive fields and enrich with reply_count + tier from sender_priorities
   const enriched = (queueResult.data || []).map((item: Record<string, unknown>) => {
     const decrypted = decryptFields(item, [...ENCRYPTED_FIELDS.REPLY_QUEUE], userId);
+    const senderEmail = item.sender_email as string;
     return {
       ...decrypted,
-      reply_count: replyCountMap[item.sender_email as string] || 0,
+      reply_count: replyCountMap[senderEmail] || 0,
+      // Use sender's current tier if queue tier is missing
+      tier: (item.tier as string) || tierMap[senderEmail] || null,
     };
   });
 
