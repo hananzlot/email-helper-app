@@ -532,10 +532,6 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
       const res = await apiPut('senders', { sender_email: senderEmail, tier: newTier, display_name: senderName || senderEmail });
       if (res.success) {
         onTierChanged(newTier);
-        // If promoted to A/B/C, trigger a triage refresh to add their messages to the queue
-        if (['A', 'B', 'C'].includes(newTier)) {
-          apiPost('triage', { action: 'triage' }).catch(() => {});
-        }
       }
     } catch (e) {
       console.error('Failed to change tier:', e);
@@ -4048,7 +4044,23 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
                     onTierChanged={(newTier) => {
                       setSenderTiers(prev => ({ ...prev, [group.email.toLowerCase()]: newTier }));
                       if (newTier === 'A' || newTier === 'B' || newTier === 'C') {
-                        showToast(`Promoted to Tier ${newTier}`, `${group.name} will appear in Top Tiers after triage runs`);
+                        // Directly add this sender's messages to the reply queue
+                        for (const msg of group.messages) {
+                          apiPost('queue', {
+                            message_id: msg.id,
+                            thread_id: msg.threadId || null,
+                            account_email: msg.accountEmail || _currentAccount,
+                            status: 'active',
+                            sender: group.name,
+                            sender_email: group.email,
+                            subject: msg.subject,
+                            summary: msg.snippet || '',
+                            tier: newTier,
+                            priority: newTier === 'A' ? 'urgent' : newTier === 'B' ? 'important' : 'normal',
+                            priority_score: newTier === 'A' ? 9 : newTier === 'B' ? 7 : 5,
+                          }).catch(() => {});
+                        }
+                        showToast(`Promoted to Tier ${newTier}`, `${group.messages.length} email${group.messages.length > 1 ? 's' : ''} moved to Top Tiers`);
                         onTierPromoted?.();
                       } else {
                         showToast(`Updated to Tier ${newTier}`, group.name);
