@@ -1504,6 +1504,22 @@ export default function Dashboard() {
       }
     }).catch(() => {});
 
+    // Advance split preview to next message if current one is being removed
+    if (splitPreviewId && messageIds.includes(splitPreviewId) && ['archive', 'trash', 'delete', 'markRead'].includes(action)) {
+      const container = splitContainerRef.current;
+      if (container) {
+        const allPreviews = Array.from(container.querySelectorAll('[data-preview-id]')) as HTMLElement[];
+        const currentIdx = allPreviews.findIndex(el => el.getAttribute('data-preview-id') === splitPreviewId);
+        const next = allPreviews[currentIdx + 1] || allPreviews[currentIdx - 1];
+        if (next) {
+          setSplitPreviewId(next.getAttribute('data-preview-id') || null);
+          setSplitPreviewAccount(next.getAttribute('data-preview-account') || undefined);
+        } else {
+          setSplitPreviewId(null);
+        }
+      }
+    }
+
     // For undoable actions (archive/trash), animate out immediately but delay the API call
     const isUndoable = ['archive', 'trash'].includes(action);
 
@@ -1516,22 +1532,6 @@ export default function Dashboard() {
 
       // Store the removed messages so we can restore on undo
       const removedMessages = messages.filter(m => messageIds.includes(m.id));
-
-      // Advance split preview to next message if current one is being removed
-      if (splitPreviewId && messageIds.includes(splitPreviewId)) {
-        const container = splitContainerRef.current;
-        if (container) {
-          const allPreviews = Array.from(container.querySelectorAll('[data-preview-id]')) as HTMLElement[];
-          const currentIdx = allPreviews.findIndex(el => el.getAttribute('data-preview-id') === splitPreviewId);
-          const next = allPreviews[currentIdx + 1] || allPreviews[currentIdx - 1];
-          if (next) {
-            setSplitPreviewId(next.getAttribute('data-preview-id') || null);
-            setSplitPreviewAccount(next.getAttribute('data-preview-account') || undefined);
-          } else {
-            setSplitPreviewId(null);
-          }
-        }
-      }
 
       setTimeout(() => {
         setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
@@ -4303,7 +4303,7 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
                   borderLeftColor: convo.hasAwaiting ? '#f59e0b' : 'var(--border)',
                 }}>
                 {/* Conversation header — click to expand */}
-                <div className="p-4 cursor-pointer" onClick={() => setExpandedConvo(isExpanded ? null : convo.normalizedSubject)} onDoubleClick={() => onDialogPreview?.(latestMsg.id, latestMsg.accountEmail)} data-preview-id={latestMsg.id} data-preview-account={latestMsg.accountEmail || ''}>
+                <div className="p-4 cursor-pointer" onClick={() => { setExpandedConvo(isExpanded ? null : convo.normalizedSubject); onPreview(latestMsg.id, latestMsg.accountEmail); }} onDoubleClick={() => onDialogPreview?.(latestMsg.id, latestMsg.accountEmail)} data-preview-id={latestMsg.id} data-preview-account={latestMsg.accountEmail || ''}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
