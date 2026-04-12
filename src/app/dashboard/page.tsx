@@ -3159,9 +3159,9 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
         </button>
         {messages.length > 0 && <button onClick={selectAll} className="px-3 py-2 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>{selected.size === messages.length ? 'Deselect All' : 'Select All'}</button>}
         {selected.size > 0 && (<>
-          <button onClick={() => { onAction('archive', selectedIds); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive ({selected.size})</button>
-          <button onClick={() => { onAction('markRead', selectedIds); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Mark Read ({selected.size})</button>
-          <button onClick={() => { onAction('trash', selectedIds); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border text-red-600" style={{ borderColor: 'var(--border)' }}>Trash ({selected.size})</button>
+          <button onClick={() => { const byAcct = new Map<string, string[]>(); selectedIds.forEach(id => { const m = messages.find(msg => msg.id === id); const a = m?.accountEmail || _currentAccount; if (!byAcct.has(a)) byAcct.set(a, []); byAcct.get(a)!.push(id); }); for (const [a, ids] of byAcct) onAction('archive', ids, undefined, a); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive ({selected.size})</button>
+          <button onClick={() => { const byAcct = new Map<string, string[]>(); selectedIds.forEach(id => { const m = messages.find(msg => msg.id === id); const a = m?.accountEmail || _currentAccount; if (!byAcct.has(a)) byAcct.set(a, []); byAcct.get(a)!.push(id); }); for (const [a, ids] of byAcct) onAction('markRead', ids, undefined, a); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>Mark Read ({selected.size})</button>
+          <button onClick={() => { const byAcct = new Map<string, string[]>(); selectedIds.forEach(id => { const m = messages.find(msg => msg.id === id); const a = m?.accountEmail || _currentAccount; if (!byAcct.has(a)) byAcct.set(a, []); byAcct.get(a)!.push(id); }); for (const [a, ids] of byAcct) onAction('trash', ids, undefined, a); setSelected(new Set()); }} className="px-3 py-2 text-xs font-medium rounded-lg border text-red-600" style={{ borderColor: 'var(--border)' }}>Trash ({selected.size})</button>
           <button onClick={() => setConfirmAction({ ids: selectedIds, count: selected.size })} className="px-3 py-2 text-xs font-medium rounded-lg border text-red-700 font-bold" style={{ borderColor: '#fca5a5' }}>Delete ({selected.size})</button>
         </>)}
         <span className="text-xs ml-auto" style={{ color: 'var(--muted)' }}>{messages.length} messages</span>
@@ -3215,13 +3215,13 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                 />
                 <button onClick={() => { setReplyingTo(replyingTo === msg.id ? null : msg.id); }}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
-                <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
-                <button onClick={() => onAction(msg.isUnread ? 'markRead' : 'markUnread', [msg.id])}
+                <button onClick={() => onAction('archive', [msg.id], undefined, msg.accountEmail)} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Archive</button>
+                <button onClick={() => onAction(msg.isUnread ? 'markRead' : 'markUnread', [msg.id], undefined, msg.accountEmail)}
                   className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>
                   {msg.isUnread ? 'Mark Read' : 'Mark Unread'}
                 </button>
-                <button onClick={() => onAction('star', [msg.id])} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
-                <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-1.5 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                <button onClick={() => onAction('star', [msg.id], undefined, msg.accountEmail)} className="px-2 py-1.5 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Star</button>
+                <button onClick={() => onAction('trash', [msg.id], undefined, msg.accountEmail)} className="px-2 py-1.5 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                 <button onClick={() => setConfirmAction({ ids: [msg.id], count: 1 })}
                   className="px-2 py-1.5 text-xs rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
               </div>
@@ -3994,6 +3994,20 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
     }
   }
 
+  // Execute action grouped by account (critical for unified mode)
+  function actionByAccount(action: string, msgIds: string[]) {
+    const byAccount = new Map<string, string[]>();
+    for (const id of msgIds) {
+      const msg = cleanupMessages.find(m => m.id === id);
+      const acct = msg?.accountEmail || _currentAccount;
+      if (!byAccount.has(acct)) byAccount.set(acct, []);
+      byAccount.get(acct)!.push(id);
+    }
+    for (const [acct, ids] of byAccount) {
+      onAction(action, ids, undefined, acct);
+    }
+  }
+
   // Collect all selected message IDs (from selected groups + individually selected messages)
   function getSelectedIds(): string[] {
     const ids = new Set<string>();
@@ -4062,15 +4076,15 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
             {selectedGroups.size > 0 && ` (${selectedGroups.size} sender${selectedGroups.size > 1 ? 's' : ''})`}
           </span>
           <div className="flex gap-2">
-            <button onClick={() => { onAction('markRead', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); }}
+            <button onClick={() => { actionByAccount('markRead', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); }}
               className="px-4 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', background: 'white' }}>
               Mark Read
             </button>
-            <button onClick={() => { onAction('archive', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); }}
+            <button onClick={() => { actionByAccount('archive', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); }}
               className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
               Archive All
             </button>
-            <button onClick={() => { onAction('trash', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); }}
+            <button onClick={() => { actionByAccount('trash', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); }}
               className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--urgent)' }}>
               Trash All
             </button>
@@ -4142,11 +4156,11 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
                     }
                     showToast('Snoozed', `${group.messages.length} message${group.messages.length > 1 ? 's' : ''} will reappear ${label}`);
                   }} />
-                  <button onClick={() => onAction('archive', allIds)}
+                  <button onClick={() => actionByAccount('archive', allIds)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
                     Archive
                   </button>
-                  <button onClick={() => onAction('trash', allIds)}
+                  <button onClick={() => actionByAccount('trash', allIds)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
                     Trash
                   </button>
@@ -4172,9 +4186,9 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
                         </div>
                         <div className="flex gap-1 flex-shrink-0 items-center">
                           <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
-                          <button onClick={() => onAction('markRead', [msg.id])} className="px-2 py-0.5 rounded border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Read</button>
-                          <button onClick={() => onAction('archive', [msg.id])} className="px-2 py-0.5 rounded border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
-                          <button onClick={() => onAction('trash', [msg.id])} className="px-2 py-0.5 rounded border text-[10px] text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                          <button onClick={() => onAction('markRead', [msg.id], undefined, msg.accountEmail)} className="px-2 py-0.5 rounded border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Read</button>
+                          <button onClick={() => onAction('archive', [msg.id], undefined, msg.accountEmail)} className="px-2 py-0.5 rounded border text-[10px]" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                          <button onClick={() => onAction('trash', [msg.id], undefined, msg.accountEmail)} className="px-2 py-0.5 rounded border text-[10px] text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
                         </div>
                       </div>
                     );
@@ -4193,7 +4207,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
           message={`This will permanently delete ${selectedCount} message${selectedCount > 1 ? 's' : ''} from Gmail. This cannot be undone.`}
           confirmLabel={`Delete ${selectedCount} Forever`}
           confirmColor="#991b1b"
-          onConfirm={() => { onAction('delete', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); setConfirmDeleteAll(false); }}
+          onConfirm={() => { actionByAccount('delete', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); setConfirmDeleteAll(false); }}
           onCancel={() => setConfirmDeleteAll(false)}
         />
       )}
