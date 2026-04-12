@@ -970,9 +970,23 @@ export default function Dashboard() {
   }
 
   // Save messages to Supabase cache in background (fire-and-forget)
+  // Track recently actioned message IDs to prevent re-caching from Gmail sync
+  const actionedIdsRef = React.useRef<Set<string>>(new Set());
+
+  function markAsActioned(messageIds: string[]) {
+    messageIds.forEach(id => actionedIdsRef.current.add(id));
+    // Auto-clear after 2 minutes (Gmail should have processed by then)
+    setTimeout(() => {
+      messageIds.forEach(id => actionedIdsRef.current.delete(id));
+    }, 2 * 60 * 1000);
+  }
+
   async function saveToCacheBackground(acctEmail: string, msgs: GmailMessage[]) {
     if (!msgs.length) return;
-    const batch = msgs.map(m => ({
+    // Filter out recently actioned messages (trashed/archived/deleted/read)
+    const filtered = msgs.filter(m => !actionedIdsRef.current.has(m.id));
+    if (!filtered.length) return;
+    const batch = filtered.map(m => ({
       id: m.id, threadId: m.threadId, sender: m.sender, senderEmail: m.senderEmail,
       subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.isUnread, labelIds: m.labelIds,
     }));
@@ -1090,7 +1104,7 @@ export default function Dashboard() {
           }
         } else {
           // No cache or small cache — full pagination
-          setMessages(freshMsgs);
+          setMessages(freshMsgs.filter((m: GmailMessage) => !actionedIdsRef.current.has(m.id)));
           const totalToLoad = exactInboxTotal || inboxRes.data.total || freshMsgs.length;
           setLoadingProgress({ loaded: freshMsgs.length, total: totalToLoad, phase: `Loading ${totalToLoad.toLocaleString()} emails...` });
           let nextToken = inboxRes.data.nextPageToken;
@@ -1540,6 +1554,11 @@ export default function Dashboard() {
         setActionHistory(prev => prev.map(h => h.id === tempId ? { ...h, id: json.data.id } : h));
       }
     }).catch(() => {});
+
+    // Mark as actioned so sync doesn't re-cache them
+    if (['archive', 'trash', 'delete', 'markRead'].includes(action)) {
+      markAsActioned(messageIds);
+    }
 
     // Advance split preview to next message if current one is being removed
     if (['archive', 'trash', 'delete', 'markRead'].includes(action)) {
