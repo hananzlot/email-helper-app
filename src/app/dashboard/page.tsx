@@ -1426,7 +1426,7 @@ export default function Dashboard() {
           }));
 
           if (done) break;
-          await new Promise(r => setTimeout(r, 500));
+          await new Promise(r => setTimeout(r, 3000));
         } catch {
           retries++;
           await new Promise(r => setTimeout(r, 5000 * retries));

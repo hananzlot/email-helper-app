@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     // Fetch one page of message IDs
     const listRes = await listMessages(gmail, {
       query: 'in:inbox',
-      maxResults: 200,
+      maxResults: 100,
       pageToken: pageToken || undefined,
     });
 
@@ -109,7 +109,7 @@ export async function POST(request: NextRequest) {
 
     if (newIds.length > 0) {
       // Batch fetch metadata (25 parallel to stay within timeout)
-      const messages = await batchGetMessageMetadata(gmail, newIds, 25);
+      const messages = await batchGetMessageMetadata(gmail, newIds, 10);
 
       const rows = messages.map(m => ({
         user_id,
