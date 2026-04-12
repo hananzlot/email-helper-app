@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
       sender_email: m.senderEmail || '',
       subject: m.subject || '',
       snippet: m.snippet || '',
-      date: m.date || new Date().toISOString(),
+      date: m.date ? new Date(m.date).toISOString() : new Date().toISOString(),
       is_unread: m.isUnread ?? true,
       label_ids: m.labelIds || [],
       cached_at: new Date().toISOString(),
