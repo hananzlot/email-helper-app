@@ -1038,7 +1038,12 @@ export default function Dashboard() {
             let totalLoaded = cachedMsgCount;
             // Paginate through Gmail, skipping pages we already have in cache
             while (nextToken && totalLoaded < MAX_MESSAGES) {
-              const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+              let pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+              // Retry on failure (Gmail rate limit / transient errors)
+              for (let retry = 0; retry < 3 && !pageRes.success; retry++) {
+                await new Promise(r => setTimeout(r, 5000 * (retry + 1)));
+                pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+              }
               if (!pageRes.success || !pageRes.data?.messages?.length) break;
               const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
               // Filter out messages already in cache
@@ -1186,7 +1191,12 @@ export default function Dashboard() {
             let loaded = 0;
             while (nextToken && loaded < MAX_PER_ACCOUNT) {
               setCurrentAccount(at.email);
-              const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+              let pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+              // Retry on failure (Gmail rate limit / transient errors)
+              for (let retry = 0; retry < 3 && !pageRes.success; retry++) {
+                await new Promise(r => setTimeout(r, 5000 * (retry + 1)));
+                pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+              }
               if (!pageRes.success || !pageRes.data?.messages?.length) break;
               const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: at.email }));
               const newPageMsgs = pageMsgs.filter((m: GmailMessage) => !cachedIds.has(m.id));
