@@ -1454,7 +1454,7 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [account, unified, accounts.length, loadInbox, loadUnifiedInbox, activeTab]);
 
-  // Background sync — direct calls to /inbox-cache/sync (no queue overhead)
+  // Background sync via queue — submits jobs, polls progress
   const [syncProgress, setSyncProgress] = useState<Record<string, { cached: number; total: number; done: boolean; speed: number; eta: string }>>({});
   const syncRunningRef = React.useRef(false);
 
@@ -1465,67 +1465,72 @@ export default function Dashboard() {
 
     let cancelled = false;
 
-    async function syncAccount(acctEmail: string) {
-      let totalCached = 0;
-      let consecutiveEmpty = 0;
-      const startTime = Date.now();
-
-      setSyncProgress(prev => ({
-        ...prev,
-        [acctEmail]: prev[acctEmail] || { cached: 0, total: 0, done: false, speed: 0, eta: 'Syncing...' },
-      }));
-
-      while (!cancelled && consecutiveEmpty < 5) {
+    async function runSync() {
+      // Submit sync jobs for all accounts
+      for (const acct of accounts) {
+        if (cancelled) break;
         try {
-          const res = await fetch('/api/emailHelperV2/inbox-cache/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ account_email: acctEmail }),
-          }).then(r => r.json());
+          await apiPost('sync-queue', { account_email: acct.email });
+          setSyncProgress(prev => ({
+            ...prev,
+            [acct.email]: prev[acct.email] || { cached: 0, total: 0, done: false, speed: 0, eta: 'Syncing...' },
+          }));
+        } catch {}
+      }
 
-          if (!res.success) {
-            if (res.error?.includes('Quota')) {
-              setSyncProgress(prev => ({ ...prev, [acctEmail]: { ...prev[acctEmail], eta: 'Rate limited — retrying...' } }));
-              await new Promise(r => setTimeout(r, 30000));
-              continue;
-            }
-            consecutiveEmpty++;
+      // Process queue — each PUT processes one page (with fast-forward)
+      let consecutiveIdles = 0;
+      const startTime = Date.now();
+      let totalCachedSession = 0;
+
+      while (!cancelled && consecutiveIdles < 5) {
+        try {
+          const res = await fetch('/api/emailHelperV2/sync-queue', { method: 'PUT' }).then(r => r.json());
+
+          if (!res.success || res.data?.idle) {
+            consecutiveIdles++;
             await new Promise(r => setTimeout(r, 5000));
             continue;
           }
+          consecutiveIdles = 0;
+          totalCachedSession += (res.data?.cachedThisPage || 0);
 
-          const { cachedThisPage, totalCached: serverCount, inboxTotal, done } = res.data;
-          totalCached += (cachedThisPage || 0);
-          const displayCached = Math.min(serverCount || totalCached, inboxTotal || 0);
-          const pct = (inboxTotal || 0) > 0 ? Math.min(100, Math.round((displayCached / (inboxTotal || 1)) * 100)) : 0;
-          const isSynced = done || displayCached >= (inboxTotal || 0);
-          const elapsed = (Date.now() - startTime) / 1000;
-          const speed = elapsed > 5 && totalCached > 0 ? Math.round(totalCached / elapsed * 60) : 0;
-          const remaining = Math.max(0, (inboxTotal || 0) - displayCached);
-          const etaMin = speed > 0 ? Math.ceil(remaining / speed) : 0;
-          const eta = isSynced ? 'Synced' :
-            etaMin === 0 ? `${pct}% — syncing...` :
-            etaMin < 60 ? `${pct}% — ~${etaMin}m remaining` :
-            `${pct}% — ~${Math.floor(etaMin / 60)}h ${etaMin % 60}m`;
+          // Update progress from queue status
+          const statusRes = await apiGet('sync-queue');
+          if (statusRes.success && statusRes.data) {
+            for (const job of statusRes.data) {
+              const total = job.total_inbox || 0;
+              const cached = Math.min(job.messages_cached || 0, total);
+              const pct = total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : 0;
+              const isDone = job.status === 'done' || cached >= total;
+              const elapsed = (Date.now() - startTime) / 1000;
+              const speed = elapsed > 5 && totalCachedSession > 0 ? Math.round(totalCachedSession / elapsed * 60) : 0;
+              const remaining = Math.max(0, total - cached);
+              const etaMin = speed > 0 ? Math.ceil(remaining / speed) : 0;
+              const eta = isDone ? 'Synced' :
+                job.status === 'error' ? 'Retry later' :
+                etaMin === 0 ? `${pct}% — syncing...` :
+                etaMin < 60 ? `${pct}% — ~${etaMin}m` :
+                `${pct}% — ~${Math.floor(etaMin / 60)}h ${etaMin % 60}m`;
 
-          setSyncProgress(prev => ({ ...prev, [acctEmail]: { cached: displayCached, total: inboxTotal || 0, done: isSynced, speed, eta } }));
+              setSyncProgress(prev => ({ ...prev, [job.account_email]: { cached, total, done: isDone, speed, eta } }));
+            }
+          }
 
-          if (done) break;
-          if (cachedThisPage === 0) { consecutiveEmpty++; } else { consecutiveEmpty = 0; }
           await new Promise(r => setTimeout(r, 3000));
         } catch {
-          consecutiveEmpty++;
           await new Promise(r => setTimeout(r, 5000));
         }
       }
-    }
 
-    async function runSync() {
-      for (const acct of accounts) {
-        if (cancelled) break;
-        await syncAccount(acct.email);
-      }
       syncRunningRef.current = false;
+      setSyncProgress(prev => {
+        const updated = { ...prev };
+        for (const key of Object.keys(updated)) {
+          if (!updated[key].done) updated[key] = { ...updated[key], done: true, eta: 'Synced' };
+        }
+        return updated;
+      });
     }
 
     const timer = setTimeout(runSync, 3000);

@@ -173,8 +173,27 @@ export async function PUT(request: NextRequest) {
     const existingSet = new Set<string>();
     if (existing) existing.forEach((r: { gmail_id: string }) => existingSet.add(r.gmail_id));
 
-    const newIds = messageIds.filter(id => !existingSet.has(id) && !actionedSet.has(id));
+    let newIds = messageIds.filter(id => !existingSet.has(id) && !actionedSet.has(id));
     let cachedThisPage = 0;
+    let skippedPages = 0;
+
+    // Fast-forward: if ALL messages on this page are cached, skip ahead (up to 50 pages)
+    let currentPageToken = listRes.nextPageToken || null;
+    while (newIds.length === 0 && currentPageToken && skippedPages < 50) {
+      skippedPages++;
+      const skipRes = await listMessages(gmail, { query: 'in:inbox', maxResults: 100, pageToken: currentPageToken });
+      if (!skipRes.messages?.length) { currentPageToken = null; break; }
+      const skipIds = skipRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
+      const { data: skipExisting } = await admin
+        .from(TABLES.INBOX_CACHE).select('gmail_id')
+        .eq('user_id', job.user_id).eq('account_email', job.account_email)
+        .in('gmail_id', skipIds);
+      const skipSet = new Set<string>();
+      if (skipExisting) skipExisting.forEach((r: { gmail_id: string }) => skipSet.add(r.gmail_id));
+      newIds = skipIds.filter(id => !skipSet.has(id) && !actionedSet.has(id));
+      currentPageToken = skipRes.nextPageToken || null;
+      if (newIds.length > 0) { messageIds.length = 0; messageIds.push(...skipIds); break; }
+    }
 
     if (newIds.length > 0) {
       const messages = await batchGetMessageMetadata(gmail, newIds, 10);
@@ -194,7 +213,7 @@ export async function PUT(request: NextRequest) {
       cachedThisPage = rows.length;
     }
 
-    const nextPageToken = listRes.nextPageToken || null;
+    const nextPageToken = currentPageToken;
 
     // Update sync + job
     await admin.from(TABLES.INBOX_SYNC).upsert({
@@ -222,7 +241,8 @@ export async function PUT(request: NextRequest) {
       jobId: job.id,
       status: nextPageToken ? 'processing' : 'done',
       cachedThisPage,
-      pagesProcessed: (job.pages_processed || 0) + 1,
+      skippedPages,
+      pagesProcessed: (job.pages_processed || 0) + 1 + skippedPages,
       nextPageToken: !!nextPageToken,
     });
   } catch (err) {

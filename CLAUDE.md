@@ -51,6 +51,17 @@ Always prefer server-side SQL/Supabase queries over client-side JavaScript when 
 The client should receive ready-to-render results, not raw data to process.
 Supabase returns max 1000 rows per query — use `.range()` pagination to fetch all rows when needed.
 
+### CRITICAL: Efficient Sync with Fast-Forward
+When syncing inbox messages from Gmail to cache:
+- Use a **sync queue** for coordinating across users and cron jobs
+- Each sync call processes one page (100 messages) from Gmail
+- If ALL messages on a page are already cached, **fast-forward** — skip up to 50 pages per call by only fetching `listMessages` (IDs + nextPageToken) without metadata
+- Save `resume_page_token` so next call picks up where it left off
+- The queue processor (PUT /sync-queue) and direct sync (/inbox-cache/sync) both use fast-forward
+- Cron processes the queue every 30 minutes with a 12-minute time budget
+- Client polls the queue while the user is on the page
+- Per-user Gmail quota: 250 calls/min — stay under with 2-3s delays between pages
+
 ### CRITICAL: User Data Isolation
 All features and updates MUST ensure full user isolation at all times:
 - Every Supabase query MUST filter by `user_id` — never return or modify another user's data

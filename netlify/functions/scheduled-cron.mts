@@ -13,90 +13,71 @@ export default async () => {
     console.error("Cron failed:", e);
   }
 
-  // 2. Direct sync for all connected accounts (no queue overhead)
+  // 2. Submit sync jobs for all connected accounts
   try {
     const accountsRes = await fetch(`${supabaseUrl}/rest/v1/emailHelperV2_gmail_accounts?select=user_id,email&status=eq.connected`, {
       headers: { apikey: srk, Authorization: `Bearer ${srk}` },
     });
     const accounts = await accountsRes.json().catch(() => []);
-    console.log(`Syncing ${accounts.length} accounts...`);
-
-    const maxPagesPerAccount = 200;
-    const maxMinutesTotal = 12; // Stay under 15-min Netlify limit
-    const startTime = Date.now();
 
     for (const account of accounts) {
-      // Check time budget
-      if ((Date.now() - startTime) > maxMinutesTotal * 60 * 1000) {
-        console.log("Time budget exceeded — stopping");
+      try {
+        await fetch(`${supabaseUrl}/rest/v1/emailHelperV2_sync_queue`, {
+          method: "POST",
+          headers: { apikey: srk, Authorization: `Bearer ${srk}`, "Content-Type": "application/json", Prefer: "return=minimal" },
+          body: JSON.stringify({ user_id: account.user_id, account_email: account.email, status: "pending", priority: 5 }),
+        });
+      } catch {}
+    }
+    console.log(`Submitted ${accounts.length} sync jobs`);
+  } catch (e) {
+    console.error("Queue submission failed:", e);
+  }
+
+  // 3. Process the queue — each PUT handles one page with fast-forward (skips 50 cached pages)
+  const maxMinutes = 12;
+  const startTime = Date.now();
+  let pagesProcessed = 0;
+
+  while ((Date.now() - startTime) < maxMinutes * 60 * 1000) {
+    try {
+      const res = await fetch(`${appUrl}/api/emailHelperV2/sync-queue`, { method: "PUT" });
+      const data = await res.json();
+
+      if (!data.success || data.data?.idle) {
+        console.log("Queue idle — stopping");
         break;
       }
 
-      let pagesProcessed = 0;
-      let totalCached = 0;
-      let consecutiveEmpty = 0;
-
-      while (pagesProcessed < maxPagesPerAccount) {
-        // Time check per iteration
-        if ((Date.now() - startTime) > maxMinutesTotal * 60 * 1000) break;
-
-        try {
-          const syncRes = await fetch(`${appUrl}/api/emailHelperV2/inbox-cache/sync`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              user_id: account.user_id,
-              account_email: account.email,
-            }),
-          });
-          const data = await syncRes.json();
-
-          if (!data.success) {
-            console.log(`${account.email}: error — ${data.error?.slice(0, 80)}`);
-            // Quota error — wait 30 seconds then continue to next account
-            if (data.error?.includes("Quota")) {
-              await new Promise(r => setTimeout(r, 30000));
-            }
-            break;
-          }
-
-          const cached = data.data?.cachedThisPage || 0;
-          const skipped = data.data?.skippedPages || 0;
-          totalCached += cached;
-          pagesProcessed += 1 + skipped;
-
-          if (cached === 0) {
-            consecutiveEmpty++;
-            if (consecutiveEmpty >= 5) {
-              // 5 empty pages in a row after fast-forward — likely done or in deep cache
-              break;
-            }
-          } else {
-            consecutiveEmpty = 0;
-          }
-
-          if (data.data?.done) {
-            console.log(`${account.email}: sync complete! +${totalCached} new, ${pagesProcessed} pages`);
-            break;
-          }
-
-          // Rate limit: 2 second delay between pages
-          await new Promise(r => setTimeout(r, 2000));
-        } catch (e) {
-          console.error(`${account.email}: sync call failed — ${e}`);
-          break;
+      if (data.data?.status === "error") {
+        console.log(`Job error: ${data.data.error?.slice(0, 80)}`);
+        if (data.data.error?.includes("Quota")) {
+          await new Promise(r => setTimeout(r, 30000));
         }
+        continue;
       }
 
-      if (pagesProcessed > 0 && totalCached > 0) {
-        console.log(`${account.email}: +${totalCached} new messages in ${pagesProcessed} pages`);
+      pagesProcessed++;
+      const skipped = data.data?.skippedPages || 0;
+      if (skipped > 0) pagesProcessed += skipped;
+
+      if (pagesProcessed % 20 === 0) {
+        console.log(`Processed ${pagesProcessed} pages (incl fast-forward)...`);
       }
+
+      if (data.data?.status === "done") {
+        console.log(`Job complete`);
+      }
+
+      // Rate limit: 2s between pages
+      await new Promise(r => setTimeout(r, 2000));
+    } catch (e) {
+      console.error("Queue error:", e);
+      break;
     }
-  } catch (e) {
-    console.error("Sync loop failed:", e);
   }
 
-  console.log(`Done in ${Math.round((Date.now() - Date.now()) / 1000)}s`);
+  console.log(`Done: ${pagesProcessed} pages in ${Math.round((Date.now() - startTime) / 1000)}s`);
 };
 
 export const config = {
