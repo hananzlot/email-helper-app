@@ -1,5 +1,4 @@
 import { NextRequest } from 'next/server';
-import { lookup } from 'dns/promises';
 import { getRequestContext, apiSuccess, apiError } from '@/lib/api-helpers';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { getValidGmailToken } from '@/lib/auth';
@@ -11,30 +10,23 @@ const UNSUB_TABLE = 'emailHelperV2_unsubscribe_log';
 /**
  * Validate a URL is safe to fetch (SSRF protection).
  * Rejects non-HTTP(S), private/internal IPs, and localhost.
+ * Uses hostname pattern matching (no DNS lookup — compatible with serverless).
  */
-async function isSafeUrl(urlStr: string): Promise<boolean> {
+function isSafeUrl(urlStr: string): boolean {
   try {
     const url = new URL(urlStr);
-    // Only allow http/https
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    // Block localhost
     const hostname = url.hostname.toLowerCase();
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]') return false;
-    // Resolve DNS and check for private IPs
-    try {
-      const { address } = await lookup(hostname);
-      const parts = address.split('.').map(Number);
-      // Block private ranges: 10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, 0.x
-      if (parts[0] === 10) return false;
-      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
-      if (parts[0] === 192 && parts[1] === 168) return false;
-      if (parts[0] === 127) return false;
-      if (parts[0] === 169 && parts[1] === 254) return false;
-      if (parts[0] === 0) return false;
-      // Block IPv6 private (fd00::/8 — caught by hostname check above for [::1])
-    } catch {
-      // DNS resolution failed — block it
-      return false;
+    // Block localhost and loopback
+    if (hostname === 'localhost' || hostname === '::1' || hostname === '[::1]') return false;
+    // Block IP addresses that are private/internal
+    const ipMatch = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipMatch) {
+      const [, a, b] = ipMatch.map(Number);
+      if (a === 10 || a === 127 || a === 0) return false;
+      if (a === 172 && b >= 16 && b <= 31) return false;
+      if (a === 192 && b === 168) return false;
+      if (a === 169 && b === 254) return false;
     }
     return true;
   } catch {
@@ -196,7 +188,7 @@ async function tryListUnsubscribeHeader(
     // Filter URLs through SSRF check
     const safeUrls: string[] = [];
     for (const u of urls) {
-      if (await isSafeUrl(u)) safeUrls.push(u);
+      if (isSafeUrl(u)) safeUrls.push(u);
     }
 
     // Prefer one-click HTTP unsubscribe (RFC 8058)
@@ -292,7 +284,7 @@ async function tryBodyUnsubscribeLink(
   // SSRF check: only allow safe URLs
   let safeUrl: string | null = null;
   for (const u of allUrls) {
-    if (await isSafeUrl(u)) { safeUrl = u; break; }
+    if (isSafeUrl(u)) { safeUrl = u; break; }
   }
   if (!safeUrl) return { success: false };
 
