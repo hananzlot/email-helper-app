@@ -4089,11 +4089,30 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
     return false;
   }
 
-  // Filter messages to only noise senders
-  const cleanupMessages = React.useMemo(() =>
-    tiersLoaded ? messages.filter(m => m.isUnread && isNoiseSender(m.senderEmail)) : [],
-    [tiersLoaded, messages.length, senderTiers]
-  );
+  // Snapshot messages on first load — stable list that doesn't jump while user works
+  const [snapshot, setSnapshot] = useState<GmailMessage[]>([]);
+  const snapshotTaken = React.useRef(false);
+
+  useEffect(() => {
+    if (!tiersLoaded || messages.length === 0 || snapshotTaken.current) return;
+    const noise = messages.filter(m => m.isUnread && isNoiseSender(m.senderEmail));
+    if (noise.length > 0) {
+      setSnapshot(noise);
+      snapshotTaken.current = true;
+    }
+  }, [tiersLoaded, messages.length]);
+
+  // Remove items from snapshot when user acts (archive/trash/read)
+  useEffect(() => {
+    if (!snapshotTaken.current) return;
+    const liveIds = new Set(messages.filter(m => m.isUnread).map(m => m.id));
+    setSnapshot(prev => {
+      const filtered = prev.filter(m => liveIds.has(m.id));
+      return filtered.length === prev.length ? prev : filtered; // Only update if something changed
+    });
+  }, [messages]);
+
+  const cleanupMessages = snapshot;
 
   // Report count to parent
   useEffect(() => { reportCount?.(cleanupMessages.length); }, [cleanupMessages.length]);
