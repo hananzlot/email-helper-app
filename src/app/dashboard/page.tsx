@@ -3439,6 +3439,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyAllMode, setReplyAllMode] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ ids: string[]; count: number } | null>(null);
   const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
 
@@ -3521,8 +3522,12 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                     showToast(`Set to Tier ${newTier}`, msg.sender);
                   }}
                 />
-                <button onClick={() => { setReplyingTo(replyingTo === msg.id ? null : msg.id); }}
+                <button onClick={() => { setReplyingTo(replyingTo === msg.id ? null : msg.id); setReplyAllMode(null); }}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
+                <button onClick={() => { setReplyingTo(msg.id); setReplyAllMode(replyAllMode === msg.id ? null : msg.id); }}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border"
+                  style={{ borderColor: 'var(--accent)', color: replyAllMode === msg.id ? '#fff' : 'var(--accent)', background: replyAllMode === msg.id ? '#7c3aed' : undefined }}>
+                  Reply All</button>
                 <ArchiveButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <StarButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
@@ -3541,8 +3546,10 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                     messageId={msg.id}
                     showToast={showToast}
                     accountEmail={(msg as unknown as Record<string, unknown>).accountEmail as string}
-                    onSent={() => { setReplyingTo(null); onRefresh(); }}
-                    onCancel={() => setReplyingTo(null)}
+                    replyAll={replyAllMode === msg.id}
+                    cc={replyAllMode === msg.id ? [...(msg.to || '').split(','), ...((msg as any).cc || '').split(',')].map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(msg.senderEmail.toLowerCase()) && !((msg as any).accountEmail && e.toLowerCase().includes(((msg as any).accountEmail as string).toLowerCase()))).join(', ') : undefined}
+                    onSent={() => { setReplyingTo(null); setReplyAllMode(null); onRefresh(); }}
+                    onCancel={() => { setReplyingTo(null); setReplyAllMode(null); }}
                   />
                 </div>
               )}
