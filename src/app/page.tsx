@@ -29,45 +29,75 @@ export default function Home() {
           Sign in with Google
         </a>
 
-        {/* Feature pillars */}
-        <div className="mt-10 grid grid-cols-3 gap-6 text-center">
-          <div>
-            <div className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>Triage</div>
-            <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Smart inbox sorting based on your reply patterns</p>
-          </div>
-          <div>
-            <div className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>Reply</div>
-            <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Prioritized reply queue with draft staging</p>
-          </div>
-          <div>
-            <div className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>Clean</div>
-            <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Archive newsletters, promos, and noise in bulk</p>
+        {/* Unified inbox highlight */}
+        <div className="mt-10 p-6 rounded-2xl" style={{ background: '#eef2ff', border: '1px solid #c7d2fe' }}>
+          <div className="text-center">
+            <div className="text-3xl mb-2">📬</div>
+            <h3 className="text-lg font-bold mb-1" style={{ color: '#4338ca' }}>One inbox to rule them all</h3>
+            <p className="text-sm" style={{ color: '#6366f1' }}>
+              Connect all your Gmail accounts — work, personal, side projects — and manage them from a single unified view.
+            </p>
+            <div className="flex justify-center gap-3 mt-4">
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium" style={{ background: 'white', color: '#4338ca', border: '1px solid #c7d2fe' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                Unlimited Gmail accounts
+              </div>
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium" style={{ background: 'white', color: '#4338ca', border: '1px solid #c7d2fe' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                Reply from the right account
+              </div>
+            </div>
+            <p className="text-[10px] mt-3" style={{ color: '#a5b4fc' }}>Yahoo &amp; Outlook support coming soon</p>
           </div>
         </div>
 
-        {/* Social proof stats */}
-        <div className="mt-10 pt-8 border-t" style={{ borderColor: 'var(--border)' }}>
+        {/* Feature pillars */}
+        <div className="mt-8 grid grid-cols-4 gap-4 text-center">
+          <div className="p-4 rounded-xl" style={{ background: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+            <div className="text-2xl mb-1">🎯</div>
+            <div className="text-sm font-bold" style={{ color: 'var(--accent)' }}>Top Tiers</div>
+            <p className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>Smart sorting by who you reply to most</p>
+          </div>
+          <div className="p-4 rounded-xl" style={{ background: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+            <div className="text-2xl mb-1">🚀</div>
+            <div className="text-sm font-bold" style={{ color: 'var(--accent)' }}>Easy-Clear</div>
+            <p className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>Bulk-clean newsletters &amp; noise by domain</p>
+          </div>
+          <div className="p-4 rounded-xl" style={{ background: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+            <div className="text-2xl mb-1">⏰</div>
+            <div className="text-sm font-bold" style={{ color: 'var(--accent)' }}>Follow Up</div>
+            <p className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>Track emails waiting for a reply</p>
+          </div>
+          <div className="p-4 rounded-xl" style={{ background: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
+            <div className="text-2xl mb-1">🔍</div>
+            <div className="text-sm font-bold" style={{ color: 'var(--accent)' }}>Smart Search</div>
+            <p className="text-[10px] mt-1" style={{ color: 'var(--muted)' }}>Find any email across all accounts instantly</p>
+          </div>
+        </div>
+
+        {/* Trust strip */}
+        <div className="mt-8 pt-6 border-t" style={{ borderColor: 'var(--border)' }}>
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
               <div className="flex justify-center mb-1">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
               </div>
-              <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>100%</div>
-              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Private — emails never stored, AES-256 encrypted</p>
+              <div className="text-lg font-bold" style={{ color: 'var(--text)' }}>100%</div>
+              <p className="text-[10px]" style={{ color: 'var(--muted)' }}>Private — AES-256 encrypted</p>
             </div>
             <div>
               <div className="flex justify-center mb-1">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
               </div>
-              <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>30s</div>
-              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Setup time — just sign in</p>
+              <div className="text-lg font-bold" style={{ color: 'var(--text)' }}>30s</div>
+              <p className="text-[10px]" style={{ color: 'var(--muted)' }}>Setup — just sign in</p>
             </div>
             <div>
               <div className="flex justify-center mb-1">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
               </div>
-              <div className="text-2xl font-bold" style={{ color: 'var(--text)' }}>1-click</div>
-              <p className="text-xs mt-1" style={{ color: 'var(--muted)' }}>Undo any action instantly</p>
+              <div className="text-lg font-bold" style={{ color: 'var(--text)' }}>1-click</div>
+              <p className="text-[10px]" style={{ color: 'var(--muted)' }}>Undo any action</p>
             </div>
           </div>
         </div>
