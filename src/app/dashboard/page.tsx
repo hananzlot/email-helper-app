@@ -4625,7 +4625,7 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
         for (const acct of accounts) {
           setCurrentAccount(acct.email);
           try {
-            const res = await gmailGet('search', { q: 'in:sent', max: '30' });
+            const res = await gmailGet('search', { q: 'in:sent', max: '50' });
             if (res.success && res.data?.messages) {
               for (const msg of res.data.messages) {
                 allSent.push({ ...msg, accountEmail: acct.email });
@@ -4635,7 +4635,7 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
         }
         setCurrentAccount(savedAccount);
       } else {
-        const res = await gmailGet('search', { q: 'in:sent', max: '50' });
+        const res = await gmailGet('search', { q: 'in:sent', max: '100' });
         if (res.success && res.data?.messages) {
           for (const msg of res.data.messages) {
             allSent.push({ ...msg, accountEmail: _currentAccount });
