@@ -12,6 +12,19 @@ export async function GET(request: NextRequest) {
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();
+  const countOnly = request.nextUrl.searchParams.get('countOnly') === 'true';
+
+  // Fast count-only mode — returns just the unread count, no message data
+  if (countOnly) {
+    const countQuery = admin
+      .from(TABLES.INBOX_CACHE)
+      .select('gmail_id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('is_unread', true);
+    if (account) countQuery.eq('account_email', account);
+    const { count } = await countQuery;
+    return apiSuccess({ unreadCount: count || 0, account: account || 'all' });
+  }
 
   // Get actioned message IDs from history (trash/archive/delete) to exclude from results
   const { data: actions } = await admin
