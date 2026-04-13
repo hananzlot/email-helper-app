@@ -2121,10 +2121,8 @@ export default function Dashboard() {
       const cronRanKey = 'email_helper_cron_last';
       const lastRun = localStorage.getItem(cronRanKey);
       const eightHoursAgo = Date.now() - 8 * 60 * 60 * 1000;
-      if (!lastRun || Number(lastRun) < eightHoursAgo) {
-        localStorage.setItem(cronRanKey, String(Date.now()));
-        fetch('/api/emailHelperV2/cron').catch(() => {});
-      }
+      // Cron is now run server-side via scheduled function with CRON_SECRET
+      // No client-side trigger needed
     }
   }, [accounts.length]);
 
