@@ -4099,57 +4099,69 @@ function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onP
     return false;
   }
 
-  // Load Easy-Clear data: use messages if available, otherwise load from cache directly
+  // Easy-Clear: 10-second sync window, then lock
   const [snapshot, setSnapshot] = useState<GmailMessage[]>([]);
   const snapshotTaken = React.useRef(false);
+  const mountTime = React.useRef(Date.now());
 
+  function buildSnapshot(msgs: GmailMessage[]) {
+    const seenIds = new Set<string>();
+    return msgs.filter(m => {
+      if (!m.isUnread || !isNoiseSender(m.senderEmail)) return false;
+      if (seenIds.has(m.id)) return false;
+      seenIds.add(m.id);
+      return true;
+    });
+  }
+
+  // Load from Supabase cache on mount (instant for returning users)
   useEffect(() => {
-    if (snapshotTaken.current) return;
+    if (snapshotTaken.current || !tiersLoaded) return;
+    (async () => {
+      try {
+        const cacheRes = await apiGet('inbox-cache');
+        if (cacheRes.success && cacheRes.data?.messages?.length > 0 && !snapshotTaken.current) {
+          const cachedMsgs = cacheRes.data.messages
+            .filter((m: { is_unread: boolean }) => m.is_unread)
+            .map((m: { gmail_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; is_unread: boolean; label_ids: string[]; account_email: string }) => ({
+              id: m.gmail_id, threadId: m.thread_id, sender: m.sender, senderEmail: m.sender_email,
+              subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.is_unread,
+              labelIds: m.label_ids, accountEmail: m.account_email, body: '', bodyHtml: '', to: '', cc: '',
+            } as GmailMessage));
+          const noise = buildSnapshot(cachedMsgs);
+          if (noise.length > 0 && !snapshotTaken.current) {
+            setSnapshot(noise);
+          }
+        }
+      } catch {}
+    })();
+  }, [tiersLoaded]);
 
-    // Try from messages state first (fast if already loaded)
-    if (tiersLoaded && !parentLoading && messages.length > 0) {
-      const seenIds = new Set<string>();
-      const noise = messages.filter(m => {
-        if (!m.isUnread || !isNoiseSender(m.senderEmail)) return false;
-        if (seenIds.has(m.id)) return false;
-        seenIds.add(m.id);
-        return true;
-      });
-      if (noise.length > 0) {
+  // During the 10-second window, keep updating with better data from messages state
+  useEffect(() => {
+    if (snapshotTaken.current || !tiersLoaded) return;
+    const elapsed = Date.now() - mountTime.current;
+    if (elapsed < 10000 && messages.length > 0) {
+      const noise = buildSnapshot(messages);
+      if (noise.length > snapshot.length) {
         setSnapshot(noise);
-        snapshotTaken.current = true;
-        return;
       }
     }
+  }, [messages.length, tiersLoaded]);
 
-    // Fallback: load directly from Supabase cache (for when messages haven't loaded yet)
-    if (tiersLoaded && messages.length === 0 && !parentLoading) {
-      (async () => {
-        try {
-          const cacheRes = await apiGet('inbox-cache');
-          if (cacheRes.success && cacheRes.data?.messages?.length > 0) {
-            const seenIds = new Set<string>();
-            const cachedMsgs = cacheRes.data.messages
-              .filter((m: { is_unread: boolean; sender_email: string; gmail_id: string }) => {
-                if (!m.is_unread || !isNoiseSender(m.sender_email)) return false;
-                if (seenIds.has(m.gmail_id)) return false;
-                seenIds.add(m.gmail_id);
-                return true;
-              })
-              .map((m: { gmail_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; is_unread: boolean; label_ids: string[]; account_email: string }) => ({
-                id: m.gmail_id, threadId: m.thread_id, sender: m.sender, senderEmail: m.sender_email,
-                subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.is_unread,
-                labelIds: m.label_ids, accountEmail: m.account_email, body: '', bodyHtml: '', to: '', cc: '',
-              } as GmailMessage));
-            if (cachedMsgs.length > 0) {
-              setSnapshot(cachedMsgs);
-              snapshotTaken.current = true;
-            }
-          }
-        } catch {}
-      })();
-    }
-  }, [tiersLoaded, parentLoading, messages.length]);
+  // Hard lock at 10 seconds — stop accepting updates
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!snapshotTaken.current) {
+        if (messages.length > 0 && tiersLoaded) {
+          const noise = buildSnapshot(messages);
+          if (noise.length > 0) setSnapshot(noise);
+        }
+        snapshotTaken.current = true;
+      }
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Remove items from snapshot ONLY when user explicitly acts
   useEffect(() => {
