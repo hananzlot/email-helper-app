@@ -223,7 +223,8 @@ async function tryListUnsubscribeHeader(
           if (looksSuccessful) {
             return { success: true, method: 'header_url', url: safeUrls[0] };
           }
-          return { success: true, method: 'header_url_visited', url: safeUrls[0] };
+          // Page visited but no confirmation text found — mark as uncertain
+          return { success: true, method: 'header_url_attempted', url: safeUrls[0] };
         }
       } catch {}
     }

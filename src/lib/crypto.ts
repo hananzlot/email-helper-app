@@ -97,8 +97,10 @@ export function decrypt(ciphertext: string | null | undefined, userId: string): 
       const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
       return decrypted.toString('utf8');
     }
-  } catch {
-    // Not encrypted data (legacy plaintext) — return as-is
+  } catch (err) {
+    // Log decryption failure for monitoring (don't log the actual data)
+    console.warn(`Decryption failed for user ${userId.slice(0, 8)}...: ${err instanceof Error ? err.message : 'unknown'}`);
+    // Return as-is for legacy unencrypted data
     return ciphertext;
   }
 }

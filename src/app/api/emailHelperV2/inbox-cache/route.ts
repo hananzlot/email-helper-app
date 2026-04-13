@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     .select('gmail_id, thread_id, sender, sender_email, subject, snippet, date, is_unread, label_ids, account_email')
     .eq('user_id', userId)
     .order('date', { ascending: false })
-    .limit(100000);
+    .limit(1000);
   if (account) cacheQuery.eq('account_email', account);
   const { data: messages, error } = await cacheQuery;
 
@@ -145,17 +145,26 @@ export async function PUT(request: NextRequest) {
 
     if (!gmail_ids?.length || !updates) return apiError('Missing gmail_ids or updates');
 
+    // Whitelist allowed update fields to prevent arbitrary column modification
+    const ALLOWED_FIELDS = new Set(['is_unread', 'label_ids', 'snippet', 'subject']);
+    const safeUpdates: Record<string, unknown> = {};
+    for (const key of Object.keys(updates)) {
+      if (ALLOWED_FIELDS.has(key)) safeUpdates[key] = updates[key];
+    }
+    if (Object.keys(safeUpdates).length === 0) return apiError('No valid update fields');
+
     const admin = createSupabaseAdmin();
     const { error } = await admin
       .from(TABLES.INBOX_CACHE)
-      .update(updates)
+      .update(safeUpdates)
       .eq('user_id', userId)
       .in('gmail_id', gmail_ids);
 
     if (error) return apiError(error.message, 500);
     return apiSuccess({ updated: gmail_ids.length });
   } catch (err) {
-    return apiError(`Failed: ${err}`, 500);
+    console.error('Inbox cache update failed:', err);
+    return apiError('Update failed', 500);
   }
 }
 

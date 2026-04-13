@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   // Clear session cookie
   response.cookies.set('email_helper_session', '', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: true,
     sameSite: 'lax',
     maxAge: 0,
     path: '/',
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   // Clear legacy cookie
   response.cookies.set('email_helper_user_id', '', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: true,
     sameSite: 'lax',
     maxAge: 0,
     path: '/',
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
   // Clear account cookie
   response.cookies.set('email_helper_account', '', {
     httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
+    secure: true,
     sameSite: 'lax',
     maxAge: 0,
     path: '/',

@@ -483,6 +483,11 @@ export async function batchDelete(gmail: gmail_v1.Gmail, messageIds: string[]) {
 
 // ============ COMPOSE OPERATIONS ============
 
+/** Sanitize header values to prevent header injection via \r\n */
+function sanitizeHeader(value: string): string {
+  return value.replace(/[\r\n\0]/g, '');
+}
+
 export async function sendEmail(
   gmail: gmail_v1.Gmail,
   options: {
@@ -496,12 +501,12 @@ export async function sendEmail(
   }
 ) {
   const messageParts = [
-    `To: ${options.to}`,
-    options.cc ? `Cc: ${options.cc}` : '',
-    options.bcc ? `Bcc: ${options.bcc}` : '',
-    `Subject: ${options.subject}`,
-    options.inReplyTo ? `In-Reply-To: ${options.inReplyTo}` : '',
-    options.inReplyTo ? `References: ${options.inReplyTo}` : '',
+    `To: ${sanitizeHeader(options.to)}`,
+    options.cc ? `Cc: ${sanitizeHeader(options.cc)}` : '',
+    options.bcc ? `Bcc: ${sanitizeHeader(options.bcc)}` : '',
+    `Subject: ${sanitizeHeader(options.subject)}`,
+    options.inReplyTo ? `In-Reply-To: ${sanitizeHeader(options.inReplyTo)}` : '',
+    options.inReplyTo ? `References: ${sanitizeHeader(options.inReplyTo)}` : '',
     'Content-Type: text/html; charset=utf-8',
     '',
     options.body,
@@ -530,11 +535,11 @@ export async function createDraft(
   }
 ): Promise<GmailDraft> {
   const messageParts = [
-    `To: ${options.to}`,
-    options.cc ? `Cc: ${options.cc}` : '',
-    `Subject: ${options.subject}`,
-    options.inReplyTo ? `In-Reply-To: ${options.inReplyTo}` : '',
-    options.inReplyTo ? `References: ${options.inReplyTo}` : '',
+    `To: ${sanitizeHeader(options.to)}`,
+    options.cc ? `Cc: ${sanitizeHeader(options.cc)}` : '',
+    `Subject: ${sanitizeHeader(options.subject)}`,
+    options.inReplyTo ? `In-Reply-To: ${sanitizeHeader(options.inReplyTo)}` : '',
+    options.inReplyTo ? `References: ${sanitizeHeader(options.inReplyTo)}` : '',
     'Content-Type: text/html; charset=utf-8',
     '',
     options.body,
@@ -571,8 +576,8 @@ export async function updateDraft(
   }
 ) {
   const messageParts = [
-    `To: ${options.to}`,
-    `Subject: ${options.subject}`,
+    `To: ${sanitizeHeader(options.to)}`,
+    `Subject: ${sanitizeHeader(options.subject)}`,
     'Content-Type: text/html; charset=utf-8',
     '',
     options.body,

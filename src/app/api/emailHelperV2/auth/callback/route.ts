@@ -155,7 +155,7 @@ export async function GET(request: NextRequest) {
       // Signed session cookie — contains token.hmac, NOT the userId
       response.cookies.set('email_helper_session', signedSession, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: true,
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 30, // 30 days
         path: '/',
@@ -163,7 +163,7 @@ export async function GET(request: NextRequest) {
       // Account cookie for UI display only (not used for auth)
       response.cookies.set('email_helper_account', gmailProfile.email, {
         httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
+        secure: true,
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 30,
         path: '/',
@@ -182,14 +182,14 @@ export async function GET(request: NextRequest) {
       const response = NextResponse.redirect(redirectUrl);
       response.cookies.set('email_helper_session', signedSession, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: true,
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 30,
         path: '/',
       });
       response.cookies.set('email_helper_account', gmailProfile.email, {
         httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
+        secure: true,
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 30,
         path: '/',

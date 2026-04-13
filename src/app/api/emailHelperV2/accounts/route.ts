@@ -59,7 +59,8 @@ export async function PUT(request: NextRequest) {
 
     return apiError(`Unknown action: ${action}`);
   } catch (err) {
-    return apiError(`Failed: ${err}`, 500);
+    console.error('Account operation failed:', err);
+    return apiError('Operation failed', 500);
   }
 }
 
@@ -89,6 +90,15 @@ export async function DELETE(request: NextRequest) {
       return apiError('Cannot disconnect your only account. Add another account first.', 400);
     }
 
+    // Revoke OAuth tokens at Google before deleting
+    try {
+      const { getValidGmailToken } = await import('@/lib/auth');
+      const token = await getValidGmailToken(userId, email);
+      await fetch(`https://oauth2.googleapis.com/revoke?token=${token}`, { method: 'POST' });
+    } catch {
+      // Token may already be expired/revoked — continue with cleanup
+    }
+
     // Delete the account record
     await admin
       .from(TABLES.GMAIL_ACCOUNTS)
@@ -96,20 +106,16 @@ export async function DELETE(request: NextRequest) {
       .eq('user_id', userId)
       .eq('email', email);
 
-    // Clean up associated data
+    // Clean up ALL associated data across all tables
     await Promise.all([
-      // Remove queue items for this account
-      admin
-        .from(TABLES.REPLY_QUEUE)
-        .delete()
-        .eq('user_id', userId)
-        .eq('account_email', email),
-      // Remove triage results for this account
-      admin
-        .from(TABLES.TRIAGE_RESULTS)
-        .delete()
-        .eq('user_id', userId)
-        .eq('account_email', email),
+      admin.from(TABLES.REPLY_QUEUE).delete().eq('user_id', userId).eq('account_email', email),
+      admin.from(TABLES.TRIAGE_RESULTS).delete().eq('user_id', userId).eq('account_email', email),
+      admin.from(TABLES.INBOX_CACHE).delete().eq('user_id', userId).eq('account_email', email),
+      admin.from(TABLES.INBOX_SYNC).delete().eq('user_id', userId).eq('account_email', email),
+      admin.from(TABLES.SYNC_QUEUE).delete().eq('user_id', userId).eq('account_email', email),
+      admin.from(TABLES.FOLLOW_UP_CACHE).delete().eq('user_id', userId).eq('account_email', email),
+      admin.from(TABLES.ACTION_HISTORY).delete().eq('user_id', userId).eq('account_email', email),
+      admin.from(TABLES.UNSUBSCRIBE_LOG).delete().eq('user_id', userId).eq('account_email', email),
     ]);
 
     // If disconnected account was primary, set another as primary
@@ -131,6 +137,7 @@ export async function DELETE(request: NextRequest) {
 
     return apiSuccess({ disconnected: email });
   } catch (err) {
-    return apiError(`Failed: ${err}`, 500);
+    console.error('Account operation failed:', err);
+    return apiError('Operation failed', 500);
   }
 }

@@ -75,27 +75,31 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Clean inbox cache: remove entries for messages that were trashed/archived/deleted/read
+    // Clean inbox cache per-user: remove entries for messages that were trashed/archived/deleted
     let cacheCleanedCount = 0;
     try {
-      const { data: actions } = await admin
-        .from(TABLES.ACTION_HISTORY)
-        .select('message_ids')
-        .in('action', ['trash', 'archive', 'delete'])
-        .eq('undone', false);
+      // Process per-user to avoid cross-user cache corruption
+      const userIds = [...new Set(accounts.map((a: { user_id: string }) => a.user_id))];
+      for (const uid of userIds) {
+        const { data: actions } = await admin
+          .from(TABLES.ACTION_HISTORY)
+          .select('message_ids')
+          .eq('user_id', uid)
+          .in('action', ['trash', 'archive', 'delete'])
+          .eq('undone', false);
 
-      if (actions && actions.length > 0) {
-        const allIds = new Set<string>();
-        for (const row of actions) {
-          for (const mid of (row.message_ids || [])) allIds.add(mid);
+        if (actions && actions.length > 0) {
+          const allIds = new Set<string>();
+          for (const row of actions) {
+            for (const mid of (row.message_ids || [])) allIds.add(mid);
+          }
+          const idsArray = Array.from(allIds);
+          for (let i = 0; i < idsArray.length; i += 100) {
+            const batch = idsArray.slice(i, i + 100);
+            await admin.from(TABLES.INBOX_CACHE).delete().eq('user_id', uid).in('gmail_id', batch);
+          }
+          cacheCleanedCount += idsArray.length;
         }
-        const idsArray = Array.from(allIds);
-        // Delete in batches of 100
-        for (let i = 0; i < idsArray.length; i += 100) {
-          const batch = idsArray.slice(i, i + 100);
-          await admin.from(TABLES.INBOX_CACHE).delete().in('gmail_id', batch);
-        }
-        cacheCleanedCount = idsArray.length;
       }
     } catch (e) {
       console.error('Cache cleanup failed:', e);

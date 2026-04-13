@@ -3,9 +3,20 @@
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 
+const ERROR_MESSAGES: Record<string, string> = {
+  access_denied: 'Access was denied. Please try again.',
+  no_code: 'Authentication failed. Please try again.',
+  invalid_state: 'Session expired. Please try again.',
+  invalid_or_expired_state: 'Session expired. Please try signing in again.',
+  state_expired: 'Session expired. Please try signing in again.',
+  state_mismatch: 'Security check failed. Please try again.',
+  missing_user_id: 'Account linking failed. Please try again.',
+};
+
 function LoginContent() {
   const searchParams = useSearchParams();
-  const error = searchParams.get('error');
+  const rawError = searchParams.get('error');
+  const error = rawError ? (ERROR_MESSAGES[rawError] || 'Something went wrong. Please try again.') : null;
 
   return (
     <div className="flex min-h-screen items-center justify-center" style={{ background: 'var(--bg)' }}>

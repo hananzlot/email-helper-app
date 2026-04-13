@@ -116,6 +116,13 @@ export async function GET(request: NextRequest) {
  *   - deleteDraft: { draftId }
  */
 export async function POST(request: NextRequest) {
+  // CSRF: verify Origin header matches our domain
+  const origin = request.headers.get('origin');
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (origin && appUrl && !appUrl.startsWith(origin)) {
+    return apiError('Cross-origin request blocked', 403);
+  }
+
   const result = await getGmailFromRequest(request);
   if ('error' in result) return apiError(result.error, 401);
   const { gmail: client } = result;
