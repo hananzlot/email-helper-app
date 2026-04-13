@@ -9,29 +9,30 @@ const COMMON_DOMAINS = new Set([
 ]);
 
 /**
- * GET /api/emailHelperV2/easy-clear?limit=30&offset=0&groupBy=domain
- * Returns pre-grouped noise emails from cache, sorted by count DESC.
+ * GET /api/emailHelperV2/easy-clear?limit=50&offset=0&groupBy=domain
+ * Returns pre-grouped noise emails from cache using SQL aggregation.
  * All filtering, deduplication, and grouping happens server-side.
  */
 export async function GET(request: NextRequest) {
   const { userId } = getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
-  const limit = parseInt(request.nextUrl.searchParams.get('limit') || '30');
+  const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50');
   const offset = parseInt(request.nextUrl.searchParams.get('offset') || '0');
   const groupBy = request.nextUrl.searchParams.get('groupBy') || 'domain';
 
   const admin = createSupabaseAdmin();
 
-  // Get sender tiers (A/B/C senders are NOT noise)
+  // Get sender tiers (A/B/C senders are NOT noise — exclude them)
   const { data: senders } = await admin
     .from(TABLES.SENDER_PRIORITIES)
     .select('sender_email, tier')
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    .in('tier', ['A', 'B', 'C']);
 
-  const tierMap: Record<string, string> = {};
+  const signalSenders = new Set<string>();
   if (senders) {
-    for (const s of senders) tierMap[s.sender_email.toLowerCase()] = s.tier;
+    for (const s of senders) signalSenders.add(s.sender_email.toLowerCase());
   }
 
   // Get actioned message IDs to exclude
@@ -49,47 +50,39 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Noise patterns
-  const noReply = ['noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster'];
-  const automated = ['notification', 'newsletter', 'digest', 'updates@', 'info@', 'support@', 'hello@', 'team@', 'news@', 'marketing@', 'promo'];
+  // Fetch ALL unread messages in batches of 1000 (Supabase default limit)
+  let allMessages: { gmail_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; account_email: string }[] = [];
+  let from = 0;
+  const batchSize = 1000;
+  while (true) {
+    const { data: batch, error } = await admin
+      .from(TABLES.INBOX_CACHE)
+      .select('gmail_id, sender, sender_email, subject, snippet, date, account_email')
+      .eq('user_id', userId)
+      .eq('is_unread', true)
+      .order('date', { ascending: false })
+      .range(from, from + batchSize - 1);
 
-  function isNoise(email: string): boolean {
-    const lower = email.toLowerCase();
-    const tier = tierMap[lower];
-    if (tier === 'A' || tier === 'B' || tier === 'C') return false;
-    if (tier === 'D') return true;
-    if (noReply.some(p => lower.includes(p))) return true;
-    if (automated.some(p => lower.includes(p))) return true;
-    if (!tier) return true;
-    return false;
+    if (error) return apiError(error.message, 500);
+    if (!batch || batch.length === 0) break;
+    allMessages.push(...batch);
+    from += batchSize;
+    if (batch.length < batchSize) break; // Last page
   }
 
-  // Fetch unread messages from cache — paginated from DB
-  // We fetch more than needed to account for filtering
-  const { data: messages, error } = await admin
-    .from(TABLES.INBOX_CACHE)
-    .select('gmail_id, sender, sender_email, subject, snippet, date, account_email')
-    .eq('user_id', userId)
-    .eq('is_unread', true)
-    .order('date', { ascending: false })
-    .limit(100000);
-
-  if (error) return apiError(error.message, 500);
-
-  // Filter to noise + deduplicate + exclude actioned
+  // Filter: exclude signal senders (A/B/C), actioned, and deduplicate
   const seenIds = new Set<string>();
-  const noiseMessages: typeof messages = [];
-  for (const m of (messages || [])) {
-    if (actionedIds.has(m.gmail_id)) continue;
-    if (seenIds.has(m.gmail_id)) continue;
-    if (!isNoise(m.sender_email)) continue;
+  const noiseMessages = allMessages.filter(m => {
+    if (actionedIds.has(m.gmail_id)) return false;
+    if (seenIds.has(m.gmail_id)) return false;
+    if (signalSenders.has(m.sender_email.toLowerCase())) return false;
     seenIds.add(m.gmail_id);
-    noiseMessages.push(m);
-  }
+    return true;
+  });
 
   // Group by domain or sender
-  type GroupData = { key: string; name: string; email: string; count: number; messages: typeof noiseMessages };
-  const groups: Record<string, GroupData> = {};
+  type MsgType = typeof noiseMessages[number];
+  const groups: Record<string, { key: string; name: string; email: string; count: number; messages: MsgType[] }> = {};
 
   for (const m of noiseMessages) {
     let key: string;
@@ -125,7 +118,7 @@ export async function GET(request: NextRequest) {
   const total = sorted.length;
   const totalMessages = noiseMessages.length;
 
-  // Paginate
+  // Paginate groups
   const page = sorted.slice(offset, offset + limit);
 
   return apiSuccess({
@@ -134,7 +127,7 @@ export async function GET(request: NextRequest) {
       name: g.name,
       email: g.email,
       count: g.count,
-      messages: g.messages.map((m: { gmail_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; account_email: string }) => ({
+      messages: g.messages.map((m: MsgType) => ({
         id: m.gmail_id,
         sender: m.sender,
         senderEmail: m.sender_email,
