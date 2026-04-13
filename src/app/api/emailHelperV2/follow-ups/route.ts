@@ -45,11 +45,11 @@ export async function GET(request: NextRequest) {
 
     const rawItems = (typeof data.data === 'string'
       ? decryptJson(data.data, userId)
-      : data.data) as { message_id?: string }[] || [];
+      : data.data) as { message_id?: string; type?: string }[] || [];
 
     const items = rawItems.filter(i => !i.message_id || !actionedIds.has(i.message_id));
-    const starred = items.filter((i: { type?: string }) => i.type === 'starred').length;
-    const awaiting = items.filter((i: { type?: string }) => i.type === 'awaiting').length;
+    const starred = items.filter(i => i.type === 'starred').length;
+    const awaiting = items.filter(i => i.type === 'awaiting').length;
 
     return apiSuccess({
       items,
