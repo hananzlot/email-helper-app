@@ -51,8 +51,25 @@ export default function Home() {
           </div>
         </div>
 
+        {/* AI Unsubscribe highlight */}
+        <div className="mt-6 p-5 rounded-2xl" style={{ background: '#faf5ff', border: '1px solid #e9d5ff' }}>
+          <div className="text-center">
+            <div className="text-3xl mb-2">🤖</div>
+            <h3 className="text-lg font-bold mb-1" style={{ color: '#7c3aed' }}>AI Auto-Unsubscribe</h3>
+            <p className="text-sm" style={{ color: '#8b5cf6' }}>
+              Our AI agent visits unsubscribe pages, fills out forms, and clicks buttons for you.
+              One click to unsubscribe from hundreds of newsletters — no manual work.
+            </p>
+            <div className="flex justify-center gap-2 mt-3">
+              <span className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: '#ede9fe', color: '#6d28d9' }}>One-click headers</span>
+              <span className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: '#ede9fe', color: '#6d28d9' }}>Smart link detection</span>
+              <span className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: '#ede9fe', color: '#6d28d9' }}>AI form filling</span>
+            </div>
+          </div>
+        </div>
+
         {/* Feature pillars */}
-        <div className="mt-8 grid grid-cols-4 gap-4 text-center">
+        <div className="mt-6 grid grid-cols-4 gap-4 text-center">
           <div className="p-4 rounded-xl" style={{ background: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
             <div className="text-2xl mb-1">🎯</div>
             <div className="text-sm font-bold" style={{ color: 'var(--accent)' }}>Top Tiers</div>

@@ -65,7 +65,8 @@ export async function POST(request: NextRequest) {
 
     // Strategy 2: Parse email body for unsubscribe link
     const bodyResult = await tryBodyUnsubscribeLink(msg);
-    if (bodyResult.success) {
+    if (bodyResult.success && bodyResult.url) {
+      // Try simple GET first — many unsubscribe URLs just need to be visited
       await admin.from(UNSUB_TABLE).update({
         method: 'body_link',
         status: 'success',
@@ -73,6 +74,27 @@ export async function POST(request: NextRequest) {
         completed_at: new Date().toISOString(),
       }).eq('id', logEntry.id);
       return apiSuccess({ status: 'success', method: 'body_link', url: bodyResult.url, logId: logEntry.id });
+    }
+
+    // Strategy 3: AI Agent with headless browser (for complex pages)
+    // Find any unsubscribe URL (from header or body) and let the AI handle it
+    const anyUrl = result.url || bodyResult.url;
+    if (anyUrl) {
+      try {
+        const { aiUnsubscribe } = await import('@/lib/unsubscribe-agent');
+        const aiResult = await aiUnsubscribe(anyUrl, account_email);
+        if (aiResult.success) {
+          await admin.from(UNSUB_TABLE).update({
+            method: aiResult.method,
+            status: 'success',
+            unsubscribe_url: anyUrl,
+            completed_at: new Date().toISOString(),
+          }).eq('id', logEntry.id);
+          return apiSuccess({ status: 'success', method: aiResult.method, details: aiResult.details, logId: logEntry.id });
+        }
+      } catch (aiErr) {
+        console.error('AI unsubscribe failed:', aiErr);
+      }
     }
 
     // All strategies failed
