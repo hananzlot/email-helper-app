@@ -14,7 +14,7 @@ const COMMON_DOMAINS = new Set([
  * All filtering, deduplication, and grouping happens server-side.
  */
 export async function GET(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId, account } = getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50');
@@ -55,11 +55,13 @@ export async function GET(request: NextRequest) {
   let from = 0;
   const batchSize = 1000;
   while (true) {
-    const { data: batch, error } = await admin
+    const query = admin
       .from(TABLES.INBOX_CACHE)
       .select('gmail_id, sender, sender_email, subject, snippet, date, account_email')
       .eq('user_id', userId)
-      .eq('is_unread', true)
+      .eq('is_unread', true);
+    if (account) query.eq('account_email', account);
+    const { data: batch, error } = await query
       .order('date', { ascending: false })
       .range(from, from + batchSize - 1);
 

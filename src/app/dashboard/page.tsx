@@ -1934,7 +1934,8 @@ export default function Dashboard() {
 
       // Easy-Clear count from server API (not client-side filtering)
       try {
-        const ecRes = await apiGet('easy-clear?limit=1&groupBy=domain');
+        const ecUrl = unified ? '/api/emailHelperV2/easy-clear?limit=1&groupBy=domain' : withAccount('/api/emailHelperV2/easy-clear?limit=1&groupBy=domain');
+        const ecRes = await fetch(ecUrl).then(r => r.json());
         if (ecRes.success && ecRes.data) {
           reportTabCount('cleanup', ecRes.data.totalMessages || 0);
         }
