@@ -1100,25 +1100,35 @@ export default function Dashboard() {
     loadAccounts();
   }, []);
 
+  async function checkAccountHealth(accts: ConnectedAccount[]) {
+    const broken = new Set<string>();
+    await Promise.all(accts.map(async (acct) => {
+      try {
+        const check = await fetch(`/api/emailHelperV2/gmail?action=profile&account=${encodeURIComponent(acct.email)}`);
+        if (!check.ok) broken.add(acct.email);
+      } catch { broken.add(acct.email); }
+    }));
+    setBrokenAccounts(broken);
+  }
+
   async function loadAccounts() {
     try {
       const res = await apiGet('accounts');
       if (res.success && res.data) {
         setAccounts(res.data);
-        // Health check: verify each account's token works
-        const broken = new Set<string>();
-        await Promise.all(res.data.map(async (acct: ConnectedAccount) => {
-          try {
-            const check = await fetch(`/api/emailHelperV2/gmail?action=profile&account=${encodeURIComponent(acct.email)}`);
-            if (!check.ok) broken.add(acct.email);
-          } catch { broken.add(acct.email); }
-        }));
-        if (broken.size > 0) setBrokenAccounts(broken);
+        checkAccountHealth(res.data);
       }
     } catch (err) {
       console.error('Failed to load accounts:', err);
     }
   }
+
+  // Re-check account health every 30 minutes for long-lived sessions
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    const interval = setInterval(() => checkAccountHealth(accounts), 30 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [accounts]);
 
   function switchAccount(newAccount: string) {
     setUnified(false);
