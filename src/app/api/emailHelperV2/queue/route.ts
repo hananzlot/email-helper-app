@@ -9,7 +9,7 @@ import { encryptFields, decryptFields, ENCRYPTED_FIELDS } from '@/lib/crypto';
  * Returns the reply queue for the current user
  */
 export async function GET(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
  * Body: { message_id, account_email, status, snoozed_until?, sender?, sender_email?, subject?, summary?, ... }
  */
 export async function POST(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
  * Body: { id: string, status: string, snoozed_until?: string }
  */
 export async function PUT(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {

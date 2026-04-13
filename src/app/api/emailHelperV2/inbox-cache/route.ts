@@ -8,7 +8,7 @@ import { TABLES } from '@/lib/tables';
  * Returns cached inbox messages for instant load. If no account specified, returns all accounts.
  */
 export async function GET(request: NextRequest) {
-  const { userId, account } = getRequestContext(request);
+  const { userId, account } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();
@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
  * Body: { account_email: string, messages: Array<{ id, threadId, sender, senderEmail, subject, snippet, date, isUnread, labelIds }> }
  */
 export async function POST(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {
@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
  * Body: { gmail_ids: string[], updates: { is_unread?: boolean } }
  */
 export async function PUT(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {
@@ -165,7 +165,7 @@ export async function PUT(request: NextRequest) {
  * Body: { account_email: string, gmail_ids: string[] }
  */
 export async function DELETE(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {

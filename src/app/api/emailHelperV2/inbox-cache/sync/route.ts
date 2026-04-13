@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     let user_id = body.user_id;
     if (!user_id) {
       const { getRequestContext } = await import('@/lib/api-helpers');
-      const ctx = getRequestContext(request);
+      const ctx = await getRequestContext(request);
       user_id = ctx.userId;
     }
 

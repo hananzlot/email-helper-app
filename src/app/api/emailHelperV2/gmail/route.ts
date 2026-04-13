@@ -189,7 +189,7 @@ export async function POST(request: NextRequest) {
       const body = await request.clone().json().catch(() => null);
       if (body) {
         const { getRequestContext: getCtx } = await import('@/lib/api-helpers');
-        const { userId } = getCtx(request);
+        const { userId } = await getCtx(request);
         if (userId) {
           const { createSupabaseAdmin } = await import('@/lib/supabase-server');
           const { TABLES } = await import('@/lib/tables');

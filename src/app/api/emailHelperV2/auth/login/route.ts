@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGoogleAuthUrl } from '@/lib/auth';
+import { validateSession } from '@/lib/session';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   let state = searchParams.get('state') || 'login';
 
-  // For add_account, attach the current userId from the cookie
+  // For add_account, attach the current userId from the session
   if (state === 'add_account') {
-    const userId = request.cookies.get('email_helper_user_id')?.value;
+    const sessionCookie = request.cookies.get('email_helper_session')?.value;
+    const session = await validateSession(sessionCookie);
+    // Fallback to legacy cookie during migration
+    const userId = session?.userId || request.cookies.get('email_helper_user_id')?.value;
     if (userId) {
       state = `add_account:${userId}`;
     } else {

@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
   if ('error' in gmailResult) return apiError(gmailResult.error, 401);
   const { gmail, account } = gmailResult;
 
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
  * Returns the last triage result for this account
  */
 export async function GET(request: NextRequest) {
-  const { userId, account } = getRequestContext(request);
+  const { userId, account } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
   if (!account) return apiError('Missing account', 400);
 

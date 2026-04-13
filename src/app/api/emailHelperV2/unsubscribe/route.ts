@@ -18,7 +18,7 @@ const UNSUB_TABLE = 'emailHelperV2_unsubscribe_log';
  * 3. Follow the link via HTTP
  */
 export async function POST(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const body = await request.json();
@@ -265,7 +265,7 @@ async function tryBodyUnsubscribeLink(
  * Returns unsubscribe history for the current user
  */
 export async function GET(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();

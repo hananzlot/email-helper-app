@@ -17,4 +17,5 @@ export const TABLES = {
   INBOX_SYNC: 'emailHelperV2_inbox_sync',
   SYNC_QUEUE: 'emailHelperV2_sync_queue',
   UNSUBSCRIBE_LOG: 'emailHelperV2_unsubscribe_log',
+  SESSIONS: 'emailHelperV2_sessions',
 } as const;

@@ -12,7 +12,7 @@ const SYNC_QUEUE = 'emailHelperV2_sync_queue';
  * Returns sync status for the current user's accounts.
  */
 export async function GET(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
  * Body: { account_email: string }
  */
 export async function POST(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const body = await request.json().catch(() => ({}));

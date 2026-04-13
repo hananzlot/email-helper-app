@@ -8,7 +8,7 @@ import { TABLES } from '@/lib/tables';
  * Returns notification rules for the current user
  */
 export async function GET(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
  * Body: { id: string, user_priority: number }
  */
 export async function PUT(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {
@@ -60,7 +60,7 @@ export async function PUT(request: NextRequest) {
  * Body: { pattern, category, description, default_priority, user_priority? }
  */
 export async function POST(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {

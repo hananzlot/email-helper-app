@@ -10,7 +10,7 @@ import { decryptJson } from '@/lib/crypto';
  * The cache is pre-computed by the cron job via computeFollowUps().
  */
 export async function GET(request: NextRequest) {
-  const { userId, account } = getRequestContext(request);
+  const { userId, account } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();

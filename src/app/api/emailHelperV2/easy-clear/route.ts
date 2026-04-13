@@ -14,7 +14,7 @@ const COMMON_DOMAINS = new Set([
  * All filtering, deduplication, and grouping happens server-side.
  */
 export async function GET(request: NextRequest) {
-  const { userId, account } = getRequestContext(request);
+  const { userId, account } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50');

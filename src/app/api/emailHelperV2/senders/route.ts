@@ -9,7 +9,7 @@ import { encryptFields, decryptFields, ENCRYPTED_FIELDS } from '@/lib/crypto';
  * Returns all sender priorities for the current user, sorted by reply count
  */
 export async function GET(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
  * Body: { senders: [{ sender_email, display_name, reply_count, last_reply, tier }] }
  */
 export async function POST(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
  * OR:   { action: 'merge', primary_email: string, secondary_email: string }
  */
 export async function PUT(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {
@@ -176,7 +176,7 @@ export async function PUT(request: NextRequest) {
  * Body: { sender_email: string }
  */
 export async function DELETE(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {

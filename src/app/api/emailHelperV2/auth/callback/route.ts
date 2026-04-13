@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { exchangeCodeForTokens, signInOrCreateUser, storeGmailTokens } from '@/lib/auth';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { TABLES } from '@/lib/tables';
+import { createSession } from '@/lib/session';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -96,36 +97,44 @@ export async function GET(request: NextRequest) {
           .eq('email', gmailProfile.email);
       }
 
-      // Redirect to dashboard (cookie-based auth, no session token needed)
+      // Create a signed session token stored server-side
+      const signedSession = await createSession(userId, gmailProfile.email);
+
       const redirectUrl = new URL('/dashboard', origin);
       redirectUrl.searchParams.set('account', gmailProfile.email);
 
-      // Set a cookie with the user ID for immediate use
       const response = NextResponse.redirect(redirectUrl);
-      response.cookies.set('email_helper_user_id', userId, {
+      // Signed session cookie — contains token.hmac, NOT the userId
+      response.cookies.set('email_helper_session', signedSession, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 30, // 30 days
         path: '/',
       });
+      // Account cookie for UI display only (not used for auth)
       response.cookies.set('email_helper_account', gmailProfile.email, {
-        httpOnly: false,  // Readable by JS for UI display
+        httpOnly: false,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 30,
         path: '/',
       });
+      // Clear legacy cookie if present
+      response.cookies.set('email_helper_user_id', '', {
+        httpOnly: true, maxAge: 0, path: '/',
+      });
 
       return response;
     } else {
-      // Adding an account — redirect back to dashboard with success
+      // Adding an account — create new session with updated account
+      const signedSession = await createSession(userId, gmailProfile.email);
+
       const redirectUrl = new URL('/dashboard', origin);
       redirectUrl.searchParams.set('account_added', gmailProfile.email);
       redirectUrl.searchParams.set('account', gmailProfile.email);
       const response = NextResponse.redirect(redirectUrl);
-      // Re-set BOTH cookies so the session survives the OAuth redirect
-      response.cookies.set('email_helper_user_id', userId, {
+      response.cookies.set('email_helper_session', signedSession, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
@@ -138,6 +147,10 @@ export async function GET(request: NextRequest) {
         sameSite: 'lax',
         maxAge: 60 * 60 * 24 * 30,
         path: '/',
+      });
+      // Clear legacy cookie if present
+      response.cookies.set('email_helper_user_id', '', {
+        httpOnly: true, maxAge: 0, path: '/',
       });
       return response;
     }

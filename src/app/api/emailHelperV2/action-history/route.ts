@@ -12,7 +12,7 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
  * Returns the last 7 days of actions for the current user, newest first.
  */
 export async function GET(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
  * Log a new action.
  */
 export async function POST(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const body = await request.json();
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
  * Update an action (e.g., mark as undone).
  */
 export async function PUT(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const body = await request.json();
@@ -106,7 +106,7 @@ export async function PUT(request: NextRequest) {
  * Clear all action history for the current user.
  */
 export async function DELETE(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();

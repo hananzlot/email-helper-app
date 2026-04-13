@@ -8,7 +8,7 @@ import { TABLES } from '@/lib/tables';
  * Returns all connected Gmail accounts for the current user
  */
 export async function GET(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   const admin = createSupabaseAdmin();
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
  * Body: { email: string, action: 'set_primary' }
  */
 export async function PUT(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {
@@ -69,7 +69,7 @@ export async function PUT(request: NextRequest) {
  * Body: { email: string }
  */
 export async function DELETE(request: NextRequest) {
-  const { userId } = getRequestContext(request);
+  const { userId } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
   try {
