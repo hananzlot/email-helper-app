@@ -2502,15 +2502,28 @@ export default function Dashboard() {
                 }}
               >
                 {tab.label}
-                {count != null && count > 0 && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
-                    style={{
-                      background: isActive ? 'var(--accent)' : '#f1f5f9',
-                      color: isActive ? 'white' : '#64748b',
-                    }}>
-                    {count > 9999 ? `${Math.round(count / 1000)}k` : count > 99 ? count.toLocaleString() : count}
-                  </span>
-                )}
+                {count != null && count > 0 && (() => {
+                  const isLargeCount = tab.id === 'cleanup' || tab.id === 'inbox';
+                  const displayCount = count > 9999 ? `${Math.round(count / 1000)}k` : count > 99 ? count.toLocaleString() : String(count);
+                  return isLargeCount ? (
+                    <span className="text-xs font-extrabold px-2 py-0.5 rounded-md min-w-[28px] text-center leading-none"
+                      style={{
+                        background: isActive ? 'var(--accent)' : '#dc2626',
+                        color: 'white',
+                        letterSpacing: '0.02em',
+                      }}>
+                      {displayCount}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
+                      style={{
+                        background: isActive ? 'var(--accent)' : '#f1f5f9',
+                        color: isActive ? 'white' : '#64748b',
+                      }}>
+                      {displayCount}
+                    </span>
+                  );
+                })()}
               </button>
             );
           })}
