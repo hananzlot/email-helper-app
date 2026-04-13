@@ -3,10 +3,13 @@ export default async () => {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://emaihelper.netlify.app";
   const srk = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://ybyhqkfyfovcuxhiejgx.supabase.co";
+  const cronSecret = process.env.CRON_SECRET || "";
+
+  const authHeaders = { Authorization: `Bearer ${cronSecret}` };
 
   // 1. Run the regular cron (scan sent, follow-ups, cache cleanup)
   try {
-    const cronRes = await fetch(`${appUrl}/api/emailHelperV2/cron`);
+    const cronRes = await fetch(`${appUrl}/api/emailHelperV2/cron`, { headers: authHeaders });
     const cronData = await cronRes.json().catch(() => ({}));
     console.log("Cron:", JSON.stringify(cronData).slice(0, 300));
   } catch (e) {
@@ -42,7 +45,7 @@ export default async () => {
 
   while ((Date.now() - startTime) < maxMinutes * 60 * 1000) {
     try {
-      const res = await fetch(`${appUrl}/api/emailHelperV2/sync-queue`, { method: "PUT" });
+      const res = await fetch(`${appUrl}/api/emailHelperV2/sync-queue`, { method: "PUT", headers: authHeaders });
       const data = await res.json();
 
       if (!data.success || data.data?.idle) {
