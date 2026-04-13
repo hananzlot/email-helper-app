@@ -82,31 +82,26 @@ export async function PUT(request: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`;
 
+  let sessionUserId: string | null = null;
   if (!isCron) {
     const { userId } = await getRequestContext(request);
     if (!userId) return apiError('Not authenticated', 401);
+    sessionUserId = userId;
   }
 
   const admin = createSupabaseAdmin();
 
   // Get the next pending job (or continue a processing one)
-  let { data: job } = await admin
-    .from(SYNC_QUEUE)
-    .select('*')
-    .eq('status', 'processing')
-    .order('started_at', { ascending: true })
-    .limit(1)
-    .single();
+  // When authenticated via session (not cron), only process the user's own jobs
+  let processingQuery = admin.from(SYNC_QUEUE).select('*').eq('status', 'processing').order('started_at', { ascending: true }).limit(1);
+  if (sessionUserId) processingQuery = processingQuery.eq('user_id', sessionUserId);
+  let { data: job } = await processingQuery.single();
 
   if (!job) {
     // No processing job — pick the next pending one
-    const { data: pending } = await admin
-      .from(SYNC_QUEUE)
-      .select('*')
-      .eq('status', 'pending')
-      .order('priority', { ascending: true })
-      .order('requested_at', { ascending: true })
-      .limit(1)
+    let pendingQuery = admin.from(SYNC_QUEUE).select('*').eq('status', 'pending').order('priority', { ascending: true }).order('requested_at', { ascending: true }).limit(1);
+    if (sessionUserId) pendingQuery = pendingQuery.eq('user_id', sessionUserId);
+    const { data: pending } = await pendingQuery
       .single();
 
     if (!pending) return apiSuccess({ message: 'Queue empty', idle: true });

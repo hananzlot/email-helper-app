@@ -100,7 +100,13 @@ export function decrypt(ciphertext: string | null | undefined, userId: string): 
   } catch (err) {
     // Log decryption failure for monitoring (don't log the actual data)
     console.warn(`Decryption failed for user ${userId.slice(0, 8)}...: ${err instanceof Error ? err.message : 'unknown'}`);
-    // Return as-is for legacy unencrypted data
+    // If it looks like it was meant to be encrypted (base64-ish), return empty rather than raw ciphertext
+    // Plain legacy text (emails, names) won't be valid base64 of sufficient length
+    const packed = Buffer.from(ciphertext, 'base64');
+    if (packed.length >= IV_LENGTH + AUTH_TAG_LENGTH + 1) {
+      return ''; // Likely tampered/corrupted encrypted data
+    }
+    // Short/non-base64 data is likely legacy unencrypted plaintext
     return ciphertext;
   }
 }

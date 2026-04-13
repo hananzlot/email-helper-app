@@ -52,14 +52,6 @@ export async function getRequestContext(request: NextRequest) {
     }
   }
 
-  // Legacy fallback: plain userId cookie (for existing sessions during migration)
-  const legacyUserId = request.cookies.get('email_helper_user_id')?.value;
-  if (legacyUserId) {
-    const account = request.nextUrl.searchParams.get('account')
-      || request.cookies.get('email_helper_account')?.value;
-    return { error: null, userId: legacyUserId, account: account || null };
-  }
-
   return { error: 'Not authenticated', userId: null, account: null };
 }
 
@@ -79,7 +71,8 @@ export async function getGmailFromRequest(
     const gmail = getGmailClient(accessToken);
     return { gmail, account };
   } catch (err) {
-    return { error: `Gmail auth failed: ${err}` };
+    console.error('Gmail auth failed:', err);
+    return { error: 'Gmail auth failed' };
   }
 }
 

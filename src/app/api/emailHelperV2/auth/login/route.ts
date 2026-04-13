@@ -5,8 +5,8 @@ import { validateSession } from '@/lib/session';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 
 function getStateSecret(): string {
-  const secret = process.env.SESSION_SECRET || process.env.ENCRYPTION_SALT;
-  if (!secret) throw new Error('SESSION_SECRET or ENCRYPTION_SALT environment variable is required.');
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error('SESSION_SECRET environment variable is required.');
   return secret;
 }
 
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   if (flow === 'add_account') {
     const sessionCookie = request.cookies.get('email_helper_session')?.value;
     const session = await validateSession(sessionCookie);
-    userId = session?.userId || request.cookies.get('email_helper_user_id')?.value || null;
+    userId = session?.userId || null;
     if (!userId) {
       flow = 'login';
     }

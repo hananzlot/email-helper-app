@@ -17,11 +17,10 @@ export function middleware(request: NextRequest) {
   // Skip admin auth route — it verifies password server-side
   if (pathname === '/api/emailHelperV2/admin/auth') return NextResponse.next();
 
-  // For protected routes, require a session cookie
+  // For protected routes, require the signed session cookie
   const hasSession = request.cookies.get('email_helper_session')?.value;
-  const hasLegacySession = request.cookies.get('email_helper_user_id')?.value;
 
-  if (!hasSession && !hasLegacySession) {
+  if (!hasSession) {
     // API routes: return 401
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });

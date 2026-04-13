@@ -3,8 +3,8 @@ import { createSupabaseAdmin } from '@/lib/supabase-server';
 
 const SESSION_TABLE = 'emailHelperV2_sessions';
 function getSessionSecret(): string {
-  const secret = process.env.SESSION_SECRET || process.env.ENCRYPTION_SALT;
-  if (!secret) throw new Error('SESSION_SECRET or ENCRYPTION_SALT environment variable is required.');
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) throw new Error('SESSION_SECRET environment variable is required.');
   return secret;
 }
 const SESSION_MAX_AGE_DAYS = 30;

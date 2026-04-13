@@ -77,7 +77,10 @@ export async function POST(request: NextRequest) {
     .select()
     .single();
 
-  if (logError) return apiError(logError.message, 500);
+  if (logError) {
+    console.error('Unsubscribe log insert failed:', logError.message);
+    return apiError('Failed to log unsubscribe attempt', 500);
+  }
 
   try {
     const accessToken = await getValidGmailToken(userId, account_email);
@@ -89,13 +92,14 @@ export async function POST(request: NextRequest) {
     // Strategy 1: Check List-Unsubscribe header
     const result = await tryListUnsubscribeHeader(gmail, message_id, accessToken);
     if (result.success) {
+      const isVerified = result.method !== 'header_url_attempted';
       await admin.from(UNSUB_TABLE).update({
         method: result.method,
-        status: 'success',
+        status: isVerified ? 'success' : 'attempted',
         unsubscribe_url: result.url || null,
         completed_at: new Date().toISOString(),
       }).eq('id', logEntry.id);
-      return apiSuccess({ status: 'success', method: result.method, logId: logEntry.id });
+      return apiSuccess({ status: isVerified ? 'success' : 'attempted', method: result.method, logId: logEntry.id });
     }
 
     // Strategy 2: Parse email body for unsubscribe link
@@ -147,7 +151,8 @@ export async function POST(request: NextRequest) {
       error_message: String(err),
       completed_at: new Date().toISOString(),
     }).eq('id', logEntry.id);
-    return apiError(`Unsubscribe failed: ${err}`, 500);
+    console.error('Unsubscribe failed:', err);
+    return apiError('Unsubscribe failed', 500);
   }
 }
 

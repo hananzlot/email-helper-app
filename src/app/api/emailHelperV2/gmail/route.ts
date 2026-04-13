@@ -116,11 +116,14 @@ export async function GET(request: NextRequest) {
  *   - deleteDraft: { draftId }
  */
 export async function POST(request: NextRequest) {
-  // CSRF: verify Origin header matches our domain
+  // CSRF: verify Origin header matches our domain (exact match)
   const origin = request.headers.get('origin');
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (origin && appUrl && !appUrl.startsWith(origin)) {
-    return apiError('Cross-origin request blocked', 403);
+  if (origin && appUrl) {
+    const expectedOrigin = new URL(appUrl).origin;
+    if (origin !== expectedOrigin) {
+      return apiError('Cross-origin request blocked', 403);
+    }
   }
 
   const result = await getGmailFromRequest(request);
@@ -227,7 +230,7 @@ export async function POST(request: NextRequest) {
                 case 'unstar': await gmail.batchModify(altClient, params.messageIds, [], ['STARRED']); break;
                 default: continue;
               }
-              console.log(`Gmail POST: action ${act} succeeded on fallback account ${acct.email}`);
+              console.log(`Gmail POST: action ${act} succeeded on fallback account`);
               return apiSuccess({ [act]: params.messageIds?.length || 1, fallbackAccount: acct.email });
             } catch {
               continue; // Try next account

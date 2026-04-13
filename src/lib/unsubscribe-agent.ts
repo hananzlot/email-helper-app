@@ -192,8 +192,8 @@ Page text content: ${pageText.slice(0, 1000)}`
       return { success: true, method: 'ai_agent_form', details: `Completed ${actions.length} actions, confirmed success` };
     }
 
-    // Not sure if it worked — might have still processed
-    return { success: true, method: 'ai_agent_attempted', details: `Completed ${actions.length} actions, could not verify success` };
+    // Not sure if it worked — report as uncertain, not success
+    return { success: false, method: 'ai_agent_attempted', details: `Completed ${actions.length} actions, could not verify success` };
 
   } catch (err) {
     if (browser) try { await browser.close(); } catch {}
