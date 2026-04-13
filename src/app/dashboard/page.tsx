@@ -4089,17 +4089,23 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
     return false;
   }
 
-  // Snapshot messages on first load — stable list that doesn't jump while user works
+  // Snapshot messages after initial load settles — wait for loading to finish
   const [snapshot, setSnapshot] = useState<GmailMessage[]>([]);
   const snapshotTaken = React.useRef(false);
+  const snapshotTimer = React.useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!tiersLoaded || messages.length === 0 || snapshotTaken.current) return;
-    const noise = messages.filter(m => m.isUnread && isNoiseSender(m.senderEmail));
-    if (noise.length > 0) {
-      setSnapshot(noise);
-      snapshotTaken.current = true;
-    }
+    // Debounce: wait 2 seconds after last messages change before snapshotting
+    if (snapshotTimer.current) clearTimeout(snapshotTimer.current);
+    snapshotTimer.current = setTimeout(() => {
+      const noise = messages.filter(m => m.isUnread && isNoiseSender(m.senderEmail));
+      if (noise.length > 0) {
+        setSnapshot(noise);
+        snapshotTaken.current = true;
+      }
+    }, 2000);
+    return () => { if (snapshotTimer.current) clearTimeout(snapshotTimer.current); };
   }, [tiersLoaded, messages.length]);
 
   // Remove items from snapshot when user acts (archive/trash/read)
@@ -4251,10 +4257,11 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
   const selectedIds = getSelectedIds();
   const selectedCount = selectedIds.length;
 
-  if (!tiersLoaded || messages.length === 0) return (
+  if (!tiersLoaded || messages.length === 0 || (!snapshotTaken.current && snapshot.length === 0)) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
       <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
-      <p className="text-sm">Loading your emails...</p>
+      <p className="text-sm">Preparing your Easy-Clear list...</p>
+      <p className="text-[10px] mt-1">Gathering all low-priority emails</p>
     </div>
   );
 
