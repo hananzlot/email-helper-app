@@ -32,14 +32,22 @@ export default function AdminPage() {
     setTimeout(() => setSaved(false), 2000);
   }
 
-  function handleAuth(e: React.FormEvent) {
+  async function handleAuth(e: React.FormEvent) {
     e.preventDefault();
-    // Simple admin password — change this or move to env var
-    if (password === 'clearbox-admin-2026') {
-      setAuthenticated(true);
-      sessionStorage.setItem('clearbox_admin_auth', 'true');
-    } else {
-      alert('Incorrect password');
+    try {
+      const res = await fetch('/api/emailHelperV2/admin/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      if (res.ok) {
+        setAuthenticated(true);
+        sessionStorage.setItem('clearbox_admin_auth', 'true');
+      } else {
+        alert('Incorrect password');
+      }
+    } catch {
+      alert('Auth check failed');
     }
   }
 
