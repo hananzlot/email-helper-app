@@ -15,6 +15,20 @@ export async function GET(request: NextRequest) {
 
   const admin = createSupabaseAdmin();
 
+  // Get actioned message IDs to exclude (same pattern as inbox-cache)
+  const { data: actions } = await admin
+    .from(TABLES.ACTION_HISTORY)
+    .select('message_ids')
+    .eq('user_id', userId)
+    .in('action', ['trash', 'archive', 'delete'])
+    .eq('undone', false);
+  const actionedIds = new Set<string>();
+  if (actions) {
+    for (const row of actions) {
+      for (const mid of (row.message_ids || [])) actionedIds.add(mid);
+    }
+  }
+
   // If account specified, get just that account's cache
   // If no account (unified), get all accounts' caches
   if (account) {
@@ -29,15 +43,19 @@ export async function GET(request: NextRequest) {
       return apiSuccess({ items: [], computed_at: null, message: 'No follow-up data cached yet. It will be computed on the next triage run.' });
     }
 
-    const items = typeof data.data === 'string'
+    const rawItems = (typeof data.data === 'string'
       ? decryptJson(data.data, userId)
-      : data.data;
+      : data.data) as { message_id?: string }[] || [];
+
+    const items = rawItems.filter(i => !i.message_id || !actionedIds.has(i.message_id));
+    const starred = items.filter((i: { type?: string }) => i.type === 'starred').length;
+    const awaiting = items.filter((i: { type?: string }) => i.type === 'awaiting').length;
 
     return apiSuccess({
-      items: items || [],
+      items,
       computed_at: data.computed_at,
-      starred_count: data.starred_count,
-      awaiting_count: data.awaiting_count,
+      starred_count: starred,
+      awaiting_count: awaiting,
     });
   }
 
@@ -65,10 +83,17 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const filteredItems = allItems.filter((i: unknown) => {
+    const item = i as { message_id?: string };
+    return !item.message_id || !actionedIds.has(item.message_id);
+  });
+  const starred = filteredItems.filter((i: unknown) => (i as { type?: string }).type === 'starred').length;
+  const awaiting = filteredItems.filter((i: unknown) => (i as { type?: string }).type === 'awaiting').length;
+
   return apiSuccess({
-    items: allItems,
+    items: filteredItems,
     computed_at: latestComputed,
-    starred_count: data.reduce((s: number, r: { starred_count?: number }) => s + (r.starred_count || 0), 0),
-    awaiting_count: data.reduce((s: number, r: { awaiting_count?: number }) => s + (r.awaiting_count || 0), 0),
+    starred_count: starred,
+    awaiting_count: awaiting,
   });
 }
