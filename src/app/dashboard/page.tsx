@@ -3181,10 +3181,21 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
       setCurrentAccount(accountEmail);
     }
     try {
+      // Fetch original message to include as quoted text
+      let quotedHtml = '';
+      try {
+        const origRes = await gmailGet('message', { id: messageId, format: 'full' });
+        if (origRes.success) {
+          const origBody = origRes.data.bodyHtml || origRes.data.body || '';
+          const origDate = origRes.data.date ? new Date(origRes.data.date).toLocaleString() : '';
+          const origFrom = origRes.data.sender || to;
+          quotedHtml = `<br><br><div style="border-left:2px solid #ccc;padding-left:12px;margin-top:12px;color:#666"><p style="margin:0 0 8px 0;font-size:12px">On ${origDate}, ${origFrom} wrote:</p>${origBody}</div>`;
+        }
+      } catch {}
       const sendPayload: Record<string, unknown> = {
         to,
         subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
-        body: body.replace(/\n/g, '<br>'),
+        body: body.replace(/\n/g, '<br>') + quotedHtml,
         threadId,
         inReplyTo: messageId,
       };
