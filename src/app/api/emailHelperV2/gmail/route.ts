@@ -89,13 +89,50 @@ export async function GET(request: NextRequest) {
         return apiError(`Unknown action: ${action}`);
     }
   } catch (err) {
-    console.error(`Gmail GET error (${action}):`, err);
     const errStr = String(err);
     console.error('Gmail GET failed:', action, errStr);
-    // Classify the error for the client
-    if (errStr.includes('not found') || errStr.includes('Not Found') || errStr.includes('notFound')) {
+
+    // For "not found" on message/thread fetch, try all other connected accounts
+    if ((errStr.includes('not found') || errStr.includes('Not Found') || errStr.includes('notFound')) && (action === 'message' || action === 'thread') && id) {
+      try {
+        const { getRequestContext: getCtx } = await import('@/lib/api-helpers');
+        const { userId } = await getCtx(request);
+        if (userId) {
+          const { createSupabaseAdmin } = await import('@/lib/supabase-server');
+          const { TABLES } = await import('@/lib/tables');
+          const { getValidGmailToken } = await import('@/lib/auth');
+          const admin = createSupabaseAdmin();
+          const currentAcct = request.nextUrl.searchParams.get('account') || '';
+          const { data: allAccounts } = await admin
+            .from(TABLES.GMAIL_ACCOUNTS)
+            .select('email')
+            .eq('user_id', userId)
+            .eq('status', 'connected')
+            .neq('email', currentAcct);
+
+          if (allAccounts) {
+            for (const acct of allAccounts) {
+              try {
+                const altToken = await getValidGmailToken(userId, acct.email);
+                const altClient = gmail.getGmailClient(altToken);
+                if (action === 'message') {
+                  const result = await gmail.getMessage(altClient, id, format);
+                  console.log(`Gmail GET: message found on fallback account`);
+                  return apiSuccess(result);
+                } else {
+                  const result = await gmail.getThread(altClient, id);
+                  return apiSuccess(result);
+                }
+              } catch { continue; }
+            }
+          }
+        }
+      } catch (fallbackErr) {
+        console.error('Gmail GET fallback failed:', fallbackErr);
+      }
       return apiError('Message not found — it may have been moved or deleted', 404);
     }
+
     if (errStr.includes('invalid_grant') || errStr.includes('Token has been expired') || errStr.includes('Invalid Credentials')) {
       return apiError('Gmail session expired — try logging out and back in', 401);
     }
