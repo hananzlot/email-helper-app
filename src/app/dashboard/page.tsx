@@ -2502,28 +2502,16 @@ export default function Dashboard() {
                 }}
               >
                 {tab.label}
-                {count != null && count > 0 && (() => {
-                  const isLargeCount = tab.id === 'cleanup' || tab.id === 'inbox';
-                  const displayCount = count > 9999 ? `${Math.round(count / 1000)}k` : count > 99 ? count.toLocaleString() : String(count);
-                  return isLargeCount ? (
-                    <span className="text-xs font-extrabold px-2 py-0.5 rounded-md min-w-[28px] text-center leading-none"
-                      style={{
-                        background: isActive ? 'var(--accent)' : '#dc2626',
-                        color: 'white',
-                        letterSpacing: '0.02em',
-                      }}>
-                      {displayCount}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
-                      style={{
-                        background: isActive ? 'var(--accent)' : '#f1f5f9',
-                        color: isActive ? 'white' : '#64748b',
-                      }}>
-                      {displayCount}
-                    </span>
-                  );
-                })()}
+                {count != null && count > 0 && (
+                  <span className="text-xs font-extrabold px-2 py-0.5 rounded-md min-w-[24px] text-center leading-none"
+                    style={{
+                      background: isActive ? 'var(--accent)' : '#dc2626',
+                      color: 'white',
+                      letterSpacing: '0.02em',
+                    }}>
+                    {count > 9999 ? `${Math.round(count / 1000)}k` : count > 99 ? count.toLocaleString() : count}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -4219,12 +4207,39 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
   const selectedCount = selectedIds.length;
 
   if (loading) return (
-    <div className="text-center py-20">
-      <div className="text-5xl mb-4">🚀</div>
+    <div className="text-center py-16">
+      <style>{`
+        @keyframes envelope-fly-1 { 0% { transform: translate(0,0) rotate(0deg); opacity:1; } 100% { transform: translate(-120px,-80px) rotate(-20deg); opacity:0; } }
+        @keyframes envelope-fly-2 { 0% { transform: translate(0,0) rotate(0deg); opacity:1; } 100% { transform: translate(100px,-90px) rotate(15deg); opacity:0; } }
+        @keyframes envelope-fly-3 { 0% { transform: translate(0,0) rotate(0deg); opacity:1; } 100% { transform: translate(-60px,-110px) rotate(-30deg); opacity:0; } }
+        @keyframes envelope-fly-4 { 0% { transform: translate(0,0) rotate(0deg); opacity:1; } 100% { transform: translate(80px,-70px) rotate(25deg); opacity:0; } }
+        @keyframes envelope-fly-5 { 0% { transform: translate(0,0) rotate(0deg); opacity:1; } 100% { transform: translate(20px,-120px) rotate(-10deg); opacity:0; } }
+        @keyframes sparkle { 0%,100% { opacity:0; transform:scale(0) rotate(0deg); } 50% { opacity:1; transform:scale(1) rotate(180deg); } }
+        @keyframes broom-sweep { 0% { transform: translateX(-40px) rotate(-10deg); } 50% { transform: translateX(40px) rotate(10deg); } 100% { transform: translateX(-40px) rotate(-10deg); } }
+        @keyframes pile-shrink { 0%,40% { transform: scaleY(1); } 100% { transform: scaleY(0.3); } }
+      `}</style>
+      <div className="relative w-48 h-36 mx-auto mb-6">
+        {/* Messy email pile */}
+        <div className="absolute bottom-0 left-1/2 -translate-x-1/2" style={{ animation: 'pile-shrink 3s ease-in-out infinite' }}>
+          <div className="text-3xl" style={{ filter: 'grayscale(0.3)' }}>📧📩📨📧📩</div>
+          <div className="text-2xl -mt-2" style={{ filter: 'grayscale(0.3)' }}>📨📧📩📧</div>
+        </div>
+        {/* Flying envelopes */}
+        <div className="absolute bottom-8 left-1/2" style={{ animation: 'envelope-fly-1 2s ease-out infinite', animationDelay: '0s' }}>✉️</div>
+        <div className="absolute bottom-8 left-1/2" style={{ animation: 'envelope-fly-2 2s ease-out infinite', animationDelay: '0.4s' }}>📧</div>
+        <div className="absolute bottom-8 left-1/2" style={{ animation: 'envelope-fly-3 2s ease-out infinite', animationDelay: '0.8s' }}>📩</div>
+        <div className="absolute bottom-8 left-1/2" style={{ animation: 'envelope-fly-4 2s ease-out infinite', animationDelay: '1.2s' }}>✉️</div>
+        <div className="absolute bottom-8 left-1/2" style={{ animation: 'envelope-fly-5 2s ease-out infinite', animationDelay: '1.6s' }}>📨</div>
+        {/* Sparkles */}
+        <div className="absolute top-2 left-8 text-xl" style={{ animation: 'sparkle 1.5s ease-in-out infinite', animationDelay: '0.2s' }}>✨</div>
+        <div className="absolute top-0 right-8 text-lg" style={{ animation: 'sparkle 1.5s ease-in-out infinite', animationDelay: '0.7s' }}>✨</div>
+        <div className="absolute top-4 left-1/2 text-xl" style={{ animation: 'sparkle 1.5s ease-in-out infinite', animationDelay: '1.2s' }}>✨</div>
+        {/* Broom */}
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-3xl" style={{ animation: 'broom-sweep 1.5s ease-in-out infinite' }}>🧹</div>
+      </div>
       <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text)' }}>Inbox Declutter Mode</h2>
-      <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>Sit back — we're organizing your noise emails for mass cleanup</p>
-      <div className="w-8 h-8 border-3 border-t-transparent rounded-full animate-spin mx-auto" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent', borderWidth: 3 }} />
-      <p className="text-xs mt-3" style={{ color: 'var(--muted)' }}>Grouping by domain so you can clear hundreds in seconds</p>
+      <p className="text-sm" style={{ color: 'var(--muted)' }}>Sweeping through your noise emails for mass cleanup</p>
+      <p className="text-xs mt-2" style={{ color: '#a5b4fc' }}>Grouping by domain so you can clear hundreds in seconds</p>
     </div>
   );
 
