@@ -97,8 +97,29 @@ export async function PUT(request: NextRequest) {
 
       if (!primaryRes.data && !secondaryRes.data) return apiError('Neither sender found');
 
-      const primary = primaryRes.data || secondaryRes.data;
-      const secondary = secondaryRes.data || primaryRes.data;
+      // If one doesn't exist, create it first so merge has something to work with
+      if (!primaryRes.data) {
+        await admin.from(TABLES.SENDER_PRIORITIES).insert({
+          user_id: userId, sender_email: primary_email, tier: 'D', reply_count: 0,
+        });
+        primaryRes.data = { sender_email: primary_email, tier: 'D', reply_count: 0, aliases: [], accounts_seen: [], display_name: '' };
+      }
+      if (!secondaryRes.data) {
+        // Secondary doesn't exist — just add it as an alias to primary
+        const aliases = [...new Set([...(primaryRes.data.aliases || []), secondary_email])];
+        await admin.from(TABLES.SENDER_PRIORITIES)
+          .update({ aliases, updated_at: new Date().toISOString() })
+          .eq('user_id', userId)
+          .eq('sender_email', primary_email);
+        return apiSuccess({ merged: true, primary: primary_email, removed: secondary_email, combined_count: primaryRes.data.reply_count || 0 });
+      }
+
+      const primary = primaryRes.data;
+      const secondary = secondaryRes.data;
+
+      if (primary.sender_email === secondary.sender_email) {
+        return apiError('Cannot merge a sender with itself');
+      }
 
       // Merge: add reply counts, keep higher tier, combine accounts_seen
       const tierRank: Record<string, number> = { A: 4, B: 3, C: 2, D: 1 };
@@ -108,7 +129,7 @@ export async function PUT(request: NextRequest) {
       const aliases = [...new Set([...(primary.aliases || []), secondary.sender_email])];
 
       // Update primary with merged data
-      await admin.from(TABLES.SENDER_PRIORITIES)
+      const { error: updateError } = await admin.from(TABLES.SENDER_PRIORITIES)
         .update({
           reply_count: combinedCount,
           tier: bestTier,
@@ -119,6 +140,11 @@ export async function PUT(request: NextRequest) {
         })
         .eq('user_id', userId)
         .eq('sender_email', primary.sender_email);
+
+      if (updateError) {
+        console.error('Merge update failed:', updateError.message);
+        return apiError('Failed to merge senders', 500);
+      }
 
       // Delete the secondary
       await admin.from(TABLES.SENDER_PRIORITIES)
