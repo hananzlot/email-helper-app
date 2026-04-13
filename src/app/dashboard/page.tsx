@@ -2519,7 +2519,7 @@ export default function Dashboard() {
               {activeTab === 'reply-queue' && <ReplyQueueTab key={`triage-${account}-${unified}`} onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} onAdvancePreview={advancePreview} />}
               {activeTab === 'follow-up' && <FollowUpTab key={`followup-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
               {activeTab === 'snoozed' && <SnoozedTab key={`snoozed-${account}-${unified}`} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
-              {activeTab === 'cleanup' && <CleanupTab messages={messages} loading={loading} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} actionedIds={actionedIdsRef.current} />}
+              {activeTab === 'cleanup' && <CleanupTab onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
               {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} />}
               {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${triageVersion}`} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
@@ -4034,136 +4034,83 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted, actionedIds }: { messages: GmailMessage[]; loading: boolean; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; actionedIds: Set<string>; }) {
+function CleanupTab({ onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name' | 'domain'>('domain');
+  const [sortBy, setSortBy] = useState<'domain' | 'count' | 'name'>('domain');
   const [visibleGroups, setVisibleGroups] = useState(30);
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
   const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
   const [senderReplyCounts, setSenderReplyCounts] = useState<Record<string, number>>({});
-  const [tiersLoaded, setTiersLoaded] = useState(false);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  // Load sender priorities to know who is noise vs signal
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await apiGet('senders');
-        if (res.success && res.data) {
-          const tiers: Record<string, string> = {};
-          const counts: Record<string, number> = {};
-          for (const s of res.data) {
-            tiers[s.sender_email.toLowerCase()] = s.tier;
-            counts[s.sender_email.toLowerCase()] = s.reply_count || 0;
-          }
-          setSenderTiers(tiers);
-          setSenderReplyCounts(counts);
-        }
-      } catch (e) { console.error('Failed to load sender tiers for cleanup:', e); }
-      setTiersLoaded(true);
-    })();
-  }, []);
+  // Server-side loaded groups and messages
+  const [serverGroups, setServerGroups] = useState<{ key: string; name: string; email: string; count: number; messages: GmailMessage[] }[]>([]);
+  const [totalMessages, setTotalMessages] = useState(0);
 
-  // Promote a sender to a higher tier (moves them out of Cleanup into Triage)
-  async function promoteSender(email: string, name: string, newTier: string) {
+  // Load data from server-side API (all filtering/grouping/dedup done in SQL)
+  async function loadData() {
+    setLoading(true);
     try {
-      const res = await apiPut('senders', { sender_email: email, tier: newTier, display_name: name || email });
-      if (res.success) {
-        setSenderTiers(prev => ({ ...prev, [email.toLowerCase()]: newTier }));
-        showToast(`Promoted to Tier ${newTier}`, `${name || email} will now appear in Inbox (Triage)`);
-      } else {
-        showToast('Failed to promote', res.error);
+      const [ecRes, sendersRes] = await Promise.all([
+        apiGet(`easy-clear?limit=10000&groupBy=${sortBy}`),
+        apiGet('senders'),
+      ]);
+      if (ecRes.success && ecRes.data) {
+        const groups = ecRes.data.groups.map((g: { key: string; name: string; email: string; count: number; messages: { id: string; sender: string; senderEmail: string; subject: string; snippet: string; date: string; accountEmail: string }[] }) => ({
+          ...g,
+          messages: g.messages.map(m => ({
+            ...m, threadId: '', isUnread: true, labelIds: [], body: '', bodyHtml: '', to: '', cc: '',
+          } as GmailMessage)),
+        }));
+        setServerGroups(groups);
+        setTotalMessages(ecRes.data.totalMessages || 0);
+        reportCount?.(ecRes.data.totalMessages || 0);
+      }
+      if (sendersRes.success && sendersRes.data) {
+        const tiers: Record<string, string> = {};
+        const counts: Record<string, number> = {};
+        for (const s of sendersRes.data) {
+          tiers[s.sender_email.toLowerCase()] = s.tier;
+          counts[s.sender_email.toLowerCase()] = s.reply_count || 0;
+        }
+        setSenderTiers(tiers);
+        setSenderReplyCounts(counts);
       }
     } catch (e) {
-      showToast('Failed to promote', String(e));
+      console.error('Easy-Clear load failed:', e);
     }
+    setLoading(false);
   }
 
-  // Noise detection helpers
-  const noReplyPatterns = ['noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster'];
-  const automatedPatterns = ['notification', 'newsletter', 'digest', 'updates@', 'info@', 'support@', 'hello@', 'team@', 'news@', 'marketing@', 'promo'];
+  useEffect(() => { loadData(); }, [sortBy]);
 
-  function isNoiseSender(email: string): boolean {
-    const lower = email.toLowerCase();
-    const tier = senderTiers[lower];
-    // Signal senders (Tier A/B/C) go to Reply Queue / Triage, not here
-    if (tier === 'A' || tier === 'B' || tier === 'C') return false;
-    // Tier D = low priority = cleanup
-    if (tier === 'D') return true;
-    // No-reply / automated senders = always noise
-    if (noReplyPatterns.some(p => lower.includes(p))) return true;
-    if (automatedPatterns.some(p => lower.includes(p))) return true;
-    // Unknown senders (not in priority list at all) = cleanup
-    if (!tier) return true;
-    return false;
-  }
+  // Use server groups directly — no client-side filtering needed
+  const cleanupMessages = serverGroups.flatMap(g => g.messages);
 
-  // Easy-Clear: 10-second sync window, then lock
-  const [snapshot, setSnapshot] = useState<GmailMessage[]>([]);
-  const snapshotTaken = React.useRef(false);
-  const mountTime = React.useRef(Date.now());
-
-  function buildSnapshot(msgs: GmailMessage[]) {
-    const seenIds = new Set<string>();
-    return msgs.filter(m => {
-      if (!m.isUnread || !isNoiseSender(m.senderEmail)) return false;
-      if (seenIds.has(m.id)) return false;
-      seenIds.add(m.id);
-      return true;
-    });
-  }
-
-  // Load from Supabase cache on mount (instant for returning users)
-  useEffect(() => {
-    if (snapshotTaken.current || !tiersLoaded) return;
-    (async () => {
-      try {
-        const cacheRes = await apiGet('inbox-cache');
-        if (cacheRes.success && cacheRes.data?.messages?.length > 0 && !snapshotTaken.current) {
-          const cachedMsgs = cacheRes.data.messages
-            .filter((m: { is_unread: boolean }) => m.is_unread)
-            .map((m: { gmail_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; is_unread: boolean; label_ids: string[]; account_email: string }) => ({
-              id: m.gmail_id, threadId: m.thread_id, sender: m.sender, senderEmail: m.sender_email,
-              subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.is_unread,
-              labelIds: m.label_ids, accountEmail: m.account_email, body: '', bodyHtml: '', to: '', cc: '',
-            } as GmailMessage));
-          const noise = buildSnapshot(cachedMsgs);
-          if (noise.length > 0 && !snapshotTaken.current) {
-            setSnapshot(noise);
-          }
-        }
-      } catch {}
-    })();
-  }, [tiersLoaded]);
-
-  // During the 10-second window, keep updating with better data from messages state
-  useEffect(() => {
-    if (snapshotTaken.current || !tiersLoaded) return;
-    const elapsed = Date.now() - mountTime.current;
-    if (elapsed < 10000 && messages.length > 0) {
-      const noise = buildSnapshot(messages);
-      if (noise.length > snapshot.length) {
-        setSnapshot(noise);
-      }
+  // Execute action grouped by account
+  function actionByAccount(action: string, msgIds: string[]) {
+    const byAccount = new Map<string, string[]>();
+    for (const id of msgIds) {
+      const msg = cleanupMessages.find(m => m.id === id);
+      const acct = msg?.accountEmail || _currentAccount;
+      if (!byAccount.has(acct)) byAccount.set(acct, []);
+      byAccount.get(acct)!.push(id);
     }
-  }, [messages.length, tiersLoaded]);
+    for (const [acct, ids] of byAccount) {
+      onAction(action, ids, undefined, acct);
+    }
+    // Remove from local state
+    const removedIds = new Set(msgIds);
+    setServerGroups(prev => prev.map(g => ({
+      ...g,
+      count: g.messages.filter(m => !removedIds.has(m.id)).length,
+      messages: g.messages.filter(m => !removedIds.has(m.id)),
+    })).filter(g => g.count > 0));
+  }
 
-  // Hard lock at 10 seconds — stop accepting updates
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (!snapshotTaken.current) {
-        if (messages.length > 0 && tiersLoaded) {
-          const noise = buildSnapshot(messages);
-          if (noise.length > 0) setSnapshot(noise);
-        }
-        snapshotTaken.current = true;
-      }
-    }, 10000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Remove items from snapshot ONLY when user explicitly acts
+  // No more client-side snapshot/filtering
   useEffect(() => {
     if (!snapshotTaken.current || actionedIds.size === 0) return;
     setSnapshot(prev => {
@@ -4175,73 +4122,10 @@ function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onP
   const cleanupMessages = snapshot;
 
   // Report count to parent
-  useEffect(() => { reportCount?.(cleanupMessages.length); }, [cleanupMessages.length]);
-
-  // Common email providers — don't group these by domain
-  const commonDomains = new Set(['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com', 'icloud.com', 'me.com', 'live.com', 'msn.com', 'protonmail.com', 'mail.com']);
-
-  // Group filtered messages — by sender email normally, or by domain when sorted by domain
+  // Groups come pre-sorted from the server API
+  const groups = serverGroups;
   const senderGroups: Record<string, { name: string; email: string; messages: GmailMessage[] }> = {};
-  for (const msg of cleanupMessages) {
-    let key: string;
-    let groupName: string;
-    let groupEmail: string;
-
-    if (sortBy === 'domain') {
-      const domain = (msg.senderEmail.split('@')[1] || '').toLowerCase();
-      if (commonDomains.has(domain)) {
-        // Common domains — group by individual sender
-        key = msg.senderEmail.toLowerCase();
-        groupName = msg.sender;
-        groupEmail = msg.senderEmail;
-      } else {
-        // Unique domains — group all senders from same domain
-        key = `@${domain}`;
-        groupName = domain;
-        groupEmail = `@${domain}`;
-      }
-    } else {
-      key = msg.senderEmail.toLowerCase();
-      groupName = msg.sender;
-      groupEmail = msg.senderEmail;
-    }
-
-    if (!senderGroups[key]) {
-      senderGroups[key] = { name: groupName, email: groupEmail, messages: [] };
-    }
-    senderGroups[key].messages.push(msg);
-  }
-
-  const groups = Object.values(senderGroups);
-  const tierOrder: Record<string, number> = { D: 0 };
-  if (sortBy === 'tier') {
-    groups.sort((a, b) => {
-      const tierA = senderTiers[a.email.toLowerCase()] || '';
-      const tierB = senderTiers[b.email.toLowerCase()] || '';
-      const orderA = tierOrder[tierA] ?? 1; // no tier = after D
-      const orderB = tierOrder[tierB] ?? 1;
-      if (orderA !== orderB) return orderA - orderB;
-      // Within same tier, sort by reply count (most sent first), then by message count
-      const rcA = senderReplyCounts[a.email.toLowerCase()] || 0;
-      const rcB = senderReplyCounts[b.email.toLowerCase()] || 0;
-      if (rcB !== rcA) return rcB - rcA;
-      return b.messages.length - a.messages.length;
-    });
-  } else if (sortBy === 'count') {
-    groups.sort((a, b) => {
-      if (b.messages.length !== a.messages.length) return b.messages.length - a.messages.length;
-      const rcA = senderReplyCounts[a.email.toLowerCase()] || 0;
-      const rcB = senderReplyCounts[b.email.toLowerCase()] || 0;
-      return rcB - rcA;
-    });
-  } else if (sortBy === 'domain') {
-    groups.sort((a, b) => {
-      if (b.messages.length !== a.messages.length) return b.messages.length - a.messages.length;
-      return a.name.localeCompare(b.name);
-    });
-  } else {
-    groups.sort((a, b) => a.name.localeCompare(b.name));
-  }
+  for (const g of groups) senderGroups[g.email.toLowerCase()] = g;
 
   function toggleGroup(email: string) {
     setSelectedGroups(prev => {
@@ -4311,15 +4195,14 @@ function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onP
   const selectedIds = getSelectedIds();
   const selectedCount = selectedIds.length;
 
-  if (!tiersLoaded || parentLoading || (!snapshotTaken.current && snapshot.length === 0)) return (
+  if (loading) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
       <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
-      <p className="text-sm">Preparing your Easy-Clear list...</p>
-      <p className="text-[10px] mt-1">Gathering all low-priority emails</p>
+      <p className="text-sm">Loading Easy-Clear...</p>
     </div>
   );
 
-  if (cleanupMessages.length === 0) return (
+  if (groups.length === 0) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
       <p className="text-lg mb-2">No low-priority emails to clean up</p>
       <p className="text-sm">Only showing noise senders (Tier C/D, unknown, automated). Your important senders are in the Reply Queue.</p>
@@ -4338,19 +4221,11 @@ function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onP
           </button>
           <div>
             <p className="text-sm font-semibold">{groups.length} senders</p>
-            <p className="text-xs" style={{ color: 'var(--muted)' }}>{cleanupMessages.length} low-priority messages</p>
+            <p className="text-xs" style={{ color: 'var(--muted)' }}>{totalMessages.toLocaleString()} low-priority messages</p>
           </div>
           <button onClick={() => {
-            // Instant re-snapshot from current messages — no waiting for load
-            const seenIds = new Set<string>();
-            const noise = messages.filter(m => {
-              if (!m.isUnread || !isNoiseSender(m.senderEmail)) return false;
-              if (seenIds.has(m.id)) return false;
-              seenIds.add(m.id);
-              return true;
-            });
-            setSnapshot(noise);
             setVisibleGroups(30);
+            loadData();
           }}
             className="px-3 py-1.5 text-xs font-medium rounded-lg border"
             style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
@@ -4368,11 +4243,6 @@ function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onP
             className="px-3 py-1 text-xs rounded-full border font-medium"
             style={{ background: sortBy === 'count' ? 'var(--accent)' : 'transparent', color: sortBy === 'count' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
             Most emails
-          </button>
-          <button onClick={() => setSortBy('tier')}
-            className="px-3 py-1 text-xs rounded-full border font-medium"
-            style={{ background: sortBy === 'tier' ? 'var(--accent)' : 'transparent', color: sortBy === 'tier' ? 'white' : 'var(--muted)', borderColor: 'var(--border)' }}>
-            By Tier
           </button>
           <button onClick={() => setSortBy('name')}
             className="px-3 py-1 text-xs rounded-full border font-medium"
