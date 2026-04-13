@@ -2448,19 +2448,19 @@ export default function Dashboard() {
                 onClick={() => setActiveTab(tab.id)}
                 className="px-3.5 py-2 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5"
                 style={{
-                  background: isActive ? 'var(--accent)' : 'white',
-                  color: isActive ? 'white' : '#475569',
+                  background: isActive ? '#eef2ff' : 'white',
+                  color: isActive ? 'var(--accent)' : '#475569',
                   boxShadow: isActive
-                    ? '0 2px 8px rgba(79, 70, 229, 0.3)'
+                    ? '0 2px 8px rgba(79, 70, 229, 0.15)'
                     : '0 1px 3px rgba(0,0,0,0.08)',
-                  border: isActive ? '1.5px solid var(--accent)' : '1.5px solid #e2e8f0',
+                  border: isActive ? '2px solid var(--accent)' : '1.5px solid #e2e8f0',
                 }}
               >
                 {tab.label}
                 {count != null && count > 0 && (
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center leading-none"
                     style={{
-                      background: isActive ? 'rgba(255,255,255,0.25)' : '#f1f5f9',
+                      background: isActive ? 'var(--accent)' : '#f1f5f9',
                       color: isActive ? 'white' : '#64748b',
                     }}>
                     {count > 9999 ? `${Math.round(count / 1000)}k` : count > 99 ? count.toLocaleString() : count}
