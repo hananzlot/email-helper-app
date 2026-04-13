@@ -42,6 +42,15 @@ Read emails are excluded from all tab views and tab counts.
 Read emails can ONLY be found via the **global search box**.
 This is a core UX rule — do not change without explicit instruction.
 
+### CRITICAL: Backend-First for Data Operations
+Always prefer server-side SQL/Supabase queries over client-side JavaScript when dealing with:
+- Large data sets (grouping, counting, filtering, sorting)
+- Bulk updates or deletes
+- Aggregations across many rows
+- Any operation on cached inbox data (45k+ rows per user)
+The client should receive ready-to-render results, not raw data to process.
+Supabase returns max 1000 rows per query — use `.range()` pagination to fetch all rows when needed.
+
 ### CRITICAL: User Data Isolation
 All features and updates MUST ensure full user isolation at all times:
 - Every Supabase query MUST filter by `user_id` — never return or modify another user's data
