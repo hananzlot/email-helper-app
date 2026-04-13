@@ -118,6 +118,13 @@ export default function Home() {
             </div>
           </div>
         </div>
+
+        {/* Footer */}
+        <div className="mt-8 pb-4 text-center" style={{ fontSize: 12, color: 'var(--muted)' }}>
+          <a href="/privacy" style={{ color: 'var(--muted)', textDecoration: 'none' }}>Privacy Policy</a>
+          <span style={{ margin: '0 8px' }}>&middot;</span>
+          <a href="/terms" style={{ color: 'var(--muted)', textDecoration: 'none' }}>Terms of Service</a>
+        </div>
       </div>
     </div>
   );
