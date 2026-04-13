@@ -2509,7 +2509,7 @@ export default function Dashboard() {
               {activeTab === 'reply-queue' && <ReplyQueueTab key={`triage-${account}-${unified}`} onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} onAdvancePreview={advancePreview} />}
               {activeTab === 'follow-up' && <FollowUpTab key={`followup-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
               {activeTab === 'snoozed' && <SnoozedTab key={`snoozed-${account}-${unified}`} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
-              {activeTab === 'cleanup' && <CleanupTab messages={messages} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
+              {activeTab === 'cleanup' && <CleanupTab messages={messages} loading={loading} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
               {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} />}
               {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${triageVersion}`} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
@@ -4024,7 +4024,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { messages: GmailMessage[]; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
+function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { messages: GmailMessage[]; loading: boolean; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name' | 'domain'>('domain');
   const [visibleGroups, setVisibleGroups] = useState(30);
@@ -4089,24 +4089,18 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
     return false;
   }
 
-  // Snapshot messages after initial load settles — wait for loading to finish
+  // Snapshot messages once initial load completes
   const [snapshot, setSnapshot] = useState<GmailMessage[]>([]);
   const snapshotTaken = React.useRef(false);
-  const snapshotTimer = React.useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (!tiersLoaded || messages.length === 0 || snapshotTaken.current) return;
-    // Debounce: wait 2 seconds after last messages change before snapshotting
-    if (snapshotTimer.current) clearTimeout(snapshotTimer.current);
-    snapshotTimer.current = setTimeout(() => {
-      const noise = messages.filter(m => m.isUnread && isNoiseSender(m.senderEmail));
-      if (noise.length > 0) {
-        setSnapshot(noise);
-        snapshotTaken.current = true;
-      }
-    }, 2000);
-    return () => { if (snapshotTimer.current) clearTimeout(snapshotTimer.current); };
-  }, [tiersLoaded, messages.length]);
+    if (snapshotTaken.current || !tiersLoaded || parentLoading || messages.length === 0) return;
+    const noise = messages.filter(m => m.isUnread && isNoiseSender(m.senderEmail));
+    if (noise.length > 0) {
+      setSnapshot(noise);
+      snapshotTaken.current = true;
+    }
+  }, [tiersLoaded, parentLoading, messages.length]);
 
   // Remove items from snapshot ONLY when user explicitly acts via actionedIdsRef
   useEffect(() => {
@@ -4256,7 +4250,7 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
   const selectedIds = getSelectedIds();
   const selectedCount = selectedIds.length;
 
-  if (!tiersLoaded || messages.length === 0 || (!snapshotTaken.current && snapshot.length === 0)) return (
+  if (!tiersLoaded || parentLoading || (!snapshotTaken.current && snapshot.length === 0)) return (
     <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
       <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
       <p className="text-sm">Preparing your Easy-Clear list...</p>
