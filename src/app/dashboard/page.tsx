@@ -4115,7 +4115,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                         showToast={showToast} accountEmail={item.account_email}
                         replyAll={replyAllTo === item.id}
                         cc={replyAllTo === item.id ? [...(item.to || '').split(','), ...(item.cc || '').split(',')].map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(item.sender_email.toLowerCase()) && !(item.account_email && e.toLowerCase().includes(item.account_email.toLowerCase()))).join(', ') : undefined}
-                        onSent={() => { setReplyingTo(null); setReplyAllTo(null); queueAction('archive', item.message_id, item.id, item.account_email); }}
+                        onSent={() => { setReplyingTo(null); setReplyAllTo(null); onAction('markRead', [item.message_id], undefined, item.account_email); showToast('Reply sent & marked as read'); }}
                         onCancel={() => { setReplyingTo(null); setReplyAllTo(null); }}
                       />
                     </div>
@@ -6125,7 +6125,7 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                     showToast={showToast} accountEmail={msg.accountEmail}
                     replyAll={replyAllTo === msg.id}
                     cc={replyAllTo === msg.id ? (msg.cc || msg.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(msg.senderEmail.toLowerCase()) && !(msg.accountEmail && e.toLowerCase().includes(msg.accountEmail.toLowerCase()))).join(', ') : undefined}
-                    onSent={() => { setReplyingTo(null); setReplyAllTo(null); onAction('archive', [msg.id], undefined, msg.accountEmail); onRemove(msg.id); }}
+                    onSent={() => { setReplyingTo(null); setReplyAllTo(null); onAction('markRead', [msg.id], undefined, msg.accountEmail); showToast('Reply sent & marked as read'); }}
                     onCancel={() => { setReplyingTo(null); setReplyAllTo(null); }}
                   />
                 </div>

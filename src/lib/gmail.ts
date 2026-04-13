@@ -500,21 +500,19 @@ export async function sendEmail(
     threadId?: string;
   }
 ) {
-  const messageParts = [
+  // Build headers, filter out empty optional ones, then add blank line + body
+  const headers = [
     `To: ${sanitizeHeader(options.to)}`,
-    options.cc ? `Cc: ${sanitizeHeader(options.cc)}` : '',
-    options.bcc ? `Bcc: ${sanitizeHeader(options.bcc)}` : '',
+    options.cc ? `Cc: ${sanitizeHeader(options.cc)}` : null,
+    options.bcc ? `Bcc: ${sanitizeHeader(options.bcc)}` : null,
     `Subject: ${sanitizeHeader(options.subject)}`,
-    options.inReplyTo ? `In-Reply-To: ${sanitizeHeader(options.inReplyTo)}` : '',
-    options.inReplyTo ? `References: ${sanitizeHeader(options.inReplyTo)}` : '',
+    options.inReplyTo ? `In-Reply-To: ${sanitizeHeader(options.inReplyTo)}` : null,
+    options.inReplyTo ? `References: ${sanitizeHeader(options.inReplyTo)}` : null,
     'Content-Type: text/html; charset=utf-8',
-    '',
-    options.body,
-  ]
-    .filter(Boolean)
-    .join('\r\n');
+  ].filter((h): h is string => h !== null);
 
-  const raw = Buffer.from(messageParts).toString('base64url');
+  // RFC 2822: blank line separates headers from body (MUST NOT be filtered out)
+  const raw = Buffer.from(headers.join('\r\n') + '\r\n\r\n' + options.body).toString('base64url');
 
   const res = await gmail.users.messages.send({
     userId: 'me',
@@ -534,20 +532,16 @@ export async function createDraft(
     threadId?: string;
   }
 ): Promise<GmailDraft> {
-  const messageParts = [
+  const headers = [
     `To: ${sanitizeHeader(options.to)}`,
-    options.cc ? `Cc: ${sanitizeHeader(options.cc)}` : '',
+    options.cc ? `Cc: ${sanitizeHeader(options.cc)}` : null,
     `Subject: ${sanitizeHeader(options.subject)}`,
-    options.inReplyTo ? `In-Reply-To: ${sanitizeHeader(options.inReplyTo)}` : '',
-    options.inReplyTo ? `References: ${sanitizeHeader(options.inReplyTo)}` : '',
+    options.inReplyTo ? `In-Reply-To: ${sanitizeHeader(options.inReplyTo)}` : null,
+    options.inReplyTo ? `References: ${sanitizeHeader(options.inReplyTo)}` : null,
     'Content-Type: text/html; charset=utf-8',
-    '',
-    options.body,
-  ]
-    .filter(Boolean)
-    .join('\r\n');
+  ].filter((h): h is string => h !== null);
 
-  const raw = Buffer.from(messageParts).toString('base64url');
+  const raw = Buffer.from(headers.join('\r\n') + '\r\n\r\n' + options.body).toString('base64url');
 
   const res = await gmail.users.drafts.create({
     userId: 'me',
@@ -575,15 +569,13 @@ export async function updateDraft(
     threadId?: string;
   }
 ) {
-  const messageParts = [
+  const headers = [
     `To: ${sanitizeHeader(options.to)}`,
     `Subject: ${sanitizeHeader(options.subject)}`,
     'Content-Type: text/html; charset=utf-8',
-    '',
-    options.body,
-  ].join('\r\n');
+  ];
 
-  const raw = Buffer.from(messageParts).toString('base64url');
+  const raw = Buffer.from(headers.join('\r\n') + '\r\n\r\n' + options.body).toString('base64url');
 
   const res = await gmail.users.drafts.update({
     userId: 'me',
