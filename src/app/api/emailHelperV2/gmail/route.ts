@@ -90,7 +90,8 @@ export async function GET(request: NextRequest) {
     }
   } catch (err) {
     console.error(`Gmail GET error (${action}):`, err);
-    return apiError(`Gmail operation failed: ${err}`, 500);
+    console.error('Gmail operation failed:', err);
+    return apiError('Gmail operation failed', 500);
   }
 }
 
@@ -229,6 +230,7 @@ export async function POST(request: NextRequest) {
       }
     }
     console.error('Gmail POST error:', err);
-    return apiError(`Gmail operation failed: ${err}`, 500);
+    console.error('Gmail operation failed:', err);
+    return apiError('Gmail operation failed', 500);
   }
 }

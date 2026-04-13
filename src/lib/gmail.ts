@@ -22,7 +22,8 @@ export function getGmailClient(accessToken: string, refreshToken?: string) {
 
 // Gmail scopes — full access scope covers read, modify, compose, send, delete
 export const GMAIL_SCOPES = [
-  'https://mail.google.com/',  // Full access — needed for permanent delete
+  'https://www.googleapis.com/auth/gmail.modify',   // Read, write, send, trash (no permanent delete)
+  'https://www.googleapis.com/auth/gmail.readonly',  // Read-only access
   'openid',
   'email',
   'profile',
@@ -423,8 +424,8 @@ export async function untrashMessage(gmail: gmail_v1.Gmail, messageId: string) {
 }
 
 export async function deleteMessage(gmail: gmail_v1.Gmail, messageId: string) {
-  // Permanent delete — use with caution
-  await gmail.users.messages.delete({ userId: 'me', id: messageId });
+  // Move to trash instead of permanent delete (gmail.modify scope doesn't allow permanent delete)
+  await gmail.users.messages.trash({ userId: 'me', id: messageId });
 }
 
 export async function markAsRead(gmail: gmail_v1.Gmail, messageId: string) {

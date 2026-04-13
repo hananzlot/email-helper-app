@@ -1,5 +1,23 @@
 import Anthropic from '@anthropic-ai/sdk';
 import puppeteer from 'puppeteer-core';
+import { lookup } from 'dns/promises';
+
+/** SSRF protection: reject private/internal IPs */
+async function isSafeUrl(urlStr: string): Promise<boolean> {
+  try {
+    const url = new URL(urlStr);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return false;
+    const { address } = await lookup(hostname);
+    const parts = address.split('.').map(Number);
+    if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) return false;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
+    if (parts[0] === 192 && parts[1] === 168) return false;
+    if (parts[0] === 169 && parts[1] === 254) return false;
+    return true;
+  } catch { return false; }
+}
 
 const BROWSERLESS_URL = process.env.BROWSERLESS_API_KEY
   ? `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_API_KEY}`
@@ -19,6 +37,11 @@ export async function aiUnsubscribe(
 ): Promise<{ success: boolean; method: string; details: string }> {
   if (!BROWSERLESS_URL) {
     return { success: false, method: 'ai_agent', details: 'BROWSERLESS_API_KEY not configured' };
+  }
+
+  // SSRF protection: reject private/internal URLs
+  if (!await isSafeUrl(unsubscribeUrl)) {
+    return { success: false, method: 'ai_agent', details: 'URL blocked by SSRF protection' };
   }
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
@@ -68,13 +91,13 @@ export async function aiUnsubscribe(
           },
           {
             type: 'text',
-            text: `You are an AI agent helping a user unsubscribe from an email list. The user's email is: ${userEmail}
+            text: `You are an AI agent helping a user unsubscribe from an email list.
 
 This is a screenshot of an unsubscribe page. Analyze it and respond with a JSON array of actions to complete the unsubscription.
 
 Available actions:
 - {"type": "click", "selector": "CSS selector of element to click"}
-- {"type": "fill", "selector": "CSS selector of input", "value": "text to type"}
+- {"type": "fill", "selector": "CSS selector of input", "value": "USE_EMAIL_PLACEHOLDER"}
 - {"type": "select", "selector": "CSS selector of dropdown", "value": "option value"}
 - {"type": "done", "message": "Already unsubscribed or confirmation visible"}
 - {"type": "captcha", "message": "Page has a captcha that cannot be automated"}
@@ -82,14 +105,14 @@ Available actions:
 
 Rules:
 - If there's a simple "Unsubscribe" or "Confirm" button, just click it
-- If there's an email field, fill it with the user's email then click submit
+- If there's an email field, use value "USE_EMAIL_PLACEHOLDER" — it will be replaced with the actual email
 - If there's a reason dropdown, select any reason
 - If the page already shows a success/confirmation message, return done
 - If there's a captcha, return captcha
 - Use specific CSS selectors that would work with document.querySelector()
 
 Respond ONLY with the JSON array, no explanation. Example:
-[{"type": "fill", "selector": "input[type=email]", "value": "${userEmail}"}, {"type": "click", "selector": "button[type=submit]"}]
+[{"type": "fill", "selector": "input[type=email]", "value": "USE_EMAIL_PLACEHOLDER"}, {"type": "click", "selector": "button[type=submit]"}]
 
 Page text content: ${pageText.slice(0, 1000)}`
           }
@@ -128,8 +151,10 @@ Page text content: ${pageText.slice(0, 1000)}`
 
           case 'fill':
             if (action.selector && action.value) {
+              // Replace placeholder with actual email at execution time (not in AI prompt)
+              const fillValue = action.value === 'USE_EMAIL_PLACEHOLDER' ? userEmail : action.value;
               await page.waitForSelector(action.selector, { timeout: 5000 });
-              await page.type(action.selector, action.value, { delay: 50 });
+              await page.type(action.selector, fillValue, { delay: 50 });
             }
             break;
 

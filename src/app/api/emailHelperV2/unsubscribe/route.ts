@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { lookup } from 'dns/promises';
 import { getRequestContext, apiSuccess, apiError } from '@/lib/api-helpers';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { getValidGmailToken } from '@/lib/auth';
@@ -6,6 +7,40 @@ import { getGmailClient, getMessage } from '@/lib/gmail';
 import { TABLES } from '@/lib/tables';
 
 const UNSUB_TABLE = 'emailHelperV2_unsubscribe_log';
+
+/**
+ * Validate a URL is safe to fetch (SSRF protection).
+ * Rejects non-HTTP(S), private/internal IPs, and localhost.
+ */
+async function isSafeUrl(urlStr: string): Promise<boolean> {
+  try {
+    const url = new URL(urlStr);
+    // Only allow http/https
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    // Block localhost
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]') return false;
+    // Resolve DNS and check for private IPs
+    try {
+      const { address } = await lookup(hostname);
+      const parts = address.split('.').map(Number);
+      // Block private ranges: 10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x, 0.x
+      if (parts[0] === 10) return false;
+      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return false;
+      if (parts[0] === 192 && parts[1] === 168) return false;
+      if (parts[0] === 127) return false;
+      if (parts[0] === 169 && parts[1] === 254) return false;
+      if (parts[0] === 0) return false;
+      // Block IPv6 private (fd00::/8 — caught by hostname check above for [::1])
+    } catch {
+      // DNS resolution failed — block it
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * POST /api/emailHelperV2/unsubscribe
@@ -153,38 +188,42 @@ async function tryListUnsubscribeHeader(
       }
     }
 
+    // Filter URLs through SSRF check
+    const safeUrls: string[] = [];
+    for (const u of urls) {
+      if (await isSafeUrl(u)) safeUrls.push(u);
+    }
+
     // Prefer one-click HTTP unsubscribe (RFC 8058)
-    if (urls.length > 0 && unsubPostHeader) {
+    if (safeUrls.length > 0 && unsubPostHeader) {
       try {
-        const response = await fetch(urls[0], {
+        const response = await fetch(safeUrls[0], {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: 'List-Unsubscribe=One-Click',
           redirect: 'follow',
         });
         if (response.ok || response.status === 200 || response.status === 302) {
-          return { success: true, method: 'header_oneclick', url: urls[0] };
+          return { success: true, method: 'header_oneclick', url: safeUrls[0] };
         }
       } catch {}
     }
 
     // Try HTTP GET on the unsubscribe URL
-    if (urls.length > 0) {
+    if (safeUrls.length > 0) {
       try {
-        const response = await fetch(urls[0], {
+        const response = await fetch(safeUrls[0], {
           method: 'GET',
           redirect: 'follow',
           headers: { 'User-Agent': 'Clearbox-Unsubscribe/1.0' },
         });
         if (response.ok) {
-          // Check if response contains confirmation or a form
           const html = await response.text();
           const looksSuccessful = /unsubscrib(ed|e success|e confirm|tion complete|tion success)/i.test(html);
           if (looksSuccessful) {
-            return { success: true, method: 'header_url', url: urls[0] };
+            return { success: true, method: 'header_url', url: safeUrls[0] };
           }
-          // Even if not confirmed, the GET might have been enough
-          return { success: true, method: 'header_url_visited', url: urls[0] };
+          return { success: true, method: 'header_url_visited', url: safeUrls[0] };
         }
       } catch {}
     }
@@ -243,21 +282,25 @@ async function tryBodyUnsubscribeLink(
 
   if (allUrls.size === 0) return { success: false };
 
-  // Try the first unsubscribe URL
-  const url = [...allUrls][0];
+  // SSRF check: only allow safe URLs
+  let safeUrl: string | null = null;
+  for (const u of allUrls) {
+    if (await isSafeUrl(u)) { safeUrl = u; break; }
+  }
+  if (!safeUrl) return { success: false };
+
   try {
-    const response = await fetch(url, {
+    const response = await fetch(safeUrl, {
       method: 'GET',
       redirect: 'follow',
       headers: { 'User-Agent': 'Clearbox-Unsubscribe/1.0' },
     });
     if (response.ok) {
-      return { success: true, url };
+      return { success: true, url: safeUrl };
     }
   } catch {}
 
-  // Even if fetch failed, return the URL — user can visit manually
-  return { success: true, url };
+  return { success: true, url: safeUrl };
 }
 
 /**
