@@ -4108,15 +4108,14 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
     return () => { if (snapshotTimer.current) clearTimeout(snapshotTimer.current); };
   }, [tiersLoaded, messages.length]);
 
-  // Remove items from snapshot when user acts (archive/trash/read)
+  // Remove items from snapshot ONLY when user explicitly acts via actionedIdsRef
   useEffect(() => {
-    if (!snapshotTaken.current) return;
-    const liveIds = new Set(messages.filter(m => m.isUnread).map(m => m.id));
+    if (!snapshotTaken.current || actionedIdsRef.current.size === 0) return;
     setSnapshot(prev => {
-      const filtered = prev.filter(m => liveIds.has(m.id));
-      return filtered.length === prev.length ? prev : filtered; // Only update if something changed
+      const filtered = prev.filter(m => !actionedIdsRef.current.has(m.id));
+      return filtered.length === prev.length ? prev : filtered;
     });
-  }, [messages]);
+  });
 
   const cleanupMessages = snapshot;
 
