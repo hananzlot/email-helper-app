@@ -5220,11 +5220,11 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                             showToast('Snoozed', `Will reappear ${label}`);
                           }} />
                         </div>
-                        <button onClick={(e) => { e.stopPropagation(); onAction('archive', [latest.id], undefined, latest.accountEmail); showToast('Archived'); }}
+                        <button onClick={(e) => { e.stopPropagation(); onAction('archive', [latest.id], undefined, latest.accountEmail); setStarredSent(prev => prev.filter(m => m.id !== latest.id)); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length + awaitingReply.length) - 1); showToast('Archived'); }}
                           className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
                           Archive
                         </button>
-                        <button onClick={(e) => { e.stopPropagation(); onAction('trash', [latest.id], undefined, latest.accountEmail); showToast('Trashed'); }}
+                        <button onClick={(e) => { e.stopPropagation(); onAction('trash', [latest.id], undefined, latest.accountEmail); setStarredSent(prev => prev.filter(m => m.id !== latest.id)); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length + awaitingReply.length) - 1); showToast('Trashed'); }}
                           className="px-2 py-1 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
                           Trash
                         </button>
@@ -5303,11 +5303,11 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                           showToast('Snoozed', `Will reappear ${label}`);
                         }} />
                       </div>
-                      <button onClick={(e) => { e.stopPropagation(); onAction('archive', [latest.id], undefined, latest.accountEmail); showToast('Archived'); }}
+                      <button onClick={(e) => { e.stopPropagation(); onAction('archive', [latest.id], undefined, latest.accountEmail); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length + awaitingReply.length) - 1); showToast('Archived'); }}
                         className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
                         Archive
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); onAction('trash', [latest.id], undefined, latest.accountEmail); showToast('Trashed'); }}
+                      <button onClick={(e) => { e.stopPropagation(); onAction('trash', [latest.id], undefined, latest.accountEmail); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length + awaitingReply.length) - 1); showToast('Trashed'); }}
                         className="px-2 py-1 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
                         Trash
                       </button>
