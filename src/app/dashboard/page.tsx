@@ -1253,11 +1253,12 @@ export default function Dashboard() {
             let totalLoaded = cachedMsgCount;
             // Paginate through Gmail, skipping pages we already have in cache
             while (nextToken && totalLoaded < MAX_MESSAGES) {
+              // Rate limit: 2s delay between pages to stay within Gmail quota
+              await new Promise(r => setTimeout(r, 2000));
               let pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-              // Retry on failure (Gmail rate limit / transient errors)
-              let retryFailed = false;
-              for (let retry = 0; retry < 3 && !pageRes.success; retry++) {
-                await new Promise(r => setTimeout(r, 5000 * (retry + 1)));
+              // On rate limit, wait longer and retry once
+              if (!pageRes.success && String(pageRes.error || '').includes('rate limit')) {
+                await new Promise(r => setTimeout(r, 15000));
                 pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
               }
               if (!pageRes.success || !pageRes.data?.messages?.length) {
@@ -1296,8 +1297,24 @@ export default function Dashboard() {
             setLoadingProgress({ loaded: totalLoaded, total: Math.min(totalToLoad, MAX_MESSAGES), phase: `Loading ${Math.min(totalToLoad, MAX_MESSAGES).toLocaleString()} emails...` });
           }
           while (nextToken && totalLoaded < MAX_MESSAGES) {
+            await new Promise(r => setTimeout(r, 2000)); // Rate limit between pages
             const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-            if (!pageRes.success || !pageRes.data?.messages?.length) break;
+            if (!pageRes.success || !pageRes.data?.messages?.length) {
+              // On rate limit, wait and retry once
+              if (!pageRes.success && String(pageRes.error || '').includes('rate limit')) {
+                await new Promise(r => setTimeout(r, 15000));
+                const retry = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+                if (retry.success && retry.data?.messages?.length) {
+                  const retryMsgs = retry.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
+                  setMessages(prev => [...prev, ...retryMsgs]);
+                  totalLoaded += retryMsgs.length;
+                  nextToken = retry.data.nextPageToken;
+                  saveToCacheBackground(account, retryMsgs);
+                  continue;
+                }
+              }
+              break;
+            }
             const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
             setMessages(prev => [...prev, ...pageMsgs]);
             totalLoaded += pageMsgs.length;
@@ -1548,7 +1565,7 @@ export default function Dashboard() {
     if (isFirstLoad) localStorage.setItem('email_helper_visited', '1');
   }, [account, unified, accounts.length]);
 
-  // Auto-refresh every 2 minutes for inbox data (skip while on Easy-Clear to prevent list jumping)
+  // Auto-refresh every 5 minutes for inbox data (skip while on Easy-Clear to prevent list jumping)
   useEffect(() => {
     if (!account) return;
     const interval = setInterval(() => {
@@ -1558,7 +1575,7 @@ export default function Dashboard() {
       } else {
         loadInbox(true, true);
       }
-    }, 2 * 60 * 1000);
+    }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [account, unified, accounts.length, loadInbox, loadUnifiedInbox, activeTab]);
 
