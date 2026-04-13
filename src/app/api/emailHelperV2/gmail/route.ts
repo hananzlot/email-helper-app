@@ -90,7 +90,21 @@ export async function GET(request: NextRequest) {
     }
   } catch (err) {
     console.error(`Gmail GET error (${action}):`, err);
-    console.error('Gmail operation failed:', err);
+    const errStr = String(err);
+    console.error('Gmail GET failed:', action, errStr);
+    // Classify the error for the client
+    if (errStr.includes('not found') || errStr.includes('Not Found') || errStr.includes('notFound')) {
+      return apiError('Message not found — it may have been moved or deleted', 404);
+    }
+    if (errStr.includes('invalid_grant') || errStr.includes('Token has been expired') || errStr.includes('Invalid Credentials')) {
+      return apiError('Gmail session expired — try logging out and back in', 401);
+    }
+    if (errStr.includes('insufficient') || errStr.includes('Insufficient Permission')) {
+      return apiError('Permission denied — try logging out and back in to re-authorize', 403);
+    }
+    if (errStr.includes('quota') || errStr.includes('Rate Limit') || errStr.includes('rateLimitExceeded')) {
+      return apiError('Gmail rate limit — please wait a moment and try again', 429);
+    }
     return apiError('Gmail operation failed', 500);
   }
 }

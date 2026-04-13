@@ -241,9 +241,9 @@ document.querySelectorAll('img').forEach(function(img) {
             const retry = await gmailGet('message', { id: messageId, format: 'full' });
             if (retry.success) { setEmail(retry.data); return; }
           }
-          setError('Could not load this email. It may have been moved or deleted.');
+          setError(res.error || 'Could not load this email');
         }
-      } catch (e) { setError('Could not load this email. It may have been moved or deleted.'); }
+      } catch (e) { setError('Could not load this email — network error'); }
       finally {
         // Restore original account
         if (accountEmail && accountEmail !== savedAccount) {
@@ -3319,6 +3319,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
 }) {
   const [email, setEmail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyAllMode, setReplyAllMode] = useState(false);
   const [isUnread, setIsUnread] = useState(true);
@@ -3376,20 +3377,31 @@ document.querySelectorAll('img').forEach(function(img) {
 
     // Not cached — fetch from Gmail
     setLoading(true);
+    setFetchError(null);
     const savedAccount = _currentAccount;
     if (accountEmail && accountEmail !== _currentAccount) setCurrentAccount(accountEmail);
-    gmailGet('message', { id: messageId, format: 'full' }).then(res => {
-      if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
+    gmailGet('message', { id: messageId, format: 'full' }).then(async (res) => {
       if (res.success) {
+        if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
         setEmail(res.data);
         setIsUnread(res.data.isUnread ?? true);
-        // Cache in memory for instant access next time
         emailContentCache.set(cacheKey, { data: res.data, timestamp: Date.now() });
+        setLoading(false);
       } else {
-        setEmail(null);
+        // Retry without account override (fallback to other accounts)
+        if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
+        const retry = await gmailGet('message', { id: messageId, format: 'full' });
+        if (retry.success) {
+          setEmail(retry.data);
+          setIsUnread(retry.data.isUnread ?? true);
+          emailContentCache.set(cacheKey, { data: retry.data, timestamp: Date.now() });
+        } else {
+          setEmail(null);
+          setFetchError(retry.error || res.error || 'Could not load email');
+        }
+        setLoading(false);
       }
-      setLoading(false);
-    }).catch(() => { setEmail(null); setLoading(false); });
+    }).catch(() => { setEmail(null); setFetchError('Network error — try again'); setLoading(false); });
   }, [messageId, accountEmail]);
 
   if (loading) return (
@@ -3400,8 +3412,8 @@ document.querySelectorAll('img').forEach(function(img) {
 
   if (!email) return (
     <div className="flex flex-col items-center justify-center h-full gap-2 p-6" style={{ color: 'var(--muted)' }}>
-      <p className="text-sm">This email is no longer available</p>
-      <p className="text-[10px]">It may have been deleted or moved. Click another email to preview.</p>
+      <p className="text-sm">{fetchError || 'Could not load this email'}</p>
+      <p className="text-[10px]">Click another email to preview, or try logging out and back in.</p>
     </div>
   );
 
