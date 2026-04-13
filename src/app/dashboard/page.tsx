@@ -774,6 +774,7 @@ export default function Dashboard() {
   }, []);
   const [account, setAccount] = useState<string>('');
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
+  const [brokenAccounts, setBrokenAccounts] = useState<Set<string>>(new Set());
   const [profile, setProfile] = useState<{ emailAddress: string } | null>(null);
   const [messages, setMessages] = useState<GmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1104,6 +1105,15 @@ export default function Dashboard() {
       const res = await apiGet('accounts');
       if (res.success && res.data) {
         setAccounts(res.data);
+        // Health check: verify each account's token works
+        const broken = new Set<string>();
+        await Promise.all(res.data.map(async (acct: ConnectedAccount) => {
+          try {
+            const check = await fetch(`/api/emailHelperV2/gmail?action=profile&account=${encodeURIComponent(acct.email)}`);
+            if (!check.ok) broken.add(acct.email);
+          } catch { broken.add(acct.email); }
+        }));
+        if (broken.size > 0) setBrokenAccounts(broken);
       }
     } catch (err) {
       console.error('Failed to load accounts:', err);
@@ -2633,6 +2643,26 @@ export default function Dashboard() {
           // Render tab content
           const tabContent = (
             <>
+              {/* Broken account alert */}
+              {brokenAccounts.size > 0 && (
+                <div className="mb-4 p-3 rounded-xl border flex items-center gap-3 flex-wrap" style={{ background: '#fef2f2', borderColor: '#fecaca' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold" style={{ color: '#dc2626' }}>Account connection issue</div>
+                    <div className="text-xs" style={{ color: '#991b1b' }}>
+                      {[...brokenAccounts].join(', ')} — needs to be disconnected and reconnected in Settings.
+                    </div>
+                  </div>
+                  <button onClick={() => setActiveTab('accounts' as Tab)}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white flex-shrink-0" style={{ background: '#dc2626' }}>
+                    Fix in Settings
+                  </button>
+                  <button onClick={() => setBrokenAccounts(new Set())}
+                    className="px-2 py-1 text-xs rounded-lg border flex-shrink-0" style={{ borderColor: '#fca5a5', color: '#dc2626' }}>
+                    Dismiss
+                  </button>
+                </div>
+              )}
               {activeTab === 'home' && (
                 <HomeTab
                   tabCounts={tabCounts}
