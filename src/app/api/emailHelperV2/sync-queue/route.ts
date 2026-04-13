@@ -73,9 +73,20 @@ export async function POST(request: NextRequest) {
 /**
  * PUT /api/emailHelperV2/sync-queue
  * Process the next job in the queue. Called by the scheduled function or manually.
+ * Requires CRON_SECRET bearer auth (server-to-server) or valid user session.
  * Processes ONE page per call, updates the job, returns status.
  */
 export async function PUT(request: NextRequest) {
+  // Require authentication: CRON_SECRET for server callers, session for client
+  const authHeader = request.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+  const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`;
+
+  if (!isCron) {
+    const { userId } = await getRequestContext(request);
+    if (!userId) return apiError('Not authenticated', 401);
+  }
+
   const admin = createSupabaseAdmin();
 
   // Get the next pending job (or continue a processing one)

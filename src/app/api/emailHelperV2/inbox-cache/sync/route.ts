@@ -21,16 +21,24 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { account_email } = body;
     let { pageToken } = body;
-    // user_id can come from body (cron) or from cookie (client)
-    let user_id = body.user_id;
-    if (!user_id) {
+
+    // Authenticate: session cookie (client) or CRON_SECRET bearer (cron/server)
+    let user_id: string | null = null;
+    const authHeader = request.headers.get('authorization');
+    const cronSecret = process.env.CRON_SECRET;
+
+    if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
+      // Cron caller — trust user_id from body
+      user_id = body.user_id;
+    } else {
+      // Client caller — derive from session
       const { getRequestContext } = await import('@/lib/api-helpers');
       const ctx = await getRequestContext(request);
       user_id = ctx.userId;
     }
 
     if (!user_id || !account_email) {
-      return NextResponse.json({ success: false, error: 'Missing user_id or account_email' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Not authenticated or missing account_email' }, { status: 401 });
     }
 
     const admin = createSupabaseAdmin();
