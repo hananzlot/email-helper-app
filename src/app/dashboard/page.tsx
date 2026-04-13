@@ -397,7 +397,7 @@ document.querySelectorAll('img').forEach(function(img) {
                     showToast={showToast}
                     accountEmail={accountEmail}
                     replyAll={replyAllMode}
-                    cc={replyAllMode ? [...(email.to || '').split(','), ...(email.cc || '').split(',')].map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(email.senderEmail.toLowerCase()) && !(accountEmail && e.toLowerCase().includes(accountEmail.toLowerCase()))).join(', ') : undefined}
+                    cc={replyAllMode ? buildReplyAllCc(email.to, email.cc, email.senderEmail, accountEmail) : undefined}
                     onSent={() => { setReplyOpen(false); setReplyAllMode(false); showToast('Reply sent', `To: ${email.senderEmail}`); onEmailSent?.(); }}
                     onCancel={() => { setReplyOpen(false); setReplyAllMode(false); }}
                   />
@@ -3267,6 +3267,30 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
 const emailContentCache = new Map<string, { data: unknown; timestamp: number }>();
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
+// Extract just the email address from a header entry like "Display Name <email@domain.com>" or "email@domain.com"
+function extractEmailAddr(entry: string): string {
+  const match = entry.match(/<([^>]+)>/);
+  return match ? match[1].trim().toLowerCase() : entry.trim().toLowerCase();
+}
+
+// Build CC list for Reply All by collecting all unique participants from To + Cc, excluding sender and self
+function buildReplyAllCc(to: string, cc: string, senderEmail: string, myEmail?: string): string {
+  const entries = [...(to || '').split(','), ...(cc || '').split(',')].map(e => e.trim()).filter(Boolean);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  const senderLower = senderEmail.toLowerCase();
+  const myLower = myEmail?.toLowerCase() || '';
+  for (const entry of entries) {
+    const addr = extractEmailAddr(entry);
+    if (!addr || seen.has(addr)) continue;
+    if (addr === senderLower) { seen.add(addr); continue; }
+    if (myLower && addr === myLower) { seen.add(addr); continue; }
+    seen.add(addr);
+    result.push(entry.trim());
+  }
+  return result.join(', ');
+}
+
 function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   messageId: string;
   accountEmail?: string;
@@ -3372,6 +3396,7 @@ document.querySelectorAll('img').forEach(function(img) {
           <span className="ml-auto">{new Date(email.date).toLocaleString()}</span>
         </div>
         {email.to && <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>To: {email.to}</div>}
+        {email.cc && <div className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>Cc: {email.cc}</div>}
       </div>
 
       {/* Action bar */}
@@ -3408,7 +3433,7 @@ document.querySelectorAll('img').forEach(function(img) {
             showToast={showToast}
             accountEmail={accountEmail}
             replyAll={replyAllMode}
-            cc={replyAllMode ? [...(email.to || '').split(','), ...(email.cc || '').split(',')].map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(email.senderEmail.toLowerCase()) && !(accountEmail && e.toLowerCase().includes(accountEmail.toLowerCase()))).join(', ') : undefined}
+            cc={replyAllMode ? buildReplyAllCc(email.to, email.cc, email.senderEmail, accountEmail) : undefined}
             onSent={() => { setReplyOpen(false); setReplyAllMode(false); showToast(`Reply${replyAllMode ? ' all' : ''} sent`); }}
             onCancel={() => { setReplyOpen(false); setReplyAllMode(false); }}
           />
@@ -3547,7 +3572,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                     showToast={showToast}
                     accountEmail={(msg as unknown as Record<string, unknown>).accountEmail as string}
                     replyAll={replyAllMode === msg.id}
-                    cc={replyAllMode === msg.id ? [...(msg.to || '').split(','), ...((msg as any).cc || '').split(',')].map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(msg.senderEmail.toLowerCase()) && !((msg as any).accountEmail && e.toLowerCase().includes(((msg as any).accountEmail as string).toLowerCase()))).join(', ') : undefined}
+                    cc={replyAllMode === msg.id ? buildReplyAllCc(msg.to || '', (msg as any).cc || '', msg.senderEmail, (msg as any).accountEmail) : undefined}
                     onSent={() => { setReplyingTo(null); setReplyAllMode(null); onRefresh(); }}
                     onCancel={() => { setReplyingTo(null); setReplyAllMode(null); }}
                   />
@@ -4094,9 +4119,8 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                             threadId: item.thread_id, inReplyTo: item.message_id,
                           };
                           if (replyAll) {
-                            const ccList = [...(item.to || '').split(','), ...(item.cc || '').split(',')].map((e: string) => e.trim())
-                              .filter((e: string) => e && !e.toLowerCase().includes(item.sender_email.toLowerCase()) && !(item.account_email && e.toLowerCase().includes(item.account_email.toLowerCase())));
-                            if (ccList.length > 0) payload.cc = ccList.join(', ');
+                            const ccStr = buildReplyAllCc(item.to || '', item.cc || '', item.sender_email, item.account_email);
+                            if (ccStr) payload.cc = ccStr;
                           }
                           const res = await gmailPost('reply', payload);
                           if (item.account_email) setCurrentAccount(savedAccount);
@@ -4121,7 +4145,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                         threadId={item.thread_id} messageId={item.message_id}
                         showToast={showToast} accountEmail={item.account_email}
                         replyAll={replyAllTo === item.id}
-                        cc={replyAllTo === item.id ? [...(item.to || '').split(','), ...(item.cc || '').split(',')].map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(item.sender_email.toLowerCase()) && !(item.account_email && e.toLowerCase().includes(item.account_email.toLowerCase()))).join(', ') : undefined}
+                        cc={replyAllTo === item.id ? buildReplyAllCc(item.to || '', item.cc || '', item.sender_email, item.account_email) : undefined}
                         onSent={() => { setReplyingTo(null); setReplyAllTo(null); onAction('markRead', [item.message_id], undefined, item.account_email); showToast('Reply sent & marked as read'); }}
                         onCancel={() => { setReplyingTo(null); setReplyAllTo(null); }}
                       />
@@ -6102,8 +6126,8 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                       if (msg.accountEmail && msg.accountEmail !== _currentAccount) setCurrentAccount(msg.accountEmail);
                       const payload: Record<string, unknown> = { to: msg.senderEmail, subject: msg.subject, body, threadId: msg.threadId, inReplyTo: msg.id };
                       if (replyAll) {
-                        const ccList = (msg.cc || msg.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(msg.senderEmail.toLowerCase()) && !(msg.accountEmail && e.toLowerCase().includes(msg.accountEmail.toLowerCase())));
-                        if (ccList.length > 0) payload.cc = ccList.join(', ');
+                        const ccStr = buildReplyAllCc(msg.to || '', msg.cc || '', msg.senderEmail, msg.accountEmail);
+                        if (ccStr) payload.cc = ccStr;
                       }
                       const res = await gmailPost('reply', payload);
                       if (msg.accountEmail) setCurrentAccount(savedAccount);
@@ -6131,7 +6155,7 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                     threadId={msg.threadId} messageId={msg.id}
                     showToast={showToast} accountEmail={msg.accountEmail}
                     replyAll={replyAllTo === msg.id}
-                    cc={replyAllTo === msg.id ? (msg.cc || msg.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(msg.senderEmail.toLowerCase()) && !(msg.accountEmail && e.toLowerCase().includes(msg.accountEmail.toLowerCase()))).join(', ') : undefined}
+                    cc={replyAllTo === msg.id ? buildReplyAllCc(msg.to || '', msg.cc || '', msg.senderEmail, msg.accountEmail) : undefined}
                     onSent={() => { setReplyingTo(null); setReplyAllTo(null); onAction('markRead', [msg.id], undefined, msg.accountEmail); showToast('Reply sent & marked as read'); }}
                     onCancel={() => { setReplyingTo(null); setReplyAllTo(null); }}
                   />
