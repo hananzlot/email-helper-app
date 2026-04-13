@@ -1414,10 +1414,11 @@ export default function Dashboard() {
     if (isFirstLoad) localStorage.setItem('email_helper_visited', '1');
   }, [account, unified, accounts.length]);
 
-  // Auto-refresh every 2 minutes for inbox data
+  // Auto-refresh every 2 minutes for inbox data (skip while on Easy-Clear to prevent list jumping)
   useEffect(() => {
     if (!account) return;
     const interval = setInterval(() => {
+      if (activeTab === 'cleanup') return; // Don't refresh while user is clearing emails
       if (unified && accounts.length > 1) {
         loadUnifiedInbox(true, true);
       } else {
@@ -1425,7 +1426,7 @@ export default function Dashboard() {
       }
     }, 2 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [account, unified, accounts.length, loadInbox, loadUnifiedInbox]);
+  }, [account, unified, accounts.length, loadInbox, loadUnifiedInbox, activeTab]);
 
   // Background sync via queue — submits sync requests, polls for progress
   const [syncProgress, setSyncProgress] = useState<Record<string, { cached: number; total: number; done: boolean; speed: number; eta: string }>>({});
@@ -4089,7 +4090,10 @@ function CleanupTab({ messages, onAction, showToast, onPreview, onDialogPreview,
   }
 
   // Filter messages to only noise senders
-  const cleanupMessages = tiersLoaded ? messages.filter(m => m.isUnread && isNoiseSender(m.senderEmail)) : [];
+  const cleanupMessages = React.useMemo(() =>
+    tiersLoaded ? messages.filter(m => m.isUnread && isNoiseSender(m.senderEmail)) : [],
+    [tiersLoaded, messages.length, senderTiers]
+  );
 
   // Report count to parent
   useEffect(() => { reportCount?.(cleanupMessages.length); }, [cleanupMessages.length]);
