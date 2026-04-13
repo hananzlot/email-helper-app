@@ -4583,6 +4583,8 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                             priority_score: newTier === 'A' ? 9 : newTier === 'B' ? 7 : 5,
                           }).catch(() => {});
                         }
+                        // Remove this group from Easy-Clear immediately
+                        setServerGroups(prev => prev.filter(g => g.email.toLowerCase() !== group.email.toLowerCase()));
                         showToast(`Promoted to Tier ${newTier}`, `${group.messages.length} email${group.messages.length > 1 ? 's' : ''} moved to Top Tiers`);
                         onTierPromoted?.();
                       } else {
