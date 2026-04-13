@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
       name: g.name,
       email: g.email,
       count: g.count,
-      messages: g.messages.map(m => ({
+      messages: g.messages.map((m: { gmail_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; account_email: string }) => ({
         id: m.gmail_id,
         sender: m.sender,
         senderEmail: m.sender_email,
