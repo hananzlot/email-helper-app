@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
         return apiSuccess({ trashed: params.messageIds.length });
 
       case 'delete':
-        await Promise.all(params.messageIds.map((id: string) => gmail.deleteMessage(client, id)));
+        await gmail.batchDelete(client, params.messageIds);
         return apiSuccess({ deleted: params.messageIds.length });
 
       case 'markRead':

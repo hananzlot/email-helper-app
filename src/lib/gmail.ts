@@ -451,10 +451,14 @@ export async function batchModify(
   addLabelIds: string[] = [],
   removeLabelIds: string[] = []
 ) {
-  await gmail.users.messages.batchModify({
-    userId: 'me',
-    requestBody: { ids: messageIds, addLabelIds, removeLabelIds },
-  });
+  // Gmail batchModify supports up to 1000 IDs per call — chunk if needed
+  for (let i = 0; i < messageIds.length; i += 1000) {
+    const chunk = messageIds.slice(i, i + 1000);
+    await gmail.users.messages.batchModify({
+      userId: 'me',
+      requestBody: { ids: chunk, addLabelIds, removeLabelIds },
+    });
+  }
 }
 
 export async function batchArchive(gmail: gmail_v1.Gmail, messageIds: string[]) {
@@ -462,8 +466,18 @@ export async function batchArchive(gmail: gmail_v1.Gmail, messageIds: string[]) 
 }
 
 export async function batchTrash(gmail: gmail_v1.Gmail, messageIds: string[]) {
-  // Gmail doesn't have a batch trash endpoint, so we use individual calls
-  await Promise.all(messageIds.map((id) => trashMessage(gmail, id)));
+  // Use batchModify to add TRASH label — 1 API call per 1000 messages instead of per-message
+  return batchModify(gmail, messageIds, ['TRASH'], ['INBOX']);
+}
+
+export async function batchDelete(gmail: gmail_v1.Gmail, messageIds: string[]) {
+  // Gmail has no batch delete — must delete individually but in controlled chunks
+  for (let i = 0; i < messageIds.length; i += 50) {
+    const chunk = messageIds.slice(i, i + 50);
+    await Promise.all(chunk.map((id) => deleteMessage(gmail, id)));
+    // Brief pause between chunks to avoid quota spikes
+    if (i + 50 < messageIds.length) await new Promise(r => setTimeout(r, 1000));
+  }
 }
 
 // ============ COMPOSE OPERATIONS ============
