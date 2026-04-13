@@ -1929,26 +1929,16 @@ export default function Dashboard() {
       // Fetch sender tiers for Cleanup count (from current messages)
       const sendersRes = await apiGet('senders');
       if (sendersRes.success && sendersRes.data) {
-        const tiers: Record<string, string> = {};
-        for (const s of sendersRes.data) tiers[s.sender_email.toLowerCase()] = s.tier;
-        // Count noise emails from messages
-        const noReply = ['noreply', 'no-reply', 'donotreply', 'do-not-reply', 'mailer-daemon', 'postmaster'];
-        const auto = ['notification', 'newsletter', 'digest', 'updates@', 'info@', 'support@', 'hello@', 'team@', 'news@', 'marketing@', 'promo'];
-        const cleanupCount = messages.filter(m => {
-          if (!m.isUnread) return false;
-          const lower = m.senderEmail.toLowerCase();
-          const tier = tiers[lower];
-          if (tier === 'A' || tier === 'B' || tier === 'C') return false;
-          if (tier === 'D') return true;
-          if (noReply.some(p => lower.includes(p))) return true;
-          if (auto.some(p => lower.includes(p))) return true;
-          if (!tier) return true;
-          return false;
-        }).length;
-        reportTabCount('cleanup', cleanupCount);
-        // Priorities count stored for the settings menu badge
         reportTabCount('priorities', sendersRes.data.length);
       }
+
+      // Easy-Clear count from server API (not client-side filtering)
+      try {
+        const ecRes = await apiGet('easy-clear?limit=1&groupBy=domain');
+        if (ecRes.success && ecRes.data) {
+          reportTabCount('cleanup', ecRes.data.totalMessages || 0);
+        }
+      } catch {}
 
       // Fetch follow-up count — unified mode gets all accounts, single gets one
       const followUpUrl = unified ? '/api/emailHelperV2/follow-ups' : withAccount('/api/emailHelperV2/follow-ups');
