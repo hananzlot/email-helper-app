@@ -1391,6 +1391,30 @@ export default function Dashboard() {
   // Track whether we've done the first load (to avoid flashing spinner on re-loads)
   const hasLoadedRef = React.useRef(false);
 
+  // Fetch Easy-Clear + All Mail counts immediately (don't wait for debounced loadAllTabCounts)
+  useEffect(() => {
+    if (!account) return;
+    // Easy-Clear count
+    const ecUrl = unified ? '/api/emailHelperV2/easy-clear?limit=1&groupBy=domain' : withAccount('/api/emailHelperV2/easy-clear?limit=1&groupBy=domain');
+    fetch(ecUrl).then(r => r.json()).then(res => {
+      if (res.success) reportTabCount('cleanup', res.data.totalMessages || 0);
+    }).catch(() => {});
+    // All Mail count — fetch per account without touching _currentAccount
+    if (unified && accounts.length > 1) {
+      Promise.all(accounts.map(acct =>
+        fetch(`/api/emailHelperV2/gmail?action=labelInfo&labelId=INBOX&account=${encodeURIComponent(acct.email)}`, {
+          headers: { 'Cookie': document.cookie },
+        }).then(r => r.json()).then(r => r.success ? (r.data.messagesTotal || 0) : 0).catch(() => 0)
+      )).then(counts => {
+        reportTabCount('inbox', counts.reduce((s: number, c: number) => s + c, 0));
+      });
+    } else {
+      fetch(`/api/emailHelperV2/gmail?action=labelInfo&labelId=INBOX&account=${encodeURIComponent(_currentAccount)}`).then(r => r.json()).then(r => {
+        if (r.success) reportTabCount('inbox', r.data.messagesTotal || 0);
+      }).catch(() => {});
+    }
+  }, [account, unified, accounts.length]);
+
   // Initial load + triage on first load
   // Re-runs when accounts populate so unified view loads all accounts
   useEffect(() => {
@@ -1949,18 +1973,13 @@ export default function Dashboard() {
         reportTabCount('follow-up', followUpCount);
       }
 
-      // All Mail count — from Gmail labels.get (accurate, 1 API call per account)
+      // All Mail count — from Gmail labels.get (per-account fetch, no _currentAccount race)
       try {
         if (unified && accounts.length > 1) {
-          let totalInbox = 0;
-          const savedAcct = _currentAccount;
-          for (const acct of accounts) {
-            setCurrentAccount(acct.email);
-            const labelRes = await gmailGet('labelInfo', { labelId: 'INBOX' });
-            if (labelRes.success) totalInbox += labelRes.data.messagesTotal || 0;
-          }
-          setCurrentAccount(savedAcct);
-          reportTabCount('inbox', totalInbox);
+          const counts = await Promise.all(accounts.map(acct =>
+            fetch(`/api/emailHelperV2/gmail?action=labelInfo&labelId=INBOX&account=${encodeURIComponent(acct.email)}`).then(r => r.json()).then(r => r.success ? (r.data.messagesTotal || 0) : 0).catch(() => 0)
+          ));
+          reportTabCount('inbox', counts.reduce((s: number, c: number) => s + c, 0));
         } else {
           const labelRes = await gmailGet('labelInfo', { labelId: 'INBOX' });
           if (labelRes.success) reportTabCount('inbox', labelRes.data.messagesTotal || 0);
@@ -2510,7 +2529,7 @@ export default function Dashboard() {
               {activeTab === 'reply-queue' && <ReplyQueueTab key={`triage-${account}-${unified}`} onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} onAdvancePreview={advancePreview} />}
               {activeTab === 'follow-up' && <FollowUpTab key={`followup-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
               {activeTab === 'snoozed' && <SnoozedTab key={`snoozed-${account}-${unified}`} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
-              {activeTab === 'cleanup' && <CleanupTab onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
+              {activeTab === 'cleanup' && <CleanupTab unified={unified} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
               {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} />}
               {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${triageVersion}`} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
@@ -4025,7 +4044,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
+function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { unified: boolean; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'domain' | 'count' | 'name'>('domain');
   const [visibleGroups, setVisibleGroups] = useState(30);
@@ -4045,7 +4064,7 @@ function CleanupTab({ onAction, showToast, onPreview, onDialogPreview, reportCou
     setLoading(true);
     try {
       const [ecRes, sendersRes] = await Promise.all([
-        apiGet(`easy-clear?limit=10000&groupBy=${sortBy}`),
+        fetch(unified ? `/api/emailHelperV2/easy-clear?limit=10000&groupBy=${sortBy}` : withAccount(`/api/emailHelperV2/easy-clear?limit=10000&groupBy=${sortBy}`)).then(r => r.json()),
         apiGet('senders'),
       ]);
       if (ecRes.success && ecRes.data) {
@@ -4162,9 +4181,12 @@ function CleanupTab({ onAction, showToast, onPreview, onDialogPreview, reportCou
   const selectedCount = selectedIds.length;
 
   if (loading) return (
-    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
-      <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-3" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
-      <p className="text-sm">Loading Easy-Clear...</p>
+    <div className="text-center py-20">
+      <div className="text-5xl mb-4">🚀</div>
+      <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text)' }}>Inbox Declutter Mode</h2>
+      <p className="text-sm mb-4" style={{ color: 'var(--muted)' }}>Sit back — we're organizing your noise emails for mass cleanup</p>
+      <div className="w-8 h-8 border-3 border-t-transparent rounded-full animate-spin mx-auto" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent', borderWidth: 3 }} />
+      <p className="text-xs mt-3" style={{ color: 'var(--muted)' }}>Grouping by domain so you can clear hundreds in seconds</p>
     </div>
   );
 
