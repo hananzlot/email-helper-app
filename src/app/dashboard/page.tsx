@@ -4533,7 +4533,9 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                   <span className="text-sm font-bold leading-none">{group.messages.length}</span>
                   <span className="text-[7px] leading-none mt-0.5" style={{ opacity: 0.8 }}>emails</span>
                 </div>
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedSender(isExpanded ? null : group.email)}>
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => { setExpandedSender(isExpanded ? null : group.email); if (!isExpanded && group.messages[0]) onPreview(group.messages[0].id, group.messages[0].accountEmail); }}
+                  onDoubleClick={() => { if (group.messages[0]) onDialogPreview?.(group.messages[0].id, group.messages[0].accountEmail); }}
+                  data-preview-id={group.messages[0]?.id || ''} data-preview-account={group.messages[0]?.accountEmail || ''}>
                   <div className="font-semibold text-sm truncate">{group.name}</div>
                   <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{group.email}</div>
                 </div>
