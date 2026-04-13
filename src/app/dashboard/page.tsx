@@ -420,9 +420,10 @@ document.querySelectorAll('img').forEach(function(img) {
               {replyOpen && replyAllMode ? 'Cancel' : 'Reply All'}
             </button>
             <button onClick={() => flashAction('archive', () => { onAction('archive', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 300); })}
-              className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
-              style={{ borderColor: 'var(--border)', background: clickedBtn === 'archive' ? '#dcfce7' : undefined, color: clickedBtn === 'archive' ? '#166534' : undefined }}>
-              {clickedBtn === 'archive' ? 'Archived!' : 'Archive'}
+              title="Archive"
+              className="p-2 rounded-lg border transition-all active:scale-90 hover:bg-gray-50"
+              style={{ borderColor: 'var(--border)', background: clickedBtn === 'archive' ? '#dcfce7' : undefined, color: clickedBtn === 'archive' ? '#166534' : 'var(--muted)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" /></svg>
             </button>
             <button onClick={() => flashAction('markRead', () => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 400); })}
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
@@ -447,12 +448,17 @@ document.querySelectorAll('img').forEach(function(img) {
               <SnoozeDropdown onSnooze={(hours, label) => { onSnooze(messageId, hours, label, accountEmail || _currentAccount); showToast('Snoozed', `Will reappear ${label}`); setTimeout(onClose, 300); }} />
             )}
             <button onClick={() => flashAction('trash', () => { onAction('trash', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 300); })}
-              className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
-              style={{ borderColor: 'var(--border)', color: clickedBtn === 'trash' ? '#fff' : '#ef4444', background: clickedBtn === 'trash' ? '#ef4444' : undefined }}>
-              {clickedBtn === 'trash' ? 'Trashed!' : 'Trash'}
+              title="Trash"
+              className="p-2 rounded-lg border transition-all active:scale-90 hover:bg-red-50"
+              style={{ borderColor: 'var(--border)', color: clickedBtn === 'trash' ? '#fff' : '#dc2626', background: clickedBtn === 'trash' ? '#ef4444' : undefined }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
             </button>
             <button onClick={() => setConfirmDelete(true)}
-              className="px-3 py-2 text-xs font-medium rounded-lg border text-red-700 transition-transform active:scale-90" style={{ borderColor: '#fca5a5' }}>Delete</button>
+              title="Delete permanently"
+              className="p-2 rounded-lg border transition-all active:scale-90 hover:bg-red-50"
+              style={{ borderColor: '#fca5a5', color: '#b91c1c' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+            </button>
           </div>
         )}
       </div>
@@ -544,11 +550,13 @@ function ArchiveButton({ messageId, accountEmail, onAction, onDone, size = 'sm' 
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   onDone?: () => void; size?: 'sm' | 'xs';
 }) {
+  const s = size === 'xs' ? 14 : 16;
   return (
     <button onClick={(e) => { e.stopPropagation(); onAction('archive', [messageId], undefined, accountEmail || _currentAccount); onDone?.(); }}
-      className={`${size === 'xs' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1.5 text-xs'} font-medium rounded-lg border`}
+      title="Archive"
+      className={`${size === 'xs' ? 'p-1' : 'p-1.5'} rounded-lg border hover:bg-gray-50 transition-colors`}
       style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-      Archive
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" /></svg>
     </button>
   );
 }
@@ -558,11 +566,13 @@ function TrashButton({ messageId, accountEmail, onAction, onDone, size = 'sm' }:
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   onDone?: () => void; size?: 'sm' | 'xs';
 }) {
+  const s = size === 'xs' ? 14 : 16;
   return (
     <button onClick={(e) => { e.stopPropagation(); onAction('trash', [messageId], undefined, accountEmail || _currentAccount); onDone?.(); }}
-      className={`${size === 'xs' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1.5 text-xs'} font-medium rounded-lg border text-red-500`}
-      style={{ borderColor: 'var(--border)' }}>
-      Trash
+      title="Trash"
+      className={`${size === 'xs' ? 'p-1' : 'p-1.5'} rounded-lg border hover:bg-red-50 transition-colors`}
+      style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+      <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
     </button>
   );
 }
@@ -2482,7 +2492,9 @@ export default function Dashboard() {
                             setSearchResults(prev => prev.filter(r => !searchSelectedIds.has(r.id)));
                             setSearchSelectedIds(new Set());
                           }}
-                            className="px-3 py-1 text-[10px] font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                            title="Archive selected" className="p-1 rounded-lg border hover:bg-gray-50" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" /></svg>
+                          </button>
                           <button onClick={() => {
                             const msgs = searchResults.filter(m => searchSelectedIds.has(m.id));
                             const byAccount = new Map<string, string[]>();
@@ -2495,7 +2507,9 @@ export default function Dashboard() {
                             setSearchResults(prev => prev.filter(r => !searchSelectedIds.has(r.id)));
                             setSearchSelectedIds(new Set());
                           }}
-                            className="px-3 py-1 text-[10px] font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                            title="Trash selected" className="p-1 rounded-lg border hover:bg-red-50" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                          </button>
                         </div>
                       )}
                     </div>
@@ -2543,9 +2557,13 @@ export default function Dashboard() {
                         </div>
                         <div className="flex gap-1 flex-shrink-0">
                           <button onClick={(e) => { e.stopPropagation(); handleAction('archive', [msg.id], undefined, msg.accountEmail); setSearchResults(prev => prev.filter(r => r.id !== msg.id)); }}
-                            className="px-2 py-1 text-[10px] rounded border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                            title="Archive" className="p-1 rounded border hover:bg-gray-50" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" /></svg>
+                          </button>
                           <button onClick={(e) => { e.stopPropagation(); handleAction('trash', [msg.id], undefined, msg.accountEmail); setSearchResults(prev => prev.filter(r => r.id !== msg.id)); }}
-                            className="px-2 py-1 text-[10px] rounded border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                            title="Trash" className="p-1 rounded border hover:bg-red-50" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                          </button>
                         </div>
                       </div>
                       );
@@ -3559,7 +3577,9 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                 <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
                 <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <button onClick={() => setConfirmAction({ ids: [msg.id], count: 1 })}
-                  className="px-2 py-1.5 text-xs rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
+                  title="Delete permanently" className="p-1.5 rounded-lg border hover:bg-red-50" style={{ borderColor: '#fca5a5', color: '#b91c1c' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                </button>
               </div>
               {/* Inline Reply Composer */}
               {replyingTo === msg.id && (
@@ -3623,9 +3643,10 @@ function SnoozeDropdown({ onSnooze }: { onSnooze: (hours: number, label: string)
   return (
     <div className="relative">
       <button onClick={() => setOpen(!open)}
-        className="px-3 py-1.5 text-xs font-medium rounded-lg"
-        style={{ background: '#fef9c3', color: '#854d0e' }}>
-        Snooze ▾
+        title="Snooze"
+        className="p-1.5 rounded-lg border hover:bg-amber-50 transition-colors"
+        style={{ borderColor: 'var(--border)', color: '#854d0e' }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2" /><path d="M5 3L2 6" /><path d="M22 6l-3-3" /><path d="M6.38 18.7L4 21" /><path d="M17.64 18.67L20 21" /></svg>
       </button>
       {open && (
         <>
@@ -4132,11 +4153,17 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                       }} />
                     )}
                     <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(item.id, hours, label)} />
-                    <button onClick={() => queueAction('archive', item.message_id, item.id, item.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                    <button onClick={() => queueAction('archive', item.message_id, item.id, item.account_email)} title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" /></svg>
+                    </button>
                     <MarkReadButton isUnread={true} messageId={item.message_id} accountEmail={item.account_email} onAction={(action, ids, label, acct) => { queueAction(action, item.message_id, item.id, acct || item.account_email); }} />
-                    <button onClick={() => queueAction('trash', item.message_id, item.id, item.account_email)} className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                    <button onClick={() => queueAction('trash', item.message_id, item.id, item.account_email)} title="Trash" className="p-1.5 rounded-lg border hover:bg-red-50" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                    </button>
                     <button onClick={() => setConfirmDelete(item.id + '::' + item.message_id + '::' + item.account_email)}
-                      className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
+                      title="Delete permanently" className="p-1.5 rounded-lg border hover:bg-red-50" style={{ borderColor: '#fca5a5', color: '#b91c1c' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                    </button>
                   </div>
                   {replyingTo === item.id && (
                     <div className="mt-3" onClick={(e) => e.stopPropagation()}>
@@ -5112,9 +5139,13 @@ function SnoozedTab({ onAction, showToast, onPreview, onDialogPreview, reloadKey
                     showToast('Re-snoozed', `Will reappear ${label}`);
                   }} />
                   <button onClick={() => { onAction('archive', [q.message_id], undefined, q.account_email); dismiss(q.id, q.message_id, q.account_email); }}
-                    className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Archive</button>
+                    title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" /></svg>
+                  </button>
                   <button onClick={() => { onAction('trash', [q.message_id], undefined, q.account_email); dismiss(q.id, q.message_id, q.account_email); }}
-                    className="px-2 py-1 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>Trash</button>
+                    title="Trash" className="p-1.5 rounded-lg border hover:bg-red-50" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                  </button>
                   <button onClick={() => dismiss(q.id, q.message_id, q.account_email)}
                     className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>Dismiss</button>
                 </div>
@@ -6146,7 +6177,9 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                 <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
                 <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} onDone={() => onRemove(msg.id)} />
                 <button onClick={() => setConfirmDelete(msg.id + '::' + (msg.accountEmail || ''))}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
+                  title="Delete permanently" className="p-1.5 rounded-lg border hover:bg-red-50" style={{ borderColor: '#fca5a5', color: '#b91c1c' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                </button>
               </div>
               {replyingTo === msg.id && (
                 <div className="mt-3" onClick={(e) => e.stopPropagation()}>
