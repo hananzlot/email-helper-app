@@ -2509,7 +2509,7 @@ export default function Dashboard() {
               {activeTab === 'reply-queue' && <ReplyQueueTab key={`triage-${account}-${unified}`} onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} onAdvancePreview={advancePreview} />}
               {activeTab === 'follow-up' && <FollowUpTab key={`followup-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
               {activeTab === 'snoozed' && <SnoozedTab key={`snoozed-${account}-${unified}`} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
-              {activeTab === 'cleanup' && <CleanupTab messages={messages} loading={loading} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
+              {activeTab === 'cleanup' && <CleanupTab messages={messages} loading={loading} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} actionedIds={actionedIdsRef.current} />}
               {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} />}
               {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${triageVersion}`} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
@@ -4024,7 +4024,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { messages: GmailMessage[]; loading: boolean; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
+function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted, actionedIds }: { messages: GmailMessage[]; loading: boolean; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; actionedIds: Set<string>; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'tier' | 'count' | 'name' | 'domain'>('domain');
   const [visibleGroups, setVisibleGroups] = useState(30);
@@ -4102,11 +4102,11 @@ function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onP
     }
   }, [tiersLoaded, parentLoading, messages.length]);
 
-  // Remove items from snapshot ONLY when user explicitly acts via actionedIdsRef
+  // Remove items from snapshot ONLY when user explicitly acts
   useEffect(() => {
-    if (!snapshotTaken.current || actionedIdsRef.current.size === 0) return;
+    if (!snapshotTaken.current || actionedIds.size === 0) return;
     setSnapshot(prev => {
-      const filtered = prev.filter(m => !actionedIdsRef.current.has(m.id));
+      const filtered = prev.filter(m => !actionedIds.has(m.id));
       return filtered.length === prev.length ? prev : filtered;
     });
   });
@@ -4279,6 +4279,15 @@ function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onP
             <p className="text-sm font-semibold">{groups.length} senders</p>
             <p className="text-xs" style={{ color: 'var(--muted)' }}>{cleanupMessages.length} low-priority messages</p>
           </div>
+          <button onClick={() => {
+            snapshotTaken.current = false;
+            setSnapshot([]);
+            setVisibleGroups(30);
+          }}
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border"
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+            Refresh
+          </button>
         </div>
         <div className="flex gap-2 items-center">
           <span className="text-xs" style={{ color: 'var(--muted)' }}>Sort:</span>
