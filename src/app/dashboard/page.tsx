@@ -1483,6 +1483,8 @@ export default function Dashboard() {
       const startTime = Date.now();
       let totalCachedSession = 0;
 
+      let consecutiveErrors = 0;
+
       while (!cancelled && consecutiveIdles < 5) {
         try {
           const res = await fetch('/api/emailHelperV2/sync-queue', { method: 'PUT' }).then(r => r.json());
@@ -1492,7 +1494,26 @@ export default function Dashboard() {
             await new Promise(r => setTimeout(r, 5000));
             continue;
           }
+
+          // Handle errors with backoff — pause 2 min after 10 consecutive, then resume
+          if (res.data?.status === 'error') {
+            consecutiveErrors++;
+            if (consecutiveErrors >= 10) {
+              setSyncProgress(prev => {
+                const updated = { ...prev };
+                for (const key of Object.keys(updated)) {
+                  if (!updated[key].done) updated[key] = { ...updated[key], eta: 'Paused — resuming in 2 min' };
+                }
+                return updated;
+              });
+              await new Promise(r => setTimeout(r, 2 * 60 * 1000));
+              consecutiveErrors = 0;
+            }
+            continue;
+          }
+
           consecutiveIdles = 0;
+          consecutiveErrors = 0;
           totalCachedSession += (res.data?.cachedThisPage || 0);
 
           // Update progress from queue status

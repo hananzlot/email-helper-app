@@ -38,6 +38,7 @@ export default async () => {
   const maxMinutes = 12;
   const startTime = Date.now();
   let pagesProcessed = 0;
+  let consecutiveErrors = 0;
 
   while ((Date.now() - startTime) < maxMinutes * 60 * 1000) {
     try {
@@ -50,12 +51,18 @@ export default async () => {
       }
 
       if (data.data?.status === "error") {
-        console.log(`Job error: ${data.data.error?.slice(0, 80)}`);
-        if (data.data.error?.includes("Quota")) {
+        consecutiveErrors++;
+        console.log(`Job error (${consecutiveErrors}): ${data.data.error?.slice(0, 80)}`);
+        if (consecutiveErrors >= 10) {
+          console.log("10 consecutive errors — pausing 2 minutes then resuming");
+          await new Promise(r => setTimeout(r, 2 * 60 * 1000));
+          consecutiveErrors = 0;
+        } else if (data.data.error?.includes("Quota")) {
           await new Promise(r => setTimeout(r, 30000));
         }
         continue;
       }
+      consecutiveErrors = 0;
 
       pagesProcessed++;
       const skipped = data.data?.skippedPages || 0;
