@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes, createHmac } from 'crypto';
 import { getGoogleAuthUrl } from '@/lib/auth';
 import { validateSession } from '@/lib/session';
+import { createSupabaseAdmin } from '@/lib/supabase-server';
 
 const STATE_SECRET = process.env.SESSION_SECRET || process.env.ENCRYPTION_SALT || 'clearbox-state-secret';
 
-function signNonce(nonce: string): string {
+function hashNonce(nonce: string): string {
   return createHmac('sha256', STATE_SECRET).update(nonce).digest('hex');
 }
 
@@ -27,6 +28,15 @@ export async function GET(request: NextRequest) {
   // Generate a random nonce to prevent CSRF / state forgery
   const nonce = randomBytes(16).toString('hex');
 
+  // Store nonce hash server-side (survives cross-site redirects unlike cookies)
+  const admin = createSupabaseAdmin();
+  await admin.from('emailHelperV2_oauth_states').upsert({
+    nonce_hash: hashNonce(nonce),
+    flow,
+    user_id: userId,
+    expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(), // 10 min
+  }, { onConflict: 'nonce_hash' });
+
   // Build state: nonce.flow or nonce.add_account.userId
   const state = flow === 'add_account' && userId
     ? `${nonce}.add_account.${userId}`
@@ -36,16 +46,5 @@ export async function GET(request: NextRequest) {
   const redirectUri = `${origin}/api/emailHelperV2/auth/callback`;
 
   const authUrl = getGoogleAuthUrl(state, redirectUri);
-  const response = NextResponse.redirect(authUrl);
-
-  // Store signed nonce in a short-lived httpOnly cookie for callback verification
-  response.cookies.set('email_helper_oauth_nonce', `${nonce}.${signNonce(nonce)}`, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 600, // 10 minutes — OAuth flow should complete well within this
-    path: '/',
-  });
-
-  return response;
+  return NextResponse.redirect(authUrl);
 }
