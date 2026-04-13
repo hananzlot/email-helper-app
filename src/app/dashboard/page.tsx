@@ -419,45 +419,39 @@ document.querySelectorAll('img').forEach(function(img) {
               style={{ borderColor: 'var(--accent)', color: replyOpen && replyAllMode ? '#fff' : 'var(--accent)', background: replyOpen && replyAllMode ? 'var(--accent)' : undefined }}>
               {replyOpen && replyAllMode ? 'Cancel' : 'Reply All'}
             </button>
-            <button onClick={() => flashAction('archive', () => { onAction('archive', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 300); })}
-              title="Archive"
-              className="p-2 rounded-lg border transition-all active:scale-90 hover:bg-gray-50"
-              style={{ borderColor: 'var(--border)', background: clickedBtn === 'archive' ? '#dcfce7' : undefined, color: clickedBtn === 'archive' ? '#166534' : 'var(--muted)' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" /></svg>
-            </button>
+            <ForwardButton messageId={messageId} accountEmail={accountEmail} subject={email.subject || ''} showToast={showToast} />
             <button onClick={() => flashAction('markRead', () => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 400); })}
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
               style={{ borderColor: 'var(--border)', background: clickedBtn === 'markRead' ? '#dbeafe' : undefined, color: clickedBtn === 'markRead' ? '#1e40af' : undefined }}>
               {clickedBtn === 'markRead' ? 'Marked read!' : (email.isUnread ? 'Mark Read' : 'Mark Unread')}
             </button>
-            <button onClick={() => flashAction('followUp', () => {
-              // Star the message so it appears in the Follow-Up tab
-              onAction('star', [messageId], undefined, accountEmail || _currentAccount);
-            })}
-              className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
-              style={{ borderColor: '#fbbf24', background: clickedBtn === 'followUp' ? '#fef3c7' : undefined, color: clickedBtn === 'followUp' ? '#92400e' : '#b45309' }}>
-              {clickedBtn === 'followUp' ? 'Added to Follow Up!' : 'Follow Up'}
-            </button>
-            <button onClick={() => flashAction('star', () => { onAction('star', [messageId], undefined, accountEmail || _currentAccount); })}
-              className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
-              style={{ borderColor: 'var(--border)', background: clickedBtn === 'star' ? '#fef3c7' : undefined, color: clickedBtn === 'star' ? '#92400e' : undefined }}>
-              {clickedBtn === 'star' ? 'Starred!' : 'Star'}
-            </button>
-            <ForwardButton messageId={messageId} accountEmail={accountEmail} subject={email.subject || ''} showToast={showToast} />
+            <div className="flex-1" />
             {onSnooze && (
               <SnoozeDropdown onSnooze={(hours, label) => { onSnooze(messageId, hours, label, accountEmail || _currentAccount); showToast('Snoozed', `Will reappear ${label}`); setTimeout(onClose, 300); }} />
             )}
+            <button onClick={() => flashAction('archive', () => { onAction('archive', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 300); })}
+              title="Archive"
+              className="p-2 rounded-lg border transition-all active:scale-90 hover:bg-gray-50"
+              style={{ borderColor: 'var(--border)', background: clickedBtn === 'archive' ? '#dcfce7' : undefined, color: clickedBtn === 'archive' ? '#166534' : 'var(--muted)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+            </button>
+            <button onClick={() => flashAction('star', () => { onAction('star', [messageId], undefined, accountEmail || _currentAccount); })}
+              title="Star"
+              className="p-2 rounded-lg border transition-all active:scale-90 hover:bg-amber-50"
+              style={{ borderColor: 'var(--border)', background: clickedBtn === 'star' ? '#fef3c7' : undefined, color: clickedBtn === 'star' ? '#92400e' : 'var(--muted)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            </button>
             <button onClick={() => flashAction('trash', () => { onAction('trash', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 300); })}
               title="Trash"
               className="p-2 rounded-lg border transition-all active:scale-90 hover:bg-red-50"
               style={{ borderColor: 'var(--border)', color: clickedBtn === 'trash' ? '#fff' : '#dc2626', background: clickedBtn === 'trash' ? '#ef4444' : undefined }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
             <button onClick={() => setConfirmDelete(true)}
               title="Delete permanently"
               className="p-2 rounded-lg border transition-all active:scale-90 hover:bg-red-50"
               style={{ borderColor: '#fca5a5', color: '#b91c1c' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
             </button>
           </div>
         )}
@@ -3429,15 +3423,30 @@ document.querySelectorAll('img').forEach(function(img) {
           style={{ borderColor: 'var(--accent)', color: replyOpen && replyAllMode ? '#fff' : 'var(--accent)', background: replyOpen && replyAllMode ? '#7c3aed' : undefined }}>
           {replyOpen && replyAllMode ? 'Cancel' : 'Reply All'}
         </button>
-        <ArchiveButton messageId={messageId} accountEmail={accountEmail} onAction={onAction} onDone={() => showToast('Archived')} />
+        <ForwardButton messageId={messageId} accountEmail={accountEmail} subject={email?.subject || ''} showToast={showToast} />
         <MarkReadButton isUnread={isUnread} messageId={messageId} accountEmail={accountEmail} onAction={(action, ids, label, acct) => {
           onAction(action, ids, label, acct);
           setIsUnread(!isUnread);
           showToast(isUnread ? 'Marked read' : 'Marked unread');
         }} />
-        <StarButton messageId={messageId} accountEmail={accountEmail} onAction={onAction} />
-        <ForwardButton messageId={messageId} accountEmail={accountEmail} subject={email?.subject || ''} showToast={showToast} />
-        <TrashButton messageId={messageId} accountEmail={accountEmail} onAction={onAction} onDone={() => showToast('Trashed')} />
+        <div className="flex-1" />
+        <SnoozeDropdown onSnooze={(hours, label) => {
+          const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+          apiPost('queue', { message_id: messageId, account_email: accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: email?.sender || '', sender_email: email?.senderEmail || '', subject: email?.subject || '' });
+          showToast('Snoozed', `Will reappear ${label}`);
+        }} />
+        <button onClick={(e) => { e.stopPropagation(); onAction('archive', [messageId], undefined, accountEmail || _currentAccount); showToast('Archived'); }}
+          title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); onAction('star', [messageId], undefined, accountEmail || _currentAccount); }}
+          title="Star" className="p-1.5 rounded-lg border hover:bg-amber-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); onAction('trash', [messageId], undefined, accountEmail || _currentAccount); showToast('Trashed'); }}
+          title="Trash" className="p-1.5 rounded-lg border hover:bg-red-50 transition-colors" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        </button>
       </div>
 
       {/* Reply composer */}
@@ -3571,14 +3580,28 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg border"
                   style={{ borderColor: 'var(--accent)', color: replyAllMode === msg.id ? '#fff' : 'var(--accent)', background: replyAllMode === msg.id ? '#7c3aed' : undefined }}>
                   Reply All</button>
-                <ArchiveButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
-                <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
-                <StarButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
-                <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
+                <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
+                <SnoozeDropdown onSnooze={(hours, label) => {
+                  const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+                  apiPost('queue', { message_id: msg.id, account_email: msg.accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: msg.sender, sender_email: msg.senderEmail, subject: msg.subject });
+                  showToast('Snoozed', `Will reappear ${label}`);
+                }} />
+                <button onClick={(e) => { e.stopPropagation(); onAction('archive', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
+                  title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); onAction('star', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
+                  title="Star" className="p-1.5 rounded-lg border hover:bg-amber-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); onAction('trash', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
+                  title="Trash" className="p-1.5 rounded-lg border hover:bg-red-50 transition-colors" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
                 <button onClick={() => setConfirmAction({ ids: [msg.id], count: 1 })}
                   title="Delete permanently" className="p-1.5 rounded-lg border hover:bg-red-50" style={{ borderColor: '#fca5a5', color: '#b91c1c' }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                 </button>
               </div>
               {/* Inline Reply Composer */}
@@ -4152,17 +4175,17 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                         } catch (e) { showToast('Error', String(e)); }
                       }} />
                     )}
-                    <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(item.id, hours, label)} />
-                    <button onClick={() => queueAction('archive', item.message_id, item.id, item.account_email)} title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" /></svg>
-                    </button>
                     <MarkReadButton isUnread={true} messageId={item.message_id} accountEmail={item.account_email} onAction={(action, ids, label, acct) => { queueAction(action, item.message_id, item.id, acct || item.account_email); }} />
-                    <button onClick={() => queueAction('trash', item.message_id, item.id, item.account_email)} title="Trash" className="p-1.5 rounded-lg border hover:bg-red-50" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                    <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(item.id, hours, label)} />
+                    <button onClick={() => queueAction('archive', item.message_id, item.id, item.account_email)} title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                    </button>
+                    <button onClick={() => queueAction('trash', item.message_id, item.id, item.account_email)} title="Trash" className="p-1.5 rounded-lg border hover:bg-red-50 transition-colors" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                     </button>
                     <button onClick={() => setConfirmDelete(item.id + '::' + item.message_id + '::' + item.account_email)}
-                      title="Delete permanently" className="p-1.5 rounded-lg border hover:bg-red-50" style={{ borderColor: '#fca5a5', color: '#b91c1c' }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                      title="Delete permanently" className="p-1.5 rounded-lg border hover:bg-red-50 transition-colors" style={{ borderColor: '#fca5a5', color: '#b91c1c' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                     </button>
                   </div>
                   {replyingTo === item.id && (
@@ -4606,10 +4629,16 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                         </div>
                         <div className="flex gap-1 flex-shrink-0 items-center">
                           <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
-                          <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
-                          <ArchiveButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
                           <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} size="xs" />
-                          <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
+                          <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
+                          <button onClick={(e) => { e.stopPropagation(); onAction('archive', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
+                            title="Archive" className="p-1 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                          </button>
+                          <button onClick={(e) => { e.stopPropagation(); onAction('trash', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
+                            title="Trash" className="p-1 rounded-lg border hover:bg-red-50 transition-colors" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                          </button>
                         </div>
                       </div>
                     );
@@ -5321,6 +5350,7 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                         )}
                       </div>
                       <div className="flex gap-2 flex-shrink-0 items-center">
+                        <ForwardButton messageId={latest.id} accountEmail={latest.accountEmail} subject={latest.subject || ''} showToast={showToast} size="xs" />
                         <div onClick={(e) => e.stopPropagation()}>
                           <SnoozeDropdown onSnooze={(hours, label) => {
                             const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
@@ -5329,13 +5359,16 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                           }} />
                         </div>
                         <button onClick={(e) => { e.stopPropagation(); onAction('archive', [latest.id], undefined, latest.accountEmail); setStarredSent(prev => prev.filter(m => m.id !== latest.id)); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length + awaitingReply.length) - 1); showToast('Archived'); }}
-                          className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                          Archive
+                          title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
                         </button>
-                        <ForwardButton messageId={latest.id} accountEmail={latest.accountEmail} subject={latest.subject || ''} showToast={showToast} size="xs" />
+                        <button onClick={(e) => { e.stopPropagation(); onAction('star', [latest.id], undefined, latest.accountEmail); }}
+                          title="Star" className="p-1.5 rounded-lg border hover:bg-amber-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                        </button>
                         <button onClick={(e) => { e.stopPropagation(); onAction('trash', [latest.id], undefined, latest.accountEmail); setStarredSent(prev => prev.filter(m => m.id !== latest.id)); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length + awaitingReply.length) - 1); showToast('Trashed'); }}
-                          className="px-2 py-1 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
-                          Trash
+                          title="Trash" className="p-1.5 rounded-lg border hover:bg-red-50 transition-colors" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                         </button>
                         <button onClick={(e) => { e.stopPropagation(); unstarMessage(latest.id, latest.accountEmail); }}
                           className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: '#fbbf24', color: '#92400e' }}>
@@ -5406,6 +5439,9 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                     </div>
                     <div className="flex gap-2 flex-shrink-0 items-center">
                       <div onClick={(e) => e.stopPropagation()}>
+                        <ForwardButton messageId={latest.id} accountEmail={latest.accountEmail} subject={convo.subject || ''} showToast={showToast} size="xs" />
+                      </div>
+                      <div onClick={(e) => e.stopPropagation()}>
                         <SnoozeDropdown onSnooze={(hours, label) => {
                           const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
                           apiPost('queue', { message_id: latest.id, account_email: latest.accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: convo.recipients.join(', '), subject: convo.subject });
@@ -5413,12 +5449,12 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                         }} />
                       </div>
                       <button onClick={(e) => { e.stopPropagation(); onAction('archive', [latest.id], undefined, latest.accountEmail); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length + awaitingReply.length) - 1); showToast('Archived'); }}
-                        className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                        Archive
+                        title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
                       </button>
                       <button onClick={(e) => { e.stopPropagation(); onAction('trash', [latest.id], undefined, latest.accountEmail); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length + awaitingReply.length) - 1); showToast('Trashed'); }}
-                        className="px-2 py-1 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
-                        Trash
+                        title="Trash" className="p-1.5 rounded-lg border hover:bg-red-50 transition-colors" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                       </button>
                       <button onClick={(e) => { e.stopPropagation(); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length) + (awaitingReply.length - 1)); showToast('Dismissed from follow-up'); }}
                         className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: '#fbbf24', color: '#92400e' }}>
@@ -6166,19 +6202,29 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                       else showToast('Failed', res.error);
                     }} />
                 )}
+                <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
+                <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <SnoozeDropdown onSnooze={(hours, label) => {
                   const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
                   apiPost('queue', { message_id: msg.id, account_email: msg.accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: msg.sender, sender_email: msg.senderEmail, subject: msg.subject });
                   showToast('Snoozed', `Will reappear ${label}`);
                   onRemove(msg.id);
                 }} />
-                <ArchiveButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} onDone={() => onRemove(msg.id)} />
-                <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
-                <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
-                <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} onDone={() => onRemove(msg.id)} />
+                <button onClick={(e) => { e.stopPropagation(); onAction('archive', [msg.id], undefined, msg.accountEmail || _currentAccount); onRemove(msg.id); }}
+                  title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); onAction('star', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
+                  title="Star" className="p-1.5 rounded-lg border hover:bg-amber-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </button>
+                <button onClick={(e) => { e.stopPropagation(); onAction('trash', [msg.id], undefined, msg.accountEmail || _currentAccount); onRemove(msg.id); }}
+                  title="Trash" className="p-1.5 rounded-lg border hover:bg-red-50 transition-colors" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
                 <button onClick={() => setConfirmDelete(msg.id + '::' + (msg.accountEmail || ''))}
-                  title="Delete permanently" className="p-1.5 rounded-lg border hover:bg-red-50" style={{ borderColor: '#fca5a5', color: '#b91c1c' }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                  title="Delete permanently" className="p-1.5 rounded-lg border hover:bg-red-50 transition-colors" style={{ borderColor: '#fca5a5', color: '#b91c1c' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                 </button>
               </div>
               {replyingTo === msg.id && (
