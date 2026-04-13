@@ -2,7 +2,11 @@ import { randomBytes, createHmac, createHash, timingSafeEqual } from 'crypto';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 
 const SESSION_TABLE = 'emailHelperV2_sessions';
-const SESSION_SECRET = process.env.SESSION_SECRET || process.env.ENCRYPTION_SALT || 'clearbox-session-secret-change-in-prod';
+function getSessionSecret(): string {
+  const secret = process.env.SESSION_SECRET || process.env.ENCRYPTION_SALT;
+  if (!secret) throw new Error('SESSION_SECRET or ENCRYPTION_SALT environment variable is required.');
+  return secret;
+}
 const SESSION_MAX_AGE_DAYS = 30;
 
 /**
@@ -17,7 +21,7 @@ function generateToken(): string {
  * Cookie format: `token.signature`
  */
 function signToken(token: string): string {
-  const signature = createHmac('sha256', SESSION_SECRET)
+  const signature = createHmac('sha256', getSessionSecret())
     .update(token)
     .digest('hex');
   return `${token}.${signature}`;
@@ -34,7 +38,7 @@ function verifySignedToken(signedValue: string): string | null {
   const token = signedValue.slice(0, dotIndex);
   const providedSig = signedValue.slice(dotIndex + 1);
 
-  const expectedSig = createHmac('sha256', SESSION_SECRET)
+  const expectedSig = createHmac('sha256', getSessionSecret())
     .update(token)
     .digest('hex');
 

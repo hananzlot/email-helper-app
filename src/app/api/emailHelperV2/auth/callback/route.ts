@@ -5,10 +5,14 @@ import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { TABLES } from '@/lib/tables';
 import { createSession } from '@/lib/session';
 
-const STATE_SECRET = process.env.SESSION_SECRET || process.env.ENCRYPTION_SALT || 'clearbox-state-secret';
+function getStateSecret(): string {
+  const secret = process.env.SESSION_SECRET || process.env.ENCRYPTION_SALT;
+  if (!secret) throw new Error('SESSION_SECRET or ENCRYPTION_SALT environment variable is required.');
+  return secret;
+}
 
 function hashNonce(nonce: string): string {
-  return createHmac('sha256', STATE_SECRET).update(nonce).digest('hex');
+  return createHmac('sha256', getStateSecret()).update(nonce).digest('hex');
 }
 
 export async function GET(request: NextRequest) {

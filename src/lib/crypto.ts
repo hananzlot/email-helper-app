@@ -1,11 +1,10 @@
-import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes, createHash, hkdfSync } from 'crypto';
 
 /**
  * Per-user AES-256-GCM encryption for metadata stored in Supabase.
  *
- * Key derivation: SHA-256 hash of (userId + APP_ENCRYPTION_SALT).
- * This gives each user a unique key that's deterministic (no extra storage),
- * tied to their identity, and rotates if they ever get a new userId.
+ * Key derivation: HKDF-SHA256 with ENCRYPTION_SALT as IKM and userId as info.
+ * Falls back to legacy SHA-256(userId:salt) for decrypting pre-existing data.
  *
  * The encrypted output format is: iv(12 bytes) + authTag(16 bytes) + ciphertext
  * all encoded as base64. This is stored as a regular text column.
@@ -15,16 +14,28 @@ const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 
-// Salt from environment, with a fallback for dev
-const SALT = process.env.ENCRYPTION_SALT || 'clearbox-v2-default-salt-change-in-prod';
+// Salt MUST be set in environment — no fallback
+function getSalt(): string {
+  const salt = process.env.ENCRYPTION_SALT;
+  if (!salt) throw new Error('ENCRYPTION_SALT environment variable is required. Set it in Netlify env vars.');
+  return salt;
+}
 
 /**
- * Derive a 256-bit encryption key from a userId.
- * Deterministic: same userId always produces same key.
+ * Derive a 256-bit encryption key from a userId using HKDF.
+ * HKDF provides proper key derivation with computational cost.
  */
 function deriveKey(userId: string): Buffer {
+  const salt = getSalt();
+  return Buffer.from(hkdfSync('sha256', salt, userId, 'clearbox-encryption', 32));
+}
+
+/**
+ * Legacy key derivation for decrypting data encrypted before the HKDF migration.
+ */
+function deriveKeyLegacy(userId: string): Buffer {
   return createHash('sha256')
-    .update(`${userId}:${SALT}`)
+    .update(`${userId}:${getSalt()}`)
     .digest();
 }
 
@@ -59,8 +70,6 @@ export function encrypt(plaintext: string | null | undefined, userId: string): s
 export function decrypt(ciphertext: string | null | undefined, userId: string): string {
   if (!ciphertext) return '';
 
-  // Graceful fallback: if it doesn't look like base64-encoded encrypted data, return as-is
-  // This handles the transition period where old unencrypted data still exists
   try {
     const packed = Buffer.from(ciphertext, 'base64');
 
@@ -73,18 +82,23 @@ export function decrypt(ciphertext: string | null | undefined, userId: string): 
     const authTag = packed.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
     const encrypted = packed.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
 
-    const key = deriveKey(userId);
-    const decipher = createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(authTag);
-
-    const decrypted = Buffer.concat([
-      decipher.update(encrypted),
-      decipher.final(),
-    ]);
-
-    return decrypted.toString('utf8');
+    // Try HKDF-derived key first (current)
+    try {
+      const key = deriveKey(userId);
+      const decipher = createDecipheriv(ALGORITHM, key, iv);
+      decipher.setAuthTag(authTag);
+      const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+      return decrypted.toString('utf8');
+    } catch {
+      // Fall back to legacy SHA-256 key for pre-migration data
+      const legacyKey = deriveKeyLegacy(userId);
+      const decipher = createDecipheriv(ALGORITHM, legacyKey, iv);
+      decipher.setAuthTag(authTag);
+      const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+      return decrypted.toString('utf8');
+    }
   } catch {
-    // If decryption fails, the data is probably not encrypted (legacy data)
+    // Not encrypted data (legacy plaintext) — return as-is
     return ciphertext;
   }
 }
