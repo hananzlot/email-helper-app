@@ -234,8 +234,16 @@ document.querySelectorAll('img').forEach(function(img) {
       try {
         const res = await gmailGet('message', { id: messageId, format: 'full' });
         if (res.success) setEmail(res.data);
-        else setError(res.error || 'Failed to load email');
-      } catch (e) { setError(String(e)); }
+        else {
+          // If failed with the specified account, try without account override (server fallback)
+          if (accountEmail) {
+            setCurrentAccount(savedAccount);
+            const retry = await gmailGet('message', { id: messageId, format: 'full' });
+            if (retry.success) { setEmail(retry.data); return; }
+          }
+          setError('Could not load this email. It may have been moved or deleted.');
+        }
+      } catch (e) { setError('Could not load this email. It may have been moved or deleted.'); }
       finally {
         // Restore original account
         if (accountEmail && accountEmail !== savedAccount) {
