@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     // Strategy 1: Check List-Unsubscribe header
     const result = await tryListUnsubscribeHeader(gmail, message_id, accessToken);
     if (result.success) {
-      const isVerified = result.method !== 'header_url_attempted';
+      const isVerified = result.method !== 'header_url_needs_interaction';
       await admin.from(UNSUB_TABLE).update({
         method: result.method,
         status: isVerified ? 'success' : 'attempted',
@@ -228,8 +228,9 @@ async function tryListUnsubscribeHeader(
           if (looksSuccessful) {
             return { success: true, method: 'header_url', url: safeUrls[0] };
           }
-          // Page visited but no confirmation text found — mark as uncertain
-          return { success: true, method: 'header_url_attempted', url: safeUrls[0] };
+          // Page visited but no confirmation — don't claim success, let AI agent try
+          // Return the URL so the AI can interact with the page
+          return { success: false, method: 'header_url_needs_interaction', url: safeUrls[0] };
         }
       } catch {}
     }
