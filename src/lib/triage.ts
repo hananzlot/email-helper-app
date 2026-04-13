@@ -179,26 +179,36 @@ export async function runTriage(
   });
 
   if (signalEmails.length > 0) {
-    const queueItems = signalEmails.map((e) => {
-      const item = {
-        user_id: userId,
-        message_id: e.id,
-        thread_id: e.threadId,
-        account_email: accountEmail,
-        sender: e.sender,
-        sender_email: e.senderEmail,
-        subject: e.subject,
-        summary: e.summary,
-        tier: e.tier,
-        priority: e.priority,
-        priority_score: e.priorityScore,
-        received: new Date(e.received).toISOString(),
-        gmail_url: e.gmailUrl,
-        status: 'active',
-      };
-      // Encrypt sensitive fields before storing
-      return encryptFields(item, [...ENCRYPTED_FIELDS.REPLY_QUEUE], userId);
-    });
+    // Fetch currently-snoozed message IDs so we don't overwrite them back to active
+    const { data: snoozedRows } = await admin
+      .from(TABLES.REPLY_QUEUE)
+      .select('message_id')
+      .eq('user_id', userId)
+      .eq('status', 'snoozed');
+    const snoozedMessageIds = new Set((snoozedRows || []).map((r: { message_id: string }) => r.message_id));
+
+    const queueItems = signalEmails
+      .filter((e) => !snoozedMessageIds.has(e.id))
+      .map((e) => {
+        const item = {
+          user_id: userId,
+          message_id: e.id,
+          thread_id: e.threadId,
+          account_email: accountEmail,
+          sender: e.sender,
+          sender_email: e.senderEmail,
+          subject: e.subject,
+          summary: e.summary,
+          tier: e.tier,
+          priority: e.priority,
+          priority_score: e.priorityScore,
+          received: new Date(e.received).toISOString(),
+          gmail_url: e.gmailUrl,
+          status: 'active',
+        };
+        // Encrypt sensitive fields before storing
+        return encryptFields(item, [...ENCRYPTED_FIELDS.REPLY_QUEUE], userId);
+      });
 
     // Batch upsert in chunks of 25 to avoid payload limits
     for (let i = 0; i < queueItems.length; i += 25) {
