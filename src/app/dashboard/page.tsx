@@ -40,6 +40,7 @@ function getMaxEmails(): number {
 // All helpers append ?account= so the server always knows which Gmail account to use.
 
 let _currentAccount = '';
+let _onEmailSent: (() => void) | null = null;
 
 function setCurrentAccount(acct: string) {
   _currentAccount = acct;
@@ -155,13 +156,14 @@ function decodeHtmlEntities(text: string): string {
   return text.replace(/&(?:#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match) => entities[match] || match);
 }
 
-function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToast, onSnooze }: {
+function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToast, onSnooze, onEmailSent }: {
   messageId: string;
   accountEmail?: string;
   onClose: () => void;
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
   onSnooze?: (messageId: string, hours: number, label: string, accountEmail?: string) => void;
+  onEmailSent?: () => void;
 }) {
   const [email, setEmail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -396,7 +398,7 @@ document.querySelectorAll('img').forEach(function(img) {
                     accountEmail={accountEmail}
                     replyAll={replyAllMode}
                     cc={replyAllMode ? [...(email.to || '').split(','), ...(email.cc || '').split(',')].map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(email.senderEmail.toLowerCase()) && !(accountEmail && e.toLowerCase().includes(accountEmail.toLowerCase()))).join(', ') : undefined}
-                    onSent={() => { setReplyOpen(false); setReplyAllMode(false); showToast('Reply sent', `To: ${email.senderEmail}`); }}
+                    onSent={() => { setReplyOpen(false); setReplyAllMode(false); showToast('Reply sent', `To: ${email.senderEmail}`); onEmailSent?.(); }}
                     onCancel={() => { setReplyOpen(false); setReplyAllMode(false); }}
                   />
                 </div>
@@ -579,10 +581,11 @@ function StarButton({ messageId, accountEmail, onAction, size = 'sm' }: {
   );
 }
 
-function ForwardButton({ messageId, accountEmail, subject, showToast, size = 'sm' }: {
+function ForwardButton({ messageId, accountEmail, subject, showToast, size = 'sm', onEmailSent }: {
   messageId: string; accountEmail?: string; subject: string;
   showToast: (title: string, subtitle?: string) => void;
   size?: 'sm' | 'xs';
+  onEmailSent?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [to, setTo] = useState('');
@@ -607,6 +610,8 @@ function ForwardButton({ messageId, accountEmail, subject, showToast, size = 'sm
       if (res.success) {
         showToast('Forwarded', `To: ${to.trim()}`);
         setOpen(false); setTo(''); setBody('');
+        onEmailSent?.();
+        _onEmailSent?.();
       } else {
         showToast('Forward failed', res.error);
       }
@@ -770,6 +775,8 @@ export default function Dashboard() {
   const [triageLoading, setTriageLoading] = useState(false);
   const [bgTaskLabel, setBgTaskLabel] = useState<string | null>(null);
   const [triageVersion, setTriageVersion] = useState(0);
+  const [sentVersion, setSentVersion] = useState(0);
+  _onEmailSent = () => { setTimeout(() => setSentVersion(v => v + 1), 2000); };
   const [userId, setUserId] = useState<string>('');
   // Track which messages are animating out and their animation type
   const [animatingOut, setAnimatingOut] = useState<Record<string, 'trash' | 'delete' | 'archive'>>({});
@@ -2625,7 +2632,7 @@ export default function Dashboard() {
               {activeTab === 'follow-up' && <FollowUpTab key={`followup-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
               {activeTab === 'snoozed' && <SnoozedTab key={`snoozed-${account}-${unified}`} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
               {activeTab === 'cleanup' && <CleanupTab unified={unified} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
-              {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
+              {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}-${sentVersion}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} />}
               {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${triageVersion}`} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
               {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
@@ -2684,7 +2691,7 @@ export default function Dashboard() {
       </div>
 
       {/* Email Preview Modal — only used in card mode */}
-      {previewMessageId && <EmailPreviewModal messageId={previewMessageId} accountEmail={previewAccount} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} onSnooze={snoozeFromPreview} />}
+      {previewMessageId && <EmailPreviewModal messageId={previewMessageId} accountEmail={previewAccount} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} onSnooze={snoozeFromPreview} onEmailSent={() => setSentVersion(v => v + 1)} />}
 
       {/* Action History Panel */}
       {showActionHistory && (
@@ -3187,6 +3194,7 @@ function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, sho
       if (res.success) {
         showToast('Reply sent', `To: ${to}${replyAll ? ' + all' : ''}${accountEmail ? ` (via ${accountEmail})` : ''}`);
         onSent();
+        _onEmailSent?.();
       } else {
         showToast('Send failed', res.error);
       }
