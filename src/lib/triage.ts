@@ -205,7 +205,6 @@ export async function runTriage(
       const chunk = queueItems.slice(i, i + 25);
       await admin.from(TABLES.REPLY_QUEUE).upsert(chunk, {
         onConflict: 'user_id,message_id',
-        ignoreDuplicates: true,
       });
     }
   }

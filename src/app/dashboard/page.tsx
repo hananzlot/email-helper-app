@@ -866,6 +866,8 @@ export default function Dashboard() {
   }, []);
   const splitContainerRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
+  const tabBarRef = useRef<HTMLDivElement>(null);
+  const [tabBarWidth, setTabBarWidth] = useState<number | undefined>(undefined);
 
   function handleSplitDragStart(e: React.MouseEvent) {
     e.preventDefault();
@@ -2041,6 +2043,14 @@ export default function Dashboard() {
     ...(searchSelectionActive.length > 0 ? [{ id: 'search-reviews' as Tab, label: `Search Reviews (${searchSelectionActive.length})` }] : []),
   ];
 
+  // Measure tab bar width so search box can align to it
+  useEffect(() => {
+    if (!tabBarRef.current) return;
+    const ro = new ResizeObserver(([entry]) => setTabBarWidth(entry.contentRect.width));
+    ro.observe(tabBarRef.current);
+    return () => ro.disconnect();
+  }, []);
+
   // Auth error — show login prompt instead of redirect loop
   if (authError) {
     return (
@@ -2274,8 +2284,8 @@ export default function Dashboard() {
           );
         })()}
 
-        {/* Global Search Bar */}
-        <div className="relative mb-2">
+        {/* Global Search Bar — width aligned to tab bar */}
+        <div className="relative mb-2" style={{ maxWidth: tabBarWidth ? tabBarWidth : undefined }}>
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#94a3b8' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2437,8 +2447,8 @@ export default function Dashboard() {
         </div>
 
         {/* Tabs — pill style, responsive, with shadow separator */}
-        <div className="flex flex-wrap gap-1.5 pb-3 mb-0"
-          style={{ borderBottom: '1px solid var(--border)' }}>
+        <div ref={tabBarRef} className="flex flex-wrap gap-1.5 pb-3 mb-0"
+          style={{ borderBottom: '1px solid var(--border)', width: 'fit-content' }}>
           {tabs.map((tab) => {
             const count = tabCounts[tab.id];
             const isActive = activeTab === tab.id;
