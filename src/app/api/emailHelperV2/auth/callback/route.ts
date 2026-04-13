@@ -1,17 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { exchangeCodeForTokens, signInOrCreateUser, storeGmailTokens } from '@/lib/auth';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { TABLES } from '@/lib/tables';
 import { createSession } from '@/lib/session';
 
+const STATE_SECRET = process.env.SESSION_SECRET || process.env.ENCRYPTION_SALT || 'clearbox-state-secret';
+
+function verifyNonce(nonce: string, signedCookie: string): boolean {
+  const dotIdx = signedCookie.lastIndexOf('.');
+  if (dotIdx === -1) return false;
+  const cookieNonce = signedCookie.slice(0, dotIdx);
+  const cookieSig = signedCookie.slice(dotIdx + 1);
+  if (cookieNonce !== nonce) return false;
+  const expectedSig = createHmac('sha256', STATE_SECRET).update(cookieNonce).digest('hex');
+  try {
+    const a = Buffer.from(cookieSig, 'hex');
+    const b = Buffer.from(expectedSig, 'hex');
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
-  const state = searchParams.get('state');  // 'login' or 'add_account:userId'
+  const state = searchParams.get('state');  // 'nonce.login' or 'nonce.add_account.userId'
   const error = searchParams.get('error');
 
-  // Use NEXT_PUBLIC_APP_URL so all redirects go to the production domain,
-  // not Netlify's internal deploy preview URLs
   const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
 
   if (error) {
@@ -20,9 +38,29 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  if (!code) {
+  if (!code || !state) {
     return NextResponse.redirect(new URL('/login?error=no_code', origin));
   }
+
+  // Verify OAuth state nonce against signed cookie
+  const nonceCookie = request.cookies.get('email_helper_oauth_nonce')?.value;
+  if (!nonceCookie) {
+    return NextResponse.redirect(new URL('/login?error=missing_state_cookie', origin));
+  }
+
+  // Parse state: nonce.login or nonce.add_account.userId
+  const stateParts = state.split('.');
+  if (stateParts.length < 2) {
+    return NextResponse.redirect(new URL('/login?error=invalid_state', origin));
+  }
+
+  const stateNonce = stateParts[0];
+  if (!verifyNonce(stateNonce, nonceCookie)) {
+    return NextResponse.redirect(new URL('/login?error=state_mismatch', origin));
+  }
+
+  const flow = stateParts[1]; // 'login' or 'add_account'
+  const isAddAccount = flow === 'add_account';
 
   try {
     const redirectUri = `${origin}/api/emailHelperV2/auth/callback`;
@@ -31,11 +69,13 @@ export async function GET(request: NextRequest) {
     const { tokens, userInfo, gmailProfile } = await exchangeCodeForTokens(code, redirectUri);
 
     let userId: string;
-    const isAddAccount = state?.startsWith('add_account:');
 
     if (isAddAccount) {
-      // Adding another Gmail account to an existing user
-      userId = state!.split(':')[1];
+      // Adding another Gmail account — userId comes from verified state
+      userId = stateParts[2];
+      if (!userId) {
+        return NextResponse.redirect(new URL('/login?error=missing_user_id', origin));
+      }
 
       // Guard: check if this email is already connected to a DIFFERENT user
       const admin = createSupabaseAdmin();
@@ -120,10 +160,9 @@ export async function GET(request: NextRequest) {
         maxAge: 60 * 60 * 24 * 30,
         path: '/',
       });
-      // Clear legacy cookie if present
-      response.cookies.set('email_helper_user_id', '', {
-        httpOnly: true, maxAge: 0, path: '/',
-      });
+      // Clear legacy + nonce cookies
+      response.cookies.set('email_helper_user_id', '', { httpOnly: true, maxAge: 0, path: '/' });
+      response.cookies.set('email_helper_oauth_nonce', '', { httpOnly: true, maxAge: 0, path: '/' });
 
       return response;
     } else {
@@ -148,10 +187,9 @@ export async function GET(request: NextRequest) {
         maxAge: 60 * 60 * 24 * 30,
         path: '/',
       });
-      // Clear legacy cookie if present
-      response.cookies.set('email_helper_user_id', '', {
-        httpOnly: true, maxAge: 0, path: '/',
-      });
+      // Clear legacy + nonce cookies
+      response.cookies.set('email_helper_user_id', '', { httpOnly: true, maxAge: 0, path: '/' });
+      response.cookies.set('email_helper_oauth_nonce', '', { httpOnly: true, maxAge: 0, path: '/' });
       return response;
     }
   } catch (err) {
