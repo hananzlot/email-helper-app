@@ -395,7 +395,7 @@ document.querySelectorAll('img').forEach(function(img) {
                     showToast={showToast}
                     accountEmail={accountEmail}
                     replyAll={replyAllMode}
-                    cc={replyAllMode ? (email.cc || email.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(email.senderEmail.toLowerCase()) && !(accountEmail && e.toLowerCase().includes(accountEmail.toLowerCase()))).join(', ') : undefined}
+                    cc={replyAllMode ? [...(email.to || '').split(','), ...(email.cc || '').split(',')].map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(email.senderEmail.toLowerCase()) && !(accountEmail && e.toLowerCase().includes(accountEmail.toLowerCase()))).join(', ') : undefined}
                     onSent={() => { setReplyOpen(false); setReplyAllMode(false); showToast('Reply sent', `To: ${email.senderEmail}`); }}
                     onCancel={() => { setReplyOpen(false); setReplyAllMode(false); }}
                   />
@@ -440,6 +440,7 @@ document.querySelectorAll('img').forEach(function(img) {
               style={{ borderColor: 'var(--border)', background: clickedBtn === 'star' ? '#fef3c7' : undefined, color: clickedBtn === 'star' ? '#92400e' : undefined }}>
               {clickedBtn === 'star' ? 'Starred!' : 'Star'}
             </button>
+            <ForwardButton messageId={messageId} accountEmail={accountEmail} subject={email.subject || ''} showToast={showToast} />
             {onSnooze && (
               <SnoozeDropdown onSnooze={(hours, label) => { onSnooze(messageId, hours, label, accountEmail || _currentAccount); showToast('Snoozed', `Will reappear ${label}`); setTimeout(onClose, 300); }} />
             )}
@@ -574,6 +575,74 @@ function StarButton({ messageId, accountEmail, onAction, size = 'sm' }: {
       className={`${size === 'xs' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1.5 text-xs'} font-medium rounded-lg border`}
       style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
       Star
+    </button>
+  );
+}
+
+function ForwardButton({ messageId, accountEmail, subject, showToast, size = 'sm' }: {
+  messageId: string; accountEmail?: string; subject: string;
+  showToast: (title: string, subtitle?: string) => void;
+  size?: 'sm' | 'xs';
+}) {
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState('');
+  const [body, setBody] = useState('');
+  const [sending, setSending] = useState(false);
+
+  async function sendForward() {
+    if (!to.trim()) return;
+    setSending(true);
+    const savedAccount = _currentAccount;
+    if (accountEmail && accountEmail !== _currentAccount) setCurrentAccount(accountEmail);
+    try {
+      // Fetch original message body for forwarding
+      const msgRes = await gmailGet('message', { id: messageId, format: 'full' });
+      const origBody = msgRes.success ? (msgRes.data.bodyHtml || msgRes.data.body || '') : '';
+      const fwdBody = `${body ? body.replace(/\n/g, '<br>') + '<br><br>' : ''}<hr style="border:none;border-top:1px solid #ccc;margin:16px 0"><strong>---------- Forwarded message ----------</strong><br>${origBody}`;
+      const res = await gmailPost('send', {
+        to: to.trim(),
+        subject: subject.startsWith('Fwd:') ? subject : `Fwd: ${subject}`,
+        body: fwdBody,
+      });
+      if (res.success) {
+        showToast('Forwarded', `To: ${to.trim()}`);
+        setOpen(false); setTo(''); setBody('');
+      } else {
+        showToast('Forward failed', res.error);
+      }
+    } catch (err) { showToast('Forward failed', String(err)); }
+    finally {
+      if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
+      setSending(false);
+    }
+  }
+
+  if (open) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={() => setOpen(false)}>
+        <div className="w-full max-w-md mx-4 p-4 rounded-xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>Forward: {subject}</div>
+          <input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder="To: email@example.com"
+            className="w-full p-2.5 mb-2 rounded-lg border text-sm" style={{ borderColor: 'var(--border)' }} autoFocus />
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Add a message (optional)"
+            rows={3} className="w-full p-2.5 rounded-lg border text-sm resize-y" style={{ borderColor: 'var(--border)' }} />
+          <div className="flex gap-2 mt-3">
+            <button onClick={sendForward} disabled={sending || !to.trim()}
+              className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: sending ? 'var(--muted)' : 'var(--accent)' }}>
+              {sending ? 'Sending...' : 'Forward'}
+            </button>
+            <button onClick={() => setOpen(false)} className="px-4 py-2 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button onClick={(e) => { e.stopPropagation(); setOpen(true); }}
+      className={`${size === 'xs' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1.5 text-xs'} font-medium rounded-lg border`}
+      style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
+      Forward
     </button>
   );
 }
@@ -3305,6 +3374,7 @@ document.querySelectorAll('img').forEach(function(img) {
           showToast(isUnread ? 'Marked read' : 'Marked unread');
         }} />
         <StarButton messageId={messageId} accountEmail={accountEmail} onAction={onAction} />
+        <ForwardButton messageId={messageId} accountEmail={accountEmail} subject={email?.subject || ''} showToast={showToast} />
         <TrashButton messageId={messageId} accountEmail={accountEmail} onAction={onAction} onDone={() => showToast('Trashed')} />
       </div>
 
@@ -3319,7 +3389,7 @@ document.querySelectorAll('img').forEach(function(img) {
             showToast={showToast}
             accountEmail={accountEmail}
             replyAll={replyAllMode}
-            cc={replyAllMode ? (email.cc || email.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(email.senderEmail.toLowerCase()) && !(accountEmail && e.toLowerCase().includes(accountEmail.toLowerCase()))).join(', ') : undefined}
+            cc={replyAllMode ? [...(email.to || '').split(','), ...(email.cc || '').split(',')].map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(email.senderEmail.toLowerCase()) && !(accountEmail && e.toLowerCase().includes(accountEmail.toLowerCase()))).join(', ') : undefined}
             onSent={() => { setReplyOpen(false); setReplyAllMode(false); showToast(`Reply${replyAllMode ? ' all' : ''} sent`); }}
             onCancel={() => { setReplyOpen(false); setReplyAllMode(false); }}
           />
@@ -3437,6 +3507,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                 <ArchiveButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <StarButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
+                <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
                 <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <button onClick={() => setConfirmAction({ ids: [msg.id], count: 1 })}
                   className="px-2 py-1.5 text-xs rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
@@ -3997,7 +4068,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                             threadId: item.thread_id, inReplyTo: item.message_id,
                           };
                           if (replyAll) {
-                            const ccList = (item.cc || item.to || '').split(',').map((e: string) => e.trim())
+                            const ccList = [...(item.to || '').split(','), ...(item.cc || '').split(',')].map((e: string) => e.trim())
                               .filter((e: string) => e && !e.toLowerCase().includes(item.sender_email.toLowerCase()) && !(item.account_email && e.toLowerCase().includes(item.account_email.toLowerCase())));
                             if (ccList.length > 0) payload.cc = ccList.join(', ');
                           }
@@ -4024,7 +4095,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                         threadId={item.thread_id} messageId={item.message_id}
                         showToast={showToast} accountEmail={item.account_email}
                         replyAll={replyAllTo === item.id}
-                        cc={replyAllTo === item.id ? (item.cc || item.to || '').split(',').map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(item.sender_email.toLowerCase()) && !(item.account_email && e.toLowerCase().includes(item.account_email.toLowerCase()))).join(', ') : undefined}
+                        cc={replyAllTo === item.id ? [...(item.to || '').split(','), ...(item.cc || '').split(',')].map((e: string) => e.trim()).filter((e: string) => e && !e.toLowerCase().includes(item.sender_email.toLowerCase()) && !(item.account_email && e.toLowerCase().includes(item.account_email.toLowerCase()))).join(', ') : undefined}
                         onSent={() => { setReplyingTo(null); setReplyAllTo(null); queueAction('archive', item.message_id, item.id, item.account_email); }}
                         onCancel={() => { setReplyingTo(null); setReplyAllTo(null); }}
                       />
@@ -4460,6 +4531,7 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                           <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                           <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
                           <ArchiveButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
+                          <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} size="xs" />
                           <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
                         </div>
                       </div>
@@ -5179,6 +5251,7 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                           className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
                           Archive
                         </button>
+                        <ForwardButton messageId={latest.id} accountEmail={latest.accountEmail} subject={latest.subject || ''} showToast={showToast} size="xs" />
                         <button onClick={(e) => { e.stopPropagation(); onAction('trash', [latest.id], undefined, latest.accountEmail); setStarredSent(prev => prev.filter(m => m.id !== latest.id)); setAwaitingReply(prev => prev.filter(m => m.id !== latest.id)); reportCount?.((starredSent.length + awaitingReply.length) - 1); showToast('Trashed'); }}
                           className="px-2 py-1 text-xs rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
                           Trash
@@ -6020,6 +6093,7 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                 }} />
                 <ArchiveButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} onDone={() => onRemove(msg.id)} />
                 <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
+                <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
                 <TrashButton messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} onDone={() => onRemove(msg.id)} />
                 <button onClick={() => setConfirmDelete(msg.id + '::' + (msg.accountEmail || ''))}
                   className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-700" style={{ borderColor: '#fca5a5' }}>Delete</button>
