@@ -4287,8 +4287,15 @@ function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onP
             <p className="text-xs" style={{ color: 'var(--muted)' }}>{cleanupMessages.length} low-priority messages</p>
           </div>
           <button onClick={() => {
-            snapshotTaken.current = false;
-            setSnapshot([]);
+            // Instant re-snapshot from current messages — no waiting for load
+            const seenIds = new Set<string>();
+            const noise = messages.filter(m => {
+              if (!m.isUnread || !isNoiseSender(m.senderEmail)) return false;
+              if (seenIds.has(m.id)) return false;
+              seenIds.add(m.id);
+              return true;
+            });
+            setSnapshot(noise);
             setVisibleGroups(30);
           }}
             className="px-3 py-1.5 text-xs font-medium rounded-lg border"
