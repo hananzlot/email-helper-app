@@ -2505,8 +2505,8 @@ export default function Dashboard() {
                 {count != null && count > 0 && (
                   <span className="text-xs font-extrabold px-2 py-0.5 rounded-md min-w-[24px] text-center leading-none"
                     style={{
-                      background: isActive ? 'var(--accent)' : '#dc2626',
-                      color: 'white',
+                      background: isActive ? 'white' : 'var(--accent)',
+                      color: isActive ? 'var(--accent)' : 'white',
                       letterSpacing: '0.02em',
                     }}>
                     {count > 9999 ? `${Math.round(count / 1000)}k` : count > 99 ? count.toLocaleString() : count}
