@@ -4301,6 +4301,28 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
             {selectedGroups.size > 0 && ` (${selectedGroups.size} sender${selectedGroups.size > 1 ? 's' : ''})`}
           </span>
           <div className="flex gap-2">
+            <button onClick={async () => {
+              // Bulk unsubscribe — one per selected sender group
+              showToast('Unsubscribing...', `${selectedGroups.size} sender${selectedGroups.size > 1 ? 's' : ''}`);
+              let success = 0;
+              for (const email of selectedGroups) {
+                const group = senderGroups[email.toLowerCase()];
+                if (!group || !group.messages[0]) continue;
+                try {
+                  const res = await apiPost('unsubscribe', {
+                    message_id: group.messages[0].id,
+                    account_email: group.messages[0].accountEmail || _currentAccount,
+                    sender_email: group.email,
+                    domain: group.email.includes('@') ? group.email.split('@')[1] : group.email.replace('@', ''),
+                  });
+                  if (res.success && res.data?.status === 'success') success++;
+                } catch {}
+              }
+              showToast(`Unsubscribed from ${success} sender${success !== 1 ? 's' : ''}`, success < selectedGroups.size ? `${selectedGroups.size - success} failed` : undefined);
+            }}
+              className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: '#8b5cf6' }}>
+              Unsubscribe ({selectedGroups.size})
+            </button>
             <button onClick={() => { actionByAccount('markRead', selectedIds); setSelectedGroups(new Set()); setSelectedMessages(new Set()); }}
               className="px-4 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', background: 'white' }}>
               Mark Read
@@ -4384,6 +4406,28 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                     actionByAccount('markRead', allIds);
                     showToast('Snoozed', `${group.messages.length} message${group.messages.length > 1 ? 's' : ''} will reappear ${label}`);
                   }} />
+                  <button onClick={async () => {
+                    const latest = group.messages[0];
+                    if (!latest) return;
+                    showToast('Unsubscribing...', group.name);
+                    try {
+                      const res = await apiPost('unsubscribe', {
+                        message_id: latest.id,
+                        account_email: latest.accountEmail || _currentAccount,
+                        sender_email: group.email,
+                        domain: group.email.includes('@') ? group.email.split('@')[1] : group.email.replace('@', ''),
+                      });
+                      if (res.success && res.data?.status === 'success') {
+                        showToast('Unsubscribed!', `${group.name} — ${res.data.method}`);
+                      } else {
+                        showToast('Could not auto-unsubscribe', res.data?.reason || 'Try manually');
+                      }
+                    } catch { showToast('Unsubscribe failed'); }
+                  }}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg border"
+                    style={{ borderColor: '#8b5cf6', color: '#8b5cf6', background: '#f5f3ff' }}>
+                    Unsubscribe
+                  </button>
                   <button onClick={() => actionByAccount('archive', allIds)}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
                     Archive
