@@ -4089,23 +4089,55 @@ function CleanupTab({ messages, loading: parentLoading, onAction, showToast, onP
     return false;
   }
 
-  // Snapshot messages once initial load completes
+  // Load Easy-Clear data: use messages if available, otherwise load from cache directly
   const [snapshot, setSnapshot] = useState<GmailMessage[]>([]);
   const snapshotTaken = React.useRef(false);
 
   useEffect(() => {
-    if (snapshotTaken.current || !tiersLoaded || parentLoading || messages.length === 0) return;
-    // Deduplicate by gmail_id (same email can be cached under multiple accounts in unified mode)
-    const seenIds = new Set<string>();
-    const noise = messages.filter(m => {
-      if (!m.isUnread || !isNoiseSender(m.senderEmail)) return false;
-      if (seenIds.has(m.id)) return false;
-      seenIds.add(m.id);
-      return true;
-    });
-    if (noise.length > 0) {
-      setSnapshot(noise);
-      snapshotTaken.current = true;
+    if (snapshotTaken.current) return;
+
+    // Try from messages state first (fast if already loaded)
+    if (tiersLoaded && !parentLoading && messages.length > 0) {
+      const seenIds = new Set<string>();
+      const noise = messages.filter(m => {
+        if (!m.isUnread || !isNoiseSender(m.senderEmail)) return false;
+        if (seenIds.has(m.id)) return false;
+        seenIds.add(m.id);
+        return true;
+      });
+      if (noise.length > 0) {
+        setSnapshot(noise);
+        snapshotTaken.current = true;
+        return;
+      }
+    }
+
+    // Fallback: load directly from Supabase cache (for when messages haven't loaded yet)
+    if (tiersLoaded && messages.length === 0 && !parentLoading) {
+      (async () => {
+        try {
+          const cacheRes = await apiGet('inbox-cache');
+          if (cacheRes.success && cacheRes.data?.messages?.length > 0) {
+            const seenIds = new Set<string>();
+            const cachedMsgs = cacheRes.data.messages
+              .filter((m: { is_unread: boolean; sender_email: string; gmail_id: string }) => {
+                if (!m.is_unread || !isNoiseSender(m.sender_email)) return false;
+                if (seenIds.has(m.gmail_id)) return false;
+                seenIds.add(m.gmail_id);
+                return true;
+              })
+              .map((m: { gmail_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; is_unread: boolean; label_ids: string[]; account_email: string }) => ({
+                id: m.gmail_id, threadId: m.thread_id, sender: m.sender, senderEmail: m.sender_email,
+                subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.is_unread,
+                labelIds: m.label_ids, accountEmail: m.account_email, body: '', bodyHtml: '', to: '', cc: '',
+              } as GmailMessage));
+            if (cachedMsgs.length > 0) {
+              setSnapshot(cachedMsgs);
+              snapshotTaken.current = true;
+            }
+          }
+        } catch {}
+      })();
     }
   }, [tiersLoaded, parentLoading, messages.length]);
 
