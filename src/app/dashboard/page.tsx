@@ -4110,18 +4110,6 @@ function CleanupTab({ onAction, showToast, onPreview, onDialogPreview, reportCou
     })).filter(g => g.count > 0));
   }
 
-  // No more client-side snapshot/filtering
-  useEffect(() => {
-    if (!snapshotTaken.current || actionedIds.size === 0) return;
-    setSnapshot(prev => {
-      const filtered = prev.filter(m => !actionedIds.has(m.id));
-      return filtered.length === prev.length ? prev : filtered;
-    });
-  });
-
-  const cleanupMessages = snapshot;
-
-  // Report count to parent
   // Groups come pre-sorted from the server API
   const groups = serverGroups;
   const senderGroups: Record<string, { name: string; email: string; messages: GmailMessage[] }> = {};
