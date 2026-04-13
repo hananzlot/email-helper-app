@@ -1949,12 +1949,21 @@ export default function Dashboard() {
         reportTabCount('follow-up', followUpCount);
       }
 
-      // All Mail count — fast SQL count from Supabase cache (account-specific or unified)
+      // All Mail count — from Gmail labels.get (accurate, 1 API call per account)
       try {
-        const countUrl = unified ? '/api/emailHelperV2/inbox-cache?countOnly=true' : withAccount('/api/emailHelperV2/inbox-cache?countOnly=true');
-        const countRes = await fetch(countUrl).then(r => r.json());
-        if (countRes.success) {
-          reportTabCount('inbox', countRes.data.unreadCount || 0);
+        if (unified && accounts.length > 1) {
+          let totalInbox = 0;
+          const savedAcct = _currentAccount;
+          for (const acct of accounts) {
+            setCurrentAccount(acct.email);
+            const labelRes = await gmailGet('labelInfo', { labelId: 'INBOX' });
+            if (labelRes.success) totalInbox += labelRes.data.messagesTotal || 0;
+          }
+          setCurrentAccount(savedAcct);
+          reportTabCount('inbox', totalInbox);
+        } else {
+          const labelRes = await gmailGet('labelInfo', { labelId: 'INBOX' });
+          if (labelRes.success) reportTabCount('inbox', labelRes.data.messagesTotal || 0);
         }
       } catch {}
     } catch (e) {
