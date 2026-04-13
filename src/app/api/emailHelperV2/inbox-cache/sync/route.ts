@@ -104,8 +104,38 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const newIds = messageIds.filter(id => !existingSet.has(id) && !actionedSet.has(id));
+    let newIds = messageIds.filter(id => !existingSet.has(id) && !actionedSet.has(id));
     let cachedThisPage = 0;
+    let skippedPages = 0;
+
+    // Fast-forward: if ALL messages on this page are cached, keep jumping pages
+    // without fetching metadata (just get nextPageToken). Up to 50 jumps per call.
+    let currentPageToken = listRes.nextPageToken || null;
+    while (newIds.length === 0 && currentPageToken && skippedPages < 50) {
+      skippedPages++;
+      const skipRes = await listMessages(gmail, { query: 'in:inbox', maxResults: 100, pageToken: currentPageToken });
+      if (!skipRes.messages?.length) { currentPageToken = null; break; }
+      const skipIds = skipRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
+      const { data: skipExisting } = await admin
+        .from(TABLES.INBOX_CACHE)
+        .select('gmail_id')
+        .eq('user_id', user_id)
+        .eq('account_email', account_email)
+        .in('gmail_id', skipIds);
+      const skipExistingSet = new Set<string>();
+      if (skipExisting) skipExisting.forEach((r: { gmail_id: string }) => skipExistingSet.add(r.gmail_id));
+      newIds = skipIds.filter(id => !skipExistingSet.has(id) && !actionedSet.has(id));
+      currentPageToken = skipRes.nextPageToken || null;
+      if (newIds.length > 0) {
+        // Found uncached messages — update messageIds for caching below
+        messageIds.length = 0;
+        messageIds.push(...skipIds);
+        break;
+      }
+    }
+
+    // Update the page token to where we actually are after fast-forwarding
+    const finalNextPageToken = currentPageToken;
 
     if (newIds.length > 0) {
       // Batch fetch metadata (25 parallel to stay within timeout)
@@ -134,7 +164,7 @@ export async function POST(request: NextRequest) {
       cachedThisPage = rows.length;
     }
 
-    const nextPageToken = listRes.nextPageToken || null;
+    const nextPageToken = finalNextPageToken;
 
     // Get actual total cached count (efficient count query, no data transfer)
     const { count: actualCachedCount } = await admin
@@ -162,6 +192,7 @@ export async function POST(request: NextRequest) {
       success: true,
       data: {
         cachedThisPage,
+        skippedPages,
         skippedExisting: existingSet.size,
         totalCached: actualCachedCount || 0,
         inboxTotal,
