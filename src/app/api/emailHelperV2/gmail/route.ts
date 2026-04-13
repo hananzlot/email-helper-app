@@ -182,6 +182,52 @@ export async function POST(request: NextRequest) {
         return apiError(`Unknown action: ${action}`);
     }
   } catch (err) {
+    const errStr = String(err);
+    // If "not found" — the message might belong to a different connected account
+    // Try all other accounts before giving up
+    if (errStr.includes('not found') || errStr.includes('Not Found') || errStr.includes('notFound')) {
+      const body = await request.clone().json().catch(() => null);
+      if (body) {
+        const { getRequestContext: getCtx } = await import('@/lib/api-helpers');
+        const { userId } = getCtx(request);
+        if (userId) {
+          const { createSupabaseAdmin } = await import('@/lib/supabase-server');
+          const { TABLES } = await import('@/lib/tables');
+          const { getValidGmailToken } = await import('@/lib/auth');
+          const admin = createSupabaseAdmin();
+          const { data: accounts } = await admin
+            .from(TABLES.GMAIL_ACCOUNTS)
+            .select('email')
+            .eq('user_id', userId)
+            .eq('status', 'connected');
+
+          const currentAccount = request.nextUrl.searchParams.get('account');
+          const otherAccounts = (accounts || []).filter((a: { email: string }) => a.email !== currentAccount);
+
+          for (const acct of otherAccounts) {
+            try {
+              const token = await getValidGmailToken(userId, acct.email);
+              const altClient = gmail.getGmailClient(token);
+              const { action: act, ...params } = body;
+              switch (act) {
+                case 'archive': await gmail.batchArchive(altClient, params.messageIds); break;
+                case 'trash': await gmail.batchTrash(altClient, params.messageIds); break;
+                case 'delete': await Promise.all(params.messageIds.map((id: string) => gmail.deleteMessage(altClient, id))); break;
+                case 'markRead': await gmail.batchModify(altClient, params.messageIds, [], ['UNREAD']); break;
+                case 'markUnread': await gmail.batchModify(altClient, params.messageIds, ['UNREAD'], []); break;
+                case 'star': await gmail.batchModify(altClient, params.messageIds, ['STARRED'], []); break;
+                case 'unstar': await gmail.batchModify(altClient, params.messageIds, [], ['STARRED']); break;
+                default: continue;
+              }
+              console.log(`Gmail POST: action ${act} succeeded on fallback account ${acct.email}`);
+              return apiSuccess({ [act]: params.messageIds?.length || 1, fallbackAccount: acct.email });
+            } catch {
+              continue; // Try next account
+            }
+          }
+        }
+      }
+    }
     console.error('Gmail POST error:', err);
     return apiError(`Gmail operation failed: ${err}`, 500);
   }
