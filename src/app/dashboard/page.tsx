@@ -4153,19 +4153,6 @@ function CleanupTab({ onAction, showToast, onPreview, onDialogPreview, reportCou
     }
   }
 
-  // Execute action grouped by account (critical for unified mode)
-  function actionByAccount(action: string, msgIds: string[]) {
-    const byAccount = new Map<string, string[]>();
-    for (const id of msgIds) {
-      const msg = cleanupMessages.find(m => m.id === id);
-      const acct = msg?.accountEmail || _currentAccount;
-      if (!byAccount.has(acct)) byAccount.set(acct, []);
-      byAccount.get(acct)!.push(id);
-    }
-    for (const [acct, ids] of byAccount) {
-      onAction(action, ids, undefined, acct);
-    }
-  }
 
   // Collect all selected message IDs (from selected groups + individually selected messages)
   function getSelectedIds(): string[] {
