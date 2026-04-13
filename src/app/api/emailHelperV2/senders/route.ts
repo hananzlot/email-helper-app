@@ -65,7 +65,8 @@ export async function POST(request: NextRequest) {
 
     return apiSuccess({ imported: upserts.length });
   } catch (err) {
-    return apiError(`Failed: ${err}`, 500);
+    console.error('Senders operation failed:', err);
+    return apiError('Operation failed', 500);
   }
 }
 
@@ -166,7 +167,8 @@ export async function PUT(request: NextRequest) {
     if (error) return apiError(error.message, 500);
     return apiSuccess(data);
   } catch (err) {
-    return apiError(`Failed: ${err}`, 500);
+    console.error('Senders operation failed:', err);
+    return apiError('Operation failed', 500);
   }
 }
 
@@ -194,6 +196,7 @@ export async function DELETE(request: NextRequest) {
     if (error) return apiError(error.message, 500);
     return apiSuccess({ deleted: sender_email });
   } catch (err) {
-    return apiError(`Failed: ${err}`, 500);
+    console.error('Senders operation failed:', err);
+    return apiError('Operation failed', 500);
   }
 }

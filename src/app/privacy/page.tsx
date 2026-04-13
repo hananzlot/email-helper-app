@@ -1,6 +1,6 @@
 export default function PrivacyPolicy() {
   return (
-    <div style={{ background: 'var(--bg)', minHeight: '100vh', padding: '48px 24px' }}>
+    <div className="px-4 sm:px-6 py-8 sm:py-12" style={{ background: 'var(--bg)', minHeight: '100vh' }}>
       <div style={{ maxWidth: 720, margin: '0 auto' }}>
         <a href="/" style={{ color: 'var(--accent)', textDecoration: 'none', fontSize: 14, fontWeight: 500 }}>
           &larr; Back to home

@@ -309,7 +309,7 @@ document.querySelectorAll('img').forEach(function(img) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
+      <div className="relative z-10 bg-white rounded-2xl shadow-2xl w-full max-w-[95vw] sm:max-w-3xl mx-4 max-h-[90vh] flex flex-col overflow-hidden">
         {/* Modal header — subject + date/time */}
         <div className="flex items-start justify-between gap-3 p-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="min-w-0 flex-1">
@@ -458,7 +458,7 @@ document.querySelectorAll('img').forEach(function(img) {
       {previewAttachment && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center">
           <div className="fixed inset-0 bg-black/60" onClick={() => setPreviewAttachment(null)} />
-          <div className="relative z-10 bg-white rounded-xl shadow-2xl max-w-3xl max-h-[85vh] overflow-auto" style={{ minWidth: 300 }}>
+          <div className="relative z-10 bg-white rounded-xl shadow-2xl w-full max-w-[95vw] sm:max-w-3xl mx-4 max-h-[85vh] overflow-auto">
             <div className="sticky top-0 flex items-center justify-between p-3 border-b bg-white rounded-t-xl" style={{ borderColor: 'var(--border)' }}>
               <span className="font-medium text-sm truncate">{previewAttachment.filename}</span>
               <div className="flex gap-2">
@@ -2113,7 +2113,7 @@ export default function Dashboard() {
       {/* Sticky header + tabs */}
       <div className="sticky top-0 z-30 -mx-4 px-4 pb-0 pt-0" style={{ background: 'var(--bg, #f8fafc)' }}>
         {/* Header */}
-        <div className="flex items-start justify-between mb-3 pt-2">
+        <div className="flex items-start justify-between mb-3 pt-2 flex-wrap gap-2">
           <div className="flex items-center gap-2.5">
             <img src="/clearbox-logo.svg" alt="Clearbox" width={64} height={64} className="rounded-xl" />
             <div>
@@ -2351,7 +2351,7 @@ export default function Dashboard() {
             <>
               <div className="fixed inset-0 z-20" onClick={closeSearch} />
               <div className="absolute left-0 right-0 top-full mt-1 z-30 rounded-xl border shadow-2xl overflow-hidden"
-                style={{ background: 'white', borderColor: 'var(--border)', maxHeight: '60vh', overflowY: 'auto' }}>
+                style={{ background: 'white', borderColor: 'var(--border)', maxHeight: '50vh', overflowY: 'auto' }}>
                 {searchLoading && searchResults.length === 0 ? (
                   <div className="p-6 text-center text-sm" style={{ color: 'var(--muted)' }}>
                     Searching across {unified && accounts.length > 1 ? `${accounts.length} accounts` : 'your inbox'}...
@@ -2482,8 +2482,8 @@ export default function Dashboard() {
         </div>
 
         {/* Tabs — pill style, responsive, with shadow separator */}
-        <div ref={tabBarRef} className="flex flex-wrap gap-1.5 pb-3 mb-0"
-          style={{ borderBottom: '1px solid var(--border)', width: 'fit-content' }}>
+        <div ref={tabBarRef} className="flex flex-nowrap gap-1.5 pb-3 mb-0 overflow-x-auto scrollbar-hide"
+          style={{ borderBottom: '1px solid var(--border)', width: 'fit-content', WebkitOverflowScrolling: 'touch' }}>
           {tabs.map((tab) => {
             const count = tabCounts[tab.id];
             const isActive = activeTab === tab.id;
@@ -2574,7 +2574,7 @@ export default function Dashboard() {
             )}
             <div ref={splitContainerRef} className="flex rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)', height: 'calc(100vh - 220px)', minHeight: 400 }}>
               {/* Left panel — email list / tab content */}
-              <div className="overflow-y-auto" style={{ width: `${splitLeftPct}%`, minWidth: 280, background: 'var(--bg)' }}>
+              <div className="overflow-y-auto" style={{ width: `${splitLeftPct}%`, minWidth: isMobile ? 0 : 280, background: 'var(--bg)' }}>
                 {tabContent}
               </div>
               {/* Drag handle */}
@@ -2620,7 +2620,7 @@ export default function Dashboard() {
       {/* Action History Panel */}
       {showActionHistory && (
         <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setShowActionHistory(false)}>
-          <div className="w-full max-w-sm bg-white shadow-2xl h-full overflow-y-auto border-l"
+          <div className="w-full sm:max-w-sm bg-white shadow-2xl h-full overflow-y-auto border-l"
             style={{ borderColor: 'var(--border)' }}
             onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
@@ -2733,7 +2733,7 @@ function UndoToast({ toast, onDismiss }: {
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in"
       style={{ maxWidth: '90vw' }}>
       <div className="flex items-center gap-4 px-5 py-3 rounded-xl text-white text-sm font-medium shadow-2xl"
-        style={{ background: '#1e293b', minWidth: 260 }}>
+        style={{ background: '#1e293b', minWidth: 200 }}>
         <div className="flex-1">
           <div className="font-semibold">{toast.title}</div>
           {toast.subtitle && <div className="text-xs opacity-70 mt-0.5">{toast.subtitle}</div>}
@@ -2860,7 +2860,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
       )}
 
       {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <button onClick={() => onNavigate('reply-queue')}
           className="p-4 rounded-xl border text-left transition-all hover:shadow-md"
           style={{ background: triageCount > 0 ? '#eef2ff' : 'var(--card)', borderColor: triageCount > 0 ? '#6366f1' : 'var(--border)' }}>
@@ -3422,7 +3422,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                 </div>
               </div>
               {/* Action bar */}
-              <div className="flex gap-1 px-4 pb-3 flex-wrap">
+              <div className="flex gap-1 px-4 pb-3 flex-wrap [&>button]:py-2 [&>button]:sm:py-1.5">
                 <TierDropdown
                   currentTier={senderTiers[msg.senderEmail.toLowerCase()] || ''}
                   senderEmail={msg.senderEmail}
@@ -5738,8 +5738,8 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
             </div>
           )}
 
-          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-            <table className="w-full text-sm">
+          <div style={{ maxHeight: 400, overflowY: 'auto' }} className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead><tr className="text-xs uppercase" style={{ color: 'var(--muted)' }}>
                 <th className="p-2 w-8">
                   <input type="checkbox"

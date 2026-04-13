@@ -126,7 +126,8 @@ export async function POST(request: NextRequest) {
 
     return apiSuccess({ cached: rows.length });
   } catch (err) {
-    return apiError(`Failed: ${err}`, 500);
+    console.error('Inbox cache POST failed:', err);
+    return apiError('Operation failed', 500);
   }
 }
 
@@ -194,6 +195,7 @@ export async function DELETE(request: NextRequest) {
     if (error) return apiError(error.message, 500);
     return apiSuccess({ deleted: gmail_ids.length });
   } catch (err) {
-    return apiError(`Failed: ${err}`, 500);
+    console.error('Inbox cache DELETE failed:', err);
+    return apiError('Operation failed', 500);
   }
 }

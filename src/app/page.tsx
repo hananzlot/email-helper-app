@@ -1,7 +1,7 @@
 export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center" style={{ background: 'var(--bg)' }}>
-      <div className="max-w-lg w-full mx-auto px-6 text-center">
+      <div className="max-w-lg w-full mx-auto px-4 sm:px-6 text-center">
         {/* Problem-statement hook */}
         <p className="text-lg mb-4 font-medium" style={{ color: 'var(--muted)' }}>
           Drowning in unread emails?
@@ -17,7 +17,7 @@ export default function Home() {
 
         <a
           href="/api/emailHelperV2/auth/login"
-          className="inline-flex items-center gap-3 px-8 py-3 rounded-xl font-semibold text-white transition-all hover:shadow-lg"
+          className="inline-flex items-center gap-3 px-6 sm:px-8 py-3 rounded-xl font-semibold text-white transition-all hover:shadow-lg"
           style={{ background: 'var(--accent)', fontSize: '16px' }}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -30,14 +30,14 @@ export default function Home() {
         </a>
 
         {/* Unified inbox highlight */}
-        <div className="mt-10 p-6 rounded-2xl" style={{ background: '#eef2ff', border: '1px solid #c7d2fe' }}>
+        <div className="mt-10 p-4 sm:p-6 rounded-2xl" style={{ background: '#eef2ff', border: '1px solid #c7d2fe' }}>
           <div className="text-center">
             <div className="text-3xl mb-2">📬</div>
             <h3 className="text-lg font-bold mb-1" style={{ color: '#4338ca' }}>One inbox to rule them all</h3>
             <p className="text-sm" style={{ color: '#6366f1' }}>
               Connect all your Gmail accounts — work, personal, side projects — and manage them from a single unified view.
             </p>
-            <div className="flex justify-center gap-3 mt-4">
+            <div className="flex flex-col sm:flex-row justify-center gap-2 sm:gap-3 mt-4">
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium" style={{ background: 'white', color: '#4338ca', border: '1px solid #c7d2fe' }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 Unlimited Gmail accounts
@@ -52,7 +52,7 @@ export default function Home() {
         </div>
 
         {/* AI Unsubscribe highlight */}
-        <div className="mt-6 p-5 rounded-2xl" style={{ background: '#faf5ff', border: '1px solid #e9d5ff' }}>
+        <div className="mt-6 p-4 sm:p-5 rounded-2xl" style={{ background: '#faf5ff', border: '1px solid #e9d5ff' }}>
           <div className="text-center">
             <div className="text-3xl mb-2">🤖</div>
             <h3 className="text-lg font-bold mb-1" style={{ color: '#7c3aed' }}>AI Auto-Unsubscribe</h3>
@@ -60,7 +60,7 @@ export default function Home() {
               Our AI agent visits unsubscribe pages, fills out forms, and clicks buttons for you.
               One click to unsubscribe from hundreds of newsletters — no manual work.
             </p>
-            <div className="flex justify-center gap-2 mt-3">
+            <div className="flex flex-wrap justify-center gap-2 mt-3">
               <span className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: '#ede9fe', color: '#6d28d9' }}>One-click headers</span>
               <span className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: '#ede9fe', color: '#6d28d9' }}>Smart link detection</span>
               <span className="text-[10px] px-2 py-1 rounded-full font-medium" style={{ background: '#ede9fe', color: '#6d28d9' }}>AI form filling</span>
@@ -69,7 +69,7 @@ export default function Home() {
         </div>
 
         {/* Feature pillars */}
-        <div className="mt-6 grid grid-cols-4 gap-4 text-center">
+        <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 text-center">
           <div className="p-4 rounded-xl" style={{ background: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}>
             <div className="text-2xl mb-1">🎯</div>
             <div className="text-sm font-bold" style={{ color: 'var(--accent)' }}>Top Tiers</div>
@@ -94,13 +94,13 @@ export default function Home() {
 
         {/* Trust strip */}
         <div className="mt-8 pt-6 border-t" style={{ borderColor: 'var(--border)' }}>
-          <div className="grid grid-cols-3 gap-4 text-center">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center">
             <div>
               <div className="flex justify-center mb-1">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
               </div>
               <div className="text-lg font-bold" style={{ color: 'var(--text)' }}>100%</div>
-              <p className="text-[10px]" style={{ color: 'var(--muted)' }}>Private — AES-256 encrypted</p>
+              <a href="/security" className="text-[10px] underline" style={{ color: 'var(--muted)' }}>Private — AES-256 encrypted</a>
             </div>
             <div>
               <div className="flex justify-center mb-1">
@@ -124,6 +124,8 @@ export default function Home() {
           <a href="/privacy" style={{ color: 'var(--muted)', textDecoration: 'none' }}>Privacy Policy</a>
           <span style={{ margin: '0 8px' }}>&middot;</span>
           <a href="/terms" style={{ color: 'var(--muted)', textDecoration: 'none' }}>Terms of Service</a>
+          <span style={{ margin: '0 8px' }}>&middot;</span>
+          <a href="/security" style={{ color: 'var(--muted)', textDecoration: 'none' }}>Security</a>
         </div>
       </div>
     </div>

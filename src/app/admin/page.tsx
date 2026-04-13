@@ -54,7 +54,7 @@ export default function AdminPage() {
   if (!authenticated) {
     return (
       <div className="flex min-h-screen items-center justify-center" style={{ background: '#f8f9fa' }}>
-        <form onSubmit={handleAuth} className="max-w-sm w-full mx-auto p-6 rounded-xl border bg-white shadow-sm">
+        <form onSubmit={handleAuth} className="max-w-sm w-full mx-auto p-4 sm:p-6 rounded-xl border bg-white shadow-sm">
           <h1 className="text-xl font-bold mb-4">Admin Access</h1>
           <input
             type="password"
@@ -101,7 +101,7 @@ export default function AdminPage() {
             />
             <span className="text-xs" style={{ color: '#64748b' }}>Current: {settings.max_emails_per_account.toLocaleString()}</span>
           </div>
-          <div className="flex gap-2 mt-2">
+          <div className="flex flex-wrap gap-2 mt-2">
             {[10000, 50000, 100000, 200000, 500000].map(v => (
               <button key={v} onClick={() => setSettings({ ...settings, max_emails_per_account: v })}
                 className="px-2.5 py-1 text-[10px] rounded-full border font-medium"
@@ -148,7 +148,7 @@ export default function AdminPage() {
         {/* System info */}
         <div className="p-4 rounded-xl border" style={{ background: '#f8fafc', borderColor: '#e2e8f0' }}>
           <label className="block text-sm font-semibold mb-2">System Info</label>
-          <div className="grid grid-cols-2 gap-2 text-xs" style={{ color: '#475569' }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs" style={{ color: '#475569' }}>
             <div>Supabase Project: <span className="font-mono">ybyhqkfyfovcuxhiejgx</span></div>
             <div>Netlify Site: <span className="font-mono">emaihelper</span></div>
             <div>Deploy: <span className="font-mono">auto on push to main</span></div>

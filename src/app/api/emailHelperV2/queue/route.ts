@@ -107,7 +107,8 @@ export async function POST(request: NextRequest) {
     if (error) return apiError(error.message, 500);
     return apiSuccess(data);
   } catch (err) {
-    return apiError(`Failed: ${err}`, 500);
+    console.error('Queue POST failed:', err);
+    return apiError('Operation failed', 500);
   }
 }
 
@@ -146,6 +147,7 @@ export async function PUT(request: NextRequest) {
     if (error) return apiError(error.message, 500);
     return apiSuccess(data?.[0] || { updated: true });
   } catch (err) {
-    return apiError(`Failed: ${err}`, 500);
+    console.error('Queue PUT failed:', err);
+    return apiError('Operation failed', 500);
   }
 }

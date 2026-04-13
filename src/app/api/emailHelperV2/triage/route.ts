@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     return apiError(`Unknown action: ${action}`);
   } catch (err) {
     console.error('Triage error:', err);
-    return apiError(`Triage failed: ${err}`, 500);
+    return apiError('Triage failed', 500);
   }
 }
 
