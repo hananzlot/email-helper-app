@@ -464,7 +464,25 @@ export async function scanSentMail(
   // Calculate tiers based on how often you email each person
   const entries = Object.entries(recipientCounts);
   entries.sort((a, b) => b[1].count - a[1].count);
-  const total = entries.length;
+
+  // Filter out machine-generated addresses (SES, noreply, UUID-like local parts)
+  const isGibberishAddress = (email: string): boolean => {
+    const local = email.split('@')[0];
+    const domain = email.split('@')[1] || '';
+    // UUID-like patterns (common in SES, transactional systems)
+    if (/[0-9a-f]{8,}-[0-9a-f]{4,}/i.test(local)) return true;
+    // Very long local parts with lots of numbers/hyphens (machine-generated)
+    if (local.length > 30 && (local.match(/[0-9-]/g) || []).length > local.length * 0.4) return true;
+    // Known transactional/noreply domains and patterns
+    if (/noreply|no-reply|donotreply|do-not-reply|bounce|mailer-daemon/i.test(local)) return true;
+    if (/amazonses\.com|sendgrid\.net|mailgun\.org|mandrillapp\.com|postmarkapp\.com/i.test(domain)) return true;
+    return false;
+  };
+
+  // Separate real contacts from gibberish — gibberish always gets Tier D
+  const realEntries = entries.filter(([email]) => !isGibberishAddress(email));
+  const gibbEntries = entries.filter(([email]) => isGibberishAddress(email));
+  const total = realEntries.length;
 
   const tierThresholds = {
     A: Math.ceil(total * 0.1),   // Top 10%
@@ -472,12 +490,20 @@ export async function scanSentMail(
     C: Math.ceil(total * 0.6),   // Next 30%
   };
 
+  // Minimum reply counts: prevent single-interaction senders from ranking high
+  const MIN_REPLIES_A = 3;
+  const MIN_REPLIES_B = 2;
+
   // Upsert sender priorities (encrypt display_name)
-  const upserts = entries.map(([email, data], idx) => {
+  const upserts = [...realEntries, ...gibbEntries].map(([email, data], idx) => {
     let tier: SenderTier = 'D';
-    if (idx < tierThresholds.A) tier = 'A';
-    else if (idx < tierThresholds.B) tier = 'B';
-    else if (idx < tierThresholds.C) tier = 'C';
+    // Gibberish addresses always get Tier D
+    if (!isGibberishAddress(email)) {
+      const realIdx = realEntries.findIndex(([e]) => e === email);
+      if (realIdx < tierThresholds.A && data.count >= MIN_REPLIES_A) tier = 'A';
+      else if (realIdx < tierThresholds.B && data.count >= MIN_REPLIES_B) tier = 'B';
+      else if (realIdx < tierThresholds.C) tier = 'C';
+    }
 
     const item = {
       user_id: userId,
