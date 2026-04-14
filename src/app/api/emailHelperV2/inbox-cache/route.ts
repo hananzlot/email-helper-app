@@ -88,8 +88,20 @@ export async function POST(request: NextRequest) {
 
     const admin = createSupabaseAdmin();
 
-    // Upsert messages in chunks of 500
-    const rows = messages.map((m: { id: string; threadId?: string; sender?: string; senderEmail?: string; subject?: string; snippet?: string; date?: string; isUnread?: boolean; labelIds?: string[] }) => ({
+    // Dedup: skip gmail_ids already cached under a different account for this user
+    const incomingIds = messages.map((m: { id: string }) => m.id).filter(Boolean);
+    const { data: alreadyCached } = await admin
+      .from(TABLES.INBOX_CACHE)
+      .select('gmail_id')
+      .eq('user_id', userId)
+      .neq('account_email', account_email)
+      .in('gmail_id', incomingIds);
+    const dupIds = new Set<string>();
+    if (alreadyCached) alreadyCached.forEach((r: { gmail_id: string }) => dupIds.add(r.gmail_id));
+
+    const dedupedMessages = messages.filter((m: { id: string }) => !dupIds.has(m.id));
+
+    const rows = dedupedMessages.map((m: { id: string; threadId?: string; sender?: string; senderEmail?: string; subject?: string; snippet?: string; date?: string; isUnread?: boolean; labelIds?: string[] }) => ({
       user_id: userId,
       account_email,
       gmail_id: m.id,
@@ -103,6 +115,8 @@ export async function POST(request: NextRequest) {
       label_ids: m.labelIds || [],
       cached_at: new Date().toISOString(),
     }));
+
+    if (rows.length === 0) return apiSuccess({ cached: 0, skippedDuplicates: dupIds.size });
 
     for (let i = 0; i < rows.length; i += 100) {
       const chunk = rows.slice(i, i + 100);

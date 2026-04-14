@@ -187,12 +187,11 @@ export async function PUT(request: NextRequest) {
 
     const messageIds = listRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
 
-    // Check existing + actioned
+    // Check existing (any account for this user) + actioned — dedup across accounts
     const { data: existing } = await admin
       .from(TABLES.INBOX_CACHE)
       .select('gmail_id')
       .eq('user_id', job.user_id)
-      .eq('account_email', job.account_email)
       .in('gmail_id', messageIds);
     const existingSet = new Set<string>();
     if (existing) existing.forEach((r: { gmail_id: string }) => existingSet.add(r.gmail_id));
@@ -211,7 +210,7 @@ export async function PUT(request: NextRequest) {
       const skipIds = skipRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
       const { data: skipExisting } = await admin
         .from(TABLES.INBOX_CACHE).select('gmail_id')
-        .eq('user_id', job.user_id).eq('account_email', job.account_email)
+        .eq('user_id', job.user_id)
         .in('gmail_id', skipIds);
       const skipSet = new Set<string>();
       if (skipExisting) skipExisting.forEach((r: { gmail_id: string }) => skipSet.add(r.gmail_id));
