@@ -876,6 +876,7 @@ export default function Dashboard() {
   }, []);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showProTips, setShowProTips] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
 
   // Global search — searches Gmail via API across all accounts
   async function performSearch(query: string) {
@@ -2539,7 +2540,7 @@ export default function Dashboard() {
         <div className="relative mb-2" style={{ maxWidth: tabBarWidth ? tabBarWidth : undefined }}>
           <div className="flex items-center gap-2">
             <div className="relative flex-1 flex">
-              <a href="https://github.com/hananzlot/email-helper-app/issues/new/choose" target="_blank" rel="noopener noreferrer"
+              <button onClick={() => setShowFeedback(true)}
                 title="Send feedback, request a feature, or report a bug"
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-r-0 rounded-l-lg transition-colors hover:bg-gray-50 flex-shrink-0"
                 style={{ borderColor: searchOpen ? 'var(--accent)' : 'var(--border)', background: 'white', color: '#64748b' }}>
@@ -2547,7 +2548,7 @@ export default function Dashboard() {
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                 </svg>
                 Feedback
-              </a>
+              </button>
               <div className="relative flex-1">
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#94a3b8' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -2981,6 +2982,8 @@ export default function Dashboard() {
         </div>
       )}
 
+      {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} showToast={showToast} />}
+
       {showProTips && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setShowProTips(false)}>
           <div className="absolute inset-0 bg-black/30" />
@@ -3109,6 +3112,88 @@ function UndoToast({ toast, onDismiss }: {
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ============ FEEDBACK MODAL ============
+
+function FeedbackModal({ onClose, showToast }: { onClose: () => void; showToast: (title: string, subtitle?: string) => void }) {
+  const [type, setType] = useState<'feedback' | 'feature' | 'bug'>('feedback');
+  const [message, setMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit() {
+    if (!message.trim()) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch(withAccount('/api/emailHelperV2/feedback'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, message }),
+      }).then(r => r.json());
+      if (res.success) {
+        showToast('\u2714 Thanks for your feedback!', 'We\'ll review it soon');
+        onClose();
+      } else {
+        showToast('Failed to submit', res.error || 'Try again');
+      }
+    } catch {
+      showToast('Failed to submit', 'Network error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const types = [
+    { value: 'feedback' as const, label: 'Feedback', icon: '\uD83D\uDCAC', color: '#4f46e5' },
+    { value: 'feature' as const, label: 'Feature Request', icon: '\u2728', color: '#059669' },
+    { value: 'bug' as const, label: 'Bug Report', icon: '\uD83D\uDC1B', color: '#dc2626' },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/30" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b px-5 py-4 flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+          <h3 className="font-semibold text-base">Send Feedback</h3>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 transition-colors" style={{ color: 'var(--muted)' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div className="p-5">
+          <div className="flex gap-2 mb-4">
+            {types.map(t => (
+              <button key={t.value} onClick={() => setType(t.value)}
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold rounded-lg border transition-all"
+                style={{
+                  borderColor: type === t.value ? t.color : 'var(--border)',
+                  background: type === t.value ? `${t.color}10` : 'white',
+                  color: type === t.value ? t.color : '#64748b',
+                }}>
+                <span>{t.icon}</span> {t.label}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder={type === 'bug' ? 'Describe the bug: what happened, what you expected, and steps to reproduce...' : type === 'feature' ? 'Describe the feature you\'d like to see...' : 'Share your thoughts, suggestions, or anything else...'}
+            className="w-full px-4 py-3 text-sm rounded-lg border resize-none focus:outline-none focus:ring-2 focus:ring-opacity-50"
+            style={{ borderColor: 'var(--border)', minHeight: 120 }}
+            maxLength={5000}
+            autoFocus
+          />
+          <div className="flex items-center justify-between mt-3">
+            <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{message.length}/5000</span>
+            <button onClick={submit} disabled={!message.trim() || submitting}
+              className="px-5 py-2 text-sm font-semibold rounded-lg text-white transition-all disabled:opacity-50"
+              style={{ background: '#4f46e5' }}>
+              {submitting ? 'Sending...' : 'Submit'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
