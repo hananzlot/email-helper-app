@@ -480,10 +480,10 @@ export async function scanSentMail(
   const isGibberishAddress = (email: string): boolean => {
     const local = email.split('@')[0];
     const domain = email.split('@')[1] || '';
+    // Local part longer than 30 characters — machine-generated / gibberish
+    if (local.length > 30) return true;
     // UUID-like patterns (common in SES, transactional systems)
     if (/[0-9a-f]{8,}-[0-9a-f]{4,}/i.test(local)) return true;
-    // Very long local parts with lots of numbers/hyphens (machine-generated)
-    if (local.length > 30 && (local.match(/[0-9-]/g) || []).length > local.length * 0.4) return true;
     // Known transactional/noreply patterns in local part
     if (/noreply|no-reply|donotreply|do-not-reply|mailer-daemon/i.test(local)) return true;
     // Bounce/transactional domains

@@ -36,8 +36,37 @@ export async function POST(request: NextRequest) {
       const tierMins: TierMinimums = body.tierMinimums || DEFAULT_TIER_MINIMUMS;
       const result = await scanSentMail(gmail, userId, account, tierMins);
 
-      // Clean up queue: remove active entries for senders now below signal tier (D or untiered)
       const admin = createSupabaseAdmin();
+
+      // Clean up gibberish senders from DB (local part > 30 chars, UUIDs, bounce, noreply, etc.)
+      const { data: allSenders } = await admin
+        .from(TABLES.SENDER_PRIORITIES)
+        .select('sender_email')
+        .eq('user_id', userId);
+      if (allSenders) {
+        const gibberishEmails = allSenders
+          .map((s: { sender_email: string }) => s.sender_email)
+          .filter((email: string) => {
+            const local = email.split('@')[0];
+            const domain = email.split('@')[1] || '';
+            if (local.length > 30) return true;
+            if (/[0-9a-f]{8,}-[0-9a-f]{4,}/i.test(local)) return true;
+            if (/noreply|no-reply|donotreply|do-not-reply|mailer-daemon/i.test(local)) return true;
+            if (/^bounce/i.test(local) || /^bounce\./i.test(domain)) return true;
+            if (/amazonses\.com|sendgrid\.net|mailgun\.org|mandrillapp\.com|postmarkapp\.com|constantcontact\.com|mailchimp\.com/i.test(domain)) return true;
+            return false;
+          });
+        for (let i = 0; i < gibberishEmails.length; i += 50) {
+          await admin.from(TABLES.SENDER_PRIORITIES).delete()
+            .eq('user_id', userId)
+            .in('sender_email', gibberishEmails.slice(i, i + 50));
+        }
+        if (gibberishEmails.length > 0) {
+          console.log(`[scan_sent] Cleaned up ${gibberishEmails.length} gibberish senders for user ${userId}`);
+        }
+      }
+
+      // Clean up queue: remove active entries for senders now below signal tier (D or untiered)
       const { data: dTierSenders } = await admin
         .from(TABLES.SENDER_PRIORITIES)
         .select('sender_email')
