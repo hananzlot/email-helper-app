@@ -2441,30 +2441,36 @@ export default function Dashboard() {
         </div>
 
 
-        {/* Sync alert banner — prominent when sync is incomplete */}
-        {Object.keys(syncProgress).length > 0 && !Object.values(syncProgress).every(s => s.done) && (() => {
-          const totalCached = Object.values(syncProgress).reduce((s, p) => s + p.cached, 0);
-          const totalInbox = Object.values(syncProgress).reduce((s, p) => s + p.total, 0);
-          const pct = totalInbox > 0 ? Math.min(100, Math.round((totalCached / totalInbox) * 100)) : 0;
-          const displayCached = Math.min(totalCached, totalInbox).toLocaleString();
-          const displayTotal = totalInbox.toLocaleString();
-          return (
-            <div className="mb-2 px-3 py-2 rounded-lg flex items-center gap-3" style={{ background: '#fefce8', border: '1px solid #fde68a' }}>
-              <div className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold" style={{ color: '#92400e' }}>
-                  Syncing your inbox — {displayCached} of {displayTotal} emails ({pct}%)
+        {/* Per-account sync progress bars — always visible when accounts have sync data */}
+        {Object.keys(syncProgress).length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {Object.entries(syncProgress).map(([email, s]) => {
+              const pct = s.total > 0 ? Math.min(100, Math.round((Math.min(s.cached, s.total) / s.total) * 100)) : 0;
+              const shortEmail = email.split('@')[0];
+              const isDone = s.done || pct >= 100;
+              return (
+                <div key={email} className="flex-1 min-w-[180px] max-w-[320px] px-3 py-2 rounded-lg border" style={{ background: isDone ? '#f0fdf4' : '#fefce8', borderColor: isDone ? '#bbf7d0' : '#fde68a' }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-1.5">
+                      {!isDone && <div className="w-2.5 h-2.5 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
+                      {isDone && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
+                      <span className="text-[11px] font-semibold truncate" style={{ color: isDone ? '#166534' : '#92400e' }}>{shortEmail}</span>
+                    </div>
+                    <span className="text-[10px] font-medium ml-2 whitespace-nowrap" style={{ color: isDone ? '#16a34a' : '#b45309' }}>
+                      {isDone ? 'Synced' : `${Math.min(s.cached, s.total).toLocaleString()} / ${s.total.toLocaleString()}`}
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: isDone ? '#dcfce7' : '#fef3c7' }}>
+                    <div className="h-full rounded-full transition-all duration-1000" style={{ background: isDone ? '#22c55e' : '#f59e0b', width: `${pct}%` }} />
+                  </div>
+                  {!isDone && s.eta && (
+                    <div className="text-[9px] mt-0.5 text-right" style={{ color: '#b45309' }}>{s.eta}</div>
+                  )}
                 </div>
-                <div className="text-[10px]" style={{ color: '#b45309' }}>
-                  Your data is still loading. Some emails may not appear yet. Sync continues in the background even when you close this tab.
-                </div>
-              </div>
-              <div className="w-24 h-1.5 rounded-full overflow-hidden flex-shrink-0" style={{ background: '#fef3c7' }}>
-                <div className="h-full rounded-full transition-all duration-1000" style={{ background: '#f59e0b', width: `${pct}%` }} />
-              </div>
-            </div>
-          );
-        })()}
+              );
+            })}
+          </div>
+        )}
 
         {/* Global Search Bar — width aligned to tab bar */}
         <div className="relative mb-2" style={{ maxWidth: tabBarWidth ? tabBarWidth : undefined }}>
