@@ -42,6 +42,14 @@ export async function POST(request: NextRequest) {
 
   const admin = createSupabaseAdmin();
 
+  // Clean up old done/error jobs for this account to prevent queue bloat
+  await admin
+    .from(SYNC_QUEUE)
+    .delete()
+    .eq('user_id', userId)
+    .eq('account_email', account_email)
+    .in('status', ['done', 'error']);
+
   // Check if there's already a pending/processing job
   const { data: existing } = await admin
     .from(SYNC_QUEUE)
