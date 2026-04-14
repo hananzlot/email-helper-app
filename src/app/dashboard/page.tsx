@@ -1639,6 +1639,15 @@ export default function Dashboard() {
                 (j.status === 'done' && (j.total_inbox || 0) > 0 && (j.messages_cached || 0) >= (j.total_inbox || 0)) || j.status === 'error');
             if (allDone) break;
 
+            // If any jobs are still pending/processing, don't count as idle
+            const hasActive = statusCheck.success && statusCheck.data?.some((j: { status: string }) =>
+              j.status === 'pending' || j.status === 'processing');
+            if (hasActive) {
+              consecutiveIdles = 0; // Reset — there's work to do
+              await new Promise(r => setTimeout(r, 3000));
+              continue;
+            }
+
             consecutiveIdles++;
             if (consecutiveIdles >= 15) break; // Safety cap
             await new Promise(r => setTimeout(r, 3000));
