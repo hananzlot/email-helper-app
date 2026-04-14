@@ -119,16 +119,24 @@ export async function PUT(request: NextRequest) {
     const accessToken = await getValidGmailToken(job.user_id, job.account_email);
     const gmail = getGmailClient(accessToken);
 
-    // Get resume token from inbox_sync
+    // Get resume token from inbox_sync (only if this job has already processed pages)
     let pageToken: string | undefined;
-    const { data: syncData } = await admin
-      .from(TABLES.INBOX_SYNC)
-      .select('resume_page_token')
-      .eq('user_id', job.user_id)
-      .eq('account_email', job.account_email)
-      .single();
+    if ((job.pages_processed || 0) > 0) {
+      const { data: syncData } = await admin
+        .from(TABLES.INBOX_SYNC)
+        .select('resume_page_token')
+        .eq('user_id', job.user_id)
+        .eq('account_email', job.account_email)
+        .single();
 
-    if (syncData?.resume_page_token) pageToken = syncData.resume_page_token;
+      if (syncData?.resume_page_token) pageToken = syncData.resume_page_token;
+    } else {
+      // Fresh sync job — clear any stale resume token so we start from the beginning
+      await admin.from(TABLES.INBOX_SYNC).upsert({
+        user_id: job.user_id, account_email: job.account_email,
+        resume_page_token: null,
+      }, { onConflict: 'user_id,account_email' });
+    }
 
     // Get actioned IDs to skip
     const { data: actions } = await admin

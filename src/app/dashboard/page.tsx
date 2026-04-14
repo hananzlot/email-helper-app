@@ -1668,7 +1668,7 @@ export default function Dashboard() {
             }
             for (const job of latestByAccount.values()) {
               const total = job.total_inbox || 0;
-              const cached = Math.min(job.messages_cached || 0, total);
+              const cached = total > 0 ? Math.min(job.messages_cached || 0, total) : (job.messages_cached || 0);
               const pct = total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : 0;
               const isDone = job.status === 'done' && total > 0;
               const elapsed = (Date.now() - startTime) / 1000;
