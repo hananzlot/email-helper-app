@@ -547,6 +547,7 @@ export async function scanSentMail(
   }
 
   // Load manually-tiered senders from action_history — these must not be overwritten
+  const { decrypt } = await import('./crypto');
   const { data: manualTierActions } = await admin
     .from(TABLES.ACTION_HISTORY)
     .select('account_email')
@@ -556,7 +557,16 @@ export async function scanSentMail(
   const manuallyTiered = new Set<string>();
   if (manualTierActions) {
     for (const a of manualTierActions) {
-      if (a.account_email) manuallyTiered.add(a.account_email.toLowerCase());
+      if (a.account_email) {
+        try {
+          // account_email is encrypted in action_history
+          const decrypted = decrypt(a.account_email, userId);
+          manuallyTiered.add(decrypted.toLowerCase());
+        } catch {
+          // Legacy unencrypted entry
+          manuallyTiered.add(a.account_email.toLowerCase());
+        }
+      }
     }
   }
 

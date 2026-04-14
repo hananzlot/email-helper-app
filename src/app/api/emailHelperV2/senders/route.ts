@@ -200,26 +200,30 @@ export async function PUT(request: NextRequest) {
       .eq('user_id', userId)
       .eq('sender_email', sender_email)
       .maybeSingle();
-    const upsertItem = encryptFields({
+    const upsertData: Record<string, unknown> = {
       user_id: userId,
       sender_email,
       tier,
       display_name: display_name || sender_email,
       reply_count: existingSender?.reply_count || 0,
-      updated_at: new Date().toISOString(),
-    }, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
+    };
+    // Only include updated_at if column exists (try-catch safe)
+    try { upsertData.updated_at = new Date().toISOString(); } catch {}
+    const upsertItem = encryptFields(upsertData, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
 
     // Record manual tier change so scanSentMail won't overwrite user's choice
+    // Encrypt fields that are encrypted in action_history table
+    const { encrypt: enc } = await import('@/lib/crypto');
     await admin.from(TABLES.ACTION_HISTORY).insert({
       user_id: userId,
       action: 'manualTier',
-      action_label: `Set ${sender_email} to Tier ${tier}`,
+      action_label: enc(`Set ${sender_email} to Tier ${tier}`, userId),
       message_ids: [],
-      account_email: sender_email,
-      subjects: [tier],
+      account_email: enc(sender_email, userId),
+      subjects: enc(JSON.stringify([tier]), userId),
       undo_action: null,
       undone: false,
-    }).catch(() => {});
+    }).catch((e: unknown) => console.error('manualTier history insert failed:', e));
 
     const { data, error } = await admin
       .from(TABLES.SENDER_PRIORITIES)
@@ -227,11 +231,15 @@ export async function PUT(request: NextRequest) {
       .select()
       .single();
 
-    if (error) return apiError(error.message, 500);
+    if (error) {
+      console.error('Senders upsert failed:', error.message, error);
+      return apiError(error.message, 500);
+    }
     return apiSuccess(data);
   } catch (err) {
-    console.error('Senders operation failed:', err);
-    return apiError('Operation failed', 500);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error('Senders tier update failed:', errMsg, err);
+    return apiError(`Tier update failed: ${errMsg}`, 500);
   }
 }
 
