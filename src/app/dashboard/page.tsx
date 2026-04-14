@@ -5658,9 +5658,17 @@ interface DuplicateCluster {
 }
 
 function findSenderDuplicates(senders: any[]): DuplicateCluster[] {
+  // Build alias set — emails that are already merged into another sender
+  const aliasedEmails = new Set<string>();
+  for (const s of senders) {
+    for (const alias of (s.aliases || [])) aliasedEmails.add(alias.toLowerCase());
+  }
+
   // Group by normalized full name (first + last)
   const nameGroups: Record<string, any[]> = {};
   for (const s of senders) {
+    // Skip senders that are already aliases of another sender
+    if (aliasedEmails.has(s.sender_email.toLowerCase())) continue;
     const name = (s.display_name || '').toLowerCase().replace(/[^a-z\s]/g, '').trim();
     if (!name || name.length < 3) continue;
     const firstName = name.split(/\s+/)[0];

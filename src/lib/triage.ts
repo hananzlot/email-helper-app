@@ -494,11 +494,22 @@ export async function scanSentMail(
     return false;
   };
 
-  // Assign tiers based on reply count thresholds (not percentile position)
-  // Gibberish/machine-generated addresses always get Tier D max
+  // Load existing aliases — emails already merged into another sender should not be re-created
+  const { data: existingSenders } = await admin
+    .from(TABLES.SENDER_PRIORITIES)
+    .select('aliases')
+    .eq('user_id', userId);
+  const aliasedEmails = new Set<string>();
+  if (existingSenders) {
+    for (const s of existingSenders) {
+      for (const alias of (s.aliases || [])) aliasedEmails.add(alias.toLowerCase());
+    }
+  }
 
-  // Upsert sender priorities — skip gibberish addresses entirely
-  const upserts = entries.filter(([email]) => !isGibberishAddress(email)).map(([email, data]) => {
+  // Assign tiers based on reply count thresholds (not percentile position)
+
+  // Upsert sender priorities — skip gibberish and already-aliased addresses
+  const upserts = entries.filter(([email]) => !isGibberishAddress(email) && !aliasedEmails.has(email.toLowerCase())).map(([email, data]) => {
     let tier: SenderTier = 'D';
     if (data.count >= mins.A) {
       tier = 'A';
