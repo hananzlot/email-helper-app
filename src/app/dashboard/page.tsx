@@ -190,6 +190,16 @@ function decodeHtmlEntities(text: string): string {
   return text.replace(/&(?:#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (match) => entities[match] || match);
 }
 
+function sanitizeEmailHtml(html: string): string {
+  // Strip <script> tags and their content
+  let s = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+  // Strip standalone <script .../> tags
+  s = s.replace(/<script[^>]*\/>/gi, '');
+  // Strip <link> tags that reference relative paths (they'd 404 against our domain)
+  s = s.replace(/<link\b[^>]*\bhref\s*=\s*["'](?![a-z]+:\/\/)[^"']*["'][^>]*\/?>/gi, '');
+  return s;
+}
+
 function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToast, onSnooze, onEmailSent }: {
   messageId: string;
   accountEmail?: string;
@@ -217,32 +227,18 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
       const doc = node.contentDocument;
       if (doc) {
         // Detect if the content is actual HTML or plain text that was used as fallback
-        const content = email.bodyHtml || email.body || '';
-        const isHtml = /<[a-z][\s\S]*>/i.test(content);
-        const displayContent = isHtml ? content : content.replace(/\n/g, '<br>');
+        const rawContent = email.bodyHtml || email.body || '';
+        const isHtml = /<[a-z][\s\S]*>/i.test(rawContent);
+        const displayContent = isHtml ? sanitizeEmailHtml(rawContent) : rawContent.replace(/\n/g, '<br>');
         doc.open();
         doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>
           body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6; color: #1a1a1a; margin: 0; padding: 16px; word-wrap: break-word; overflow-wrap: break-word; }
           img { max-width: 100%; height: auto; }
-          img.broken-img { display: inline-block; padding: 6px 10px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 11px; color: #4f46e5; font-family: system-ui; }
           a { color: #2563eb; }
           table { max-width: 100%; }
           pre, code { white-space: pre-wrap; word-wrap: break-word; }
           blockquote { border-left: 3px solid #d1d5db; margin: 8px 0; padding-left: 12px; color: #6b7280; }
-        </style></head><body>${displayContent}<script>
-document.querySelectorAll('img').forEach(function(img) {
-  img.onerror = function() {
-    var src = this.src;
-    var el = document.createElement('span');
-    el.className = 'broken-img';
-    el.textContent = '🖼 View image';
-    el.title = src;
-    el.onclick = function() { window.open(src, '_blank'); };
-    this.parentNode.replaceChild(el, this);
-  };
-  if (img.complete && img.naturalWidth === 0 && img.src) img.onerror();
-});
-</script></body></html>`);
+        </style></head><body>${displayContent}</body></html>`);
         doc.close();
         const resize = () => {
           if (node.contentDocument?.body) {
@@ -2441,28 +2437,23 @@ export default function Dashboard() {
         </div>
 
 
-        {/* Per-account sync progress bars — fixed left column, doesn't push content */}
+        {/* Per-account sync progress — right-aligned, horizontal, below badges */}
         {Object.keys(syncProgress).length > 0 && (
-          <div className="fixed left-3 top-20 z-30 flex flex-col gap-1.5" style={{ width: 220 }}>
+          <div className="flex justify-end gap-3 flex-wrap mb-1 -mt-1">
             {Object.entries(syncProgress).map(([email, s]) => {
               const pct = s.total > 0 ? Math.min(100, Math.round((Math.min(s.cached, s.total) / s.total) * 100)) : 0;
               const isDone = s.done || pct >= 100;
               return (
-                <div key={email} className="px-2.5 py-1.5 rounded-lg border shadow-sm" style={{ background: isDone ? '#f0fdf4' : '#fefce8', borderColor: isDone ? '#bbf7d0' : '#fde68a' }}>
-                  <div className="flex items-center gap-1.5 mb-1">
-                    {!isDone && <div className="w-2 h-2 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
-                    {isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
-                    <span className="text-[10px] font-semibold truncate" style={{ color: isDone ? '#166534' : '#92400e' }}>{email}</span>
-                  </div>
-                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: isDone ? '#dcfce7' : '#fef3c7' }}>
+                <div key={email} className="flex items-center gap-2 px-2.5 py-1 rounded-lg border" style={{ background: isDone ? '#f0fdf4' : '#fefce8', borderColor: isDone ? '#bbf7d0' : '#fde68a' }}>
+                  {!isDone && <div className="w-2 h-2 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
+                  {isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
+                  <span className="text-[10px] font-semibold" style={{ color: isDone ? '#166534' : '#92400e' }}>{email}</span>
+                  <div className="w-16 h-1 rounded-full overflow-hidden" style={{ background: isDone ? '#dcfce7' : '#fef3c7' }}>
                     <div className="h-full rounded-full transition-all duration-1000" style={{ background: isDone ? '#22c55e' : '#f59e0b', width: `${pct}%` }} />
                   </div>
-                  <div className="flex items-center justify-between mt-0.5">
-                    <span className="text-[9px]" style={{ color: isDone ? '#16a34a' : '#b45309' }}>
-                      {isDone ? `${s.total.toLocaleString()} — 100%` : `${Math.min(s.cached, s.total).toLocaleString()} / ${s.total.toLocaleString()} (${pct}%)`}
-                    </span>
-                    {!isDone && s.eta && <span className="text-[9px]" style={{ color: '#b45309' }}>{s.eta}</span>}
-                  </div>
+                  <span className="text-[9px] whitespace-nowrap" style={{ color: isDone ? '#16a34a' : '#b45309' }}>
+                    {isDone ? '100%' : `${Math.min(s.cached, s.total).toLocaleString()}/${s.total.toLocaleString()} (${pct}%)`}
+                  </span>
                 </div>
               );
             })}
@@ -3473,29 +3464,15 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
     if (node && (email?.bodyHtml || email?.body)) {
       const doc = node.contentDocument;
       if (doc) {
-        const content = email.bodyHtml || email.body || '';
-        const isHtml = /<[a-z][\s\S]*>/i.test(content);
-        const displayContent = isHtml ? content : content.replace(/\n/g, '<br>');
+        const rawContent = email.bodyHtml || email.body || '';
+        const isHtml = /<[a-z][\s\S]*>/i.test(rawContent);
+        const displayContent = isHtml ? sanitizeEmailHtml(rawContent) : rawContent.replace(/\n/g, '<br>');
         doc.open();
         doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank"><style>
           body { font-family: -apple-system, system-ui, sans-serif; font-size: 14px; line-height: 1.6; color: #1e293b; padding: 16px; margin: 0; word-wrap: break-word; }
           a { color: #2563eb; } img { max-width: 100%; height: auto; }
-          img.broken-img { display: inline-block; padding: 6px 10px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 6px; cursor: pointer; font-size: 11px; color: #4f46e5; font-family: system-ui; }
           blockquote { border-left: 3px solid #e2e8f0; margin: 8px 0; padding-left: 12px; color: #64748b; }
-        </style></head><body>${displayContent}<script>
-document.querySelectorAll('img').forEach(function(img) {
-  img.onerror = function() {
-    var src = this.src;
-    var el = document.createElement('span');
-    el.className = 'broken-img';
-    el.textContent = '🖼 View image';
-    el.title = src;
-    el.onclick = function() { window.open(src, '_blank'); };
-    this.parentNode.replaceChild(el, this);
-  };
-  if (img.complete && img.naturalWidth === 0 && img.src) img.onerror();
-});
-</script></body></html>`);
+        </style></head><body>${displayContent}</body></html>`);
         doc.close();
         setTimeout(() => {
           if (node.contentDocument?.body) {
