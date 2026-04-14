@@ -1631,8 +1631,8 @@ export default function Dashboard() {
             // Check if all accounts are actually done before giving up
             const statusCheck = await apiGet('sync-queue');
             const allDone = statusCheck.success && statusCheck.data?.length > 0 &&
-              statusCheck.data.every((j: { status: string; total_inbox?: number }) =>
-                (j.status === 'done' && (j.total_inbox || 0) > 0) || j.status === 'error');
+              statusCheck.data.every((j: { status: string; total_inbox?: number; messages_cached?: number }) =>
+                (j.status === 'done' && (j.total_inbox || 0) > 0 && (j.messages_cached || 0) >= (j.total_inbox || 0)) || j.status === 'error');
             if (allDone) break;
 
             consecutiveIdles++;

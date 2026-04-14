@@ -177,12 +177,16 @@ export async function PUT(request: NextRequest) {
     gmailCalls++;
 
     if (!listRes.messages?.length) {
-      // Done
+      // No more messages — sync complete
       const { count } = await admin
         .from(TABLES.INBOX_CACHE)
         .select('gmail_id', { count: 'exact', head: true })
         .eq('user_id', job.user_id)
         .eq('account_email', job.account_email);
+
+      // Get real Gmail inbox total (not cache count)
+      let realTotal = count || 0;
+      try { realTotal = (await getLabelInfo(gmail, 'INBOX')).messagesTotal; } catch {}
 
       await admin.from(TABLES.INBOX_SYNC).upsert({
         user_id: job.user_id, account_email: job.account_email,
@@ -192,10 +196,11 @@ export async function PUT(request: NextRequest) {
 
       await admin.from(SYNC_QUEUE).update({
         status: 'done', completed_at: new Date().toISOString(),
-        messages_cached: count || 0, total_inbox: count || 0,
+        messages_cached: Math.min(count || 0, realTotal),
+        total_inbox: realTotal,
       }).eq('id', job.id);
 
-      return apiSuccess({ jobId: job.id, status: 'done', totalCached: count || 0, gmailCalls: 1 });
+      return apiSuccess({ jobId: job.id, status: 'done', totalCached: count || 0, gmailCalls: 2 });
     }
 
     const messageIds = listRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
