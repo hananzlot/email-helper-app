@@ -791,10 +791,14 @@ interface ConnectedAccount {
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
-  // Returning users land on Top Tiers tab (skip if backup redirect)
+  // Returning users land on Top Tiers tab (skip if pending backup)
   useEffect(() => {
+    if (sessionStorage.getItem('pending_backup')) {
+      setActiveTab('accounts');
+      return;
+    }
     const params = new URLSearchParams(window.location.search);
-    if (params.get('backup_started')) return; // Let backup handler control the tab
+    if (params.get('backup_started')) return;
     if (localStorage.getItem('email_helper_visited')) setActiveTab('reply-queue');
   }, []);
   const [layoutMode, setLayoutMode] = useState<'cards' | 'split'>('split');
@@ -6688,6 +6692,8 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
     // Need Drive auth?
     if (res.data?.needsDriveAuth) {
       showToast('Connecting to Drive', 'Redirecting to Google...');
+      // Store pending backup BEFORE redirect — survives the OAuth round-trip
+      sessionStorage.setItem('pending_backup', email);
       window.location.href = `/api/emailHelperV2/auth/login?state=drive_backup&hint=${encodeURIComponent(email)}`;
       return;
     }
