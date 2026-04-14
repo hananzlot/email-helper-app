@@ -65,13 +65,23 @@ export async function POST(request: NextRequest) {
     await admin.from(SYNC_QUEUE).delete().eq('id', doneJob.id);
   }
 
-  // Clean up old error jobs for this account
+  // Clean up old error jobs and stuck processing jobs (older than 30 min) for this account
   await admin
     .from(SYNC_QUEUE)
     .delete()
     .eq('user_id', userId)
     .eq('account_email', account_email)
     .eq('status', 'error');
+
+  // Reset stuck processing jobs (started > 30 min ago) back to pending
+  const stuckCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  await admin
+    .from(SYNC_QUEUE)
+    .delete()
+    .eq('user_id', userId)
+    .eq('account_email', account_email)
+    .eq('status', 'processing')
+    .lt('started_at', stuckCutoff);
 
   // Check if there's already a pending/processing job
   const { data: existing } = await admin
