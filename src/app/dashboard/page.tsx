@@ -1628,7 +1628,8 @@ export default function Dashboard() {
             // Check if all accounts are actually done before giving up
             const statusCheck = await apiGet('sync-queue');
             const allDone = statusCheck.success && statusCheck.data?.length > 0 &&
-              statusCheck.data.every((j: { status: string }) => j.status === 'done' || j.status === 'error');
+              statusCheck.data.every((j: { status: string; total_inbox?: number }) =>
+                (j.status === 'done' && (j.total_inbox || 0) > 0) || j.status === 'error');
             if (allDone) break;
 
             consecutiveIdles++;
@@ -1658,14 +1659,18 @@ export default function Dashboard() {
           consecutiveErrors = 0;
           totalCachedSession += (res.data?.cachedThisPage || 0);
 
-          // Update progress from queue status
+          // Update progress from queue status (use latest job per account)
           const statusRes = await apiGet('sync-queue');
           if (statusRes.success && statusRes.data) {
-            for (const job of statusRes.data) {
+            const latestByAccount = new Map<string, typeof statusRes.data[0]>();
+            for (const j of statusRes.data) {
+              if (!latestByAccount.has(j.account_email)) latestByAccount.set(j.account_email, j);
+            }
+            for (const job of latestByAccount.values()) {
               const total = job.total_inbox || 0;
               const cached = Math.min(job.messages_cached || 0, total);
               const pct = total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : 0;
-              const isDone = job.status === 'done' || cached >= total;
+              const isDone = job.status === 'done' && total > 0;
               const elapsed = (Date.now() - startTime) / 1000;
               const speed = elapsed > 5 && totalCachedSession > 0 ? Math.round(totalCachedSession / elapsed * 60) : 0;
               const remaining = Math.max(0, total - cached);
