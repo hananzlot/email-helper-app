@@ -50,8 +50,9 @@ export async function GET(request: NextRequest) {
   const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
   const redirectUri = `${origin}/api/emailHelperV2/auth/callback`;
 
-  // Drive backup flow requests additional Drive scope
+  // Drive backup flow requests additional Drive scope + login_hint to target correct account
   const scopes = flow === 'drive_backup' ? [...GMAIL_SCOPES, DRIVE_SCOPE] : undefined;
-  const authUrl = getGoogleAuthUrl(state, redirectUri, scopes);
+  const loginHint = flow === 'drive_backup' ? searchParams.get('hint') || undefined : undefined;
+  const authUrl = getGoogleAuthUrl(state, redirectUri, scopes, loginHint);
   return NextResponse.redirect(authUrl);
 }

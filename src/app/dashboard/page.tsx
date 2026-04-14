@@ -6709,7 +6709,8 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
 
     // Need Drive auth?
     if (res.data?.needsDriveAuth) {
-      window.location.href = '/api/emailHelperV2/auth/login?state=drive_backup';
+      showToast('Connecting to Drive', 'Redirecting to Google...');
+      window.location.href = `/api/emailHelperV2/auth/login?state=drive_backup&hint=${encodeURIComponent(email)}`;
       return;
     }
 
