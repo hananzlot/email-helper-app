@@ -178,20 +178,52 @@ export async function PUT(request: NextRequest) {
       query += ` after:${epoch}`;
     }
 
-    // Get resume token from job metadata
-    const resumeToken = job.resume_page_token || undefined;
+    // Process multiple pages within a time budget (20s) to reduce file count
+    const TIME_BUDGET = 20_000;
+    const startTime = Date.now();
+    let pageToken: string | undefined = job.resume_page_token || undefined;
+    const allRawMessages: { id: string; raw: string; internalDate: string }[] = [];
+    let folderDone = false;
 
-    // Fetch one page of message IDs
-    const listRes = await listMessages(gmail, { query, maxResults: 50, pageToken: resumeToken });
-    gmailCalls++;
+    while (Date.now() - startTime < TIME_BUDGET) {
+      const listRes = await listMessages(gmail, { query, maxResults: 50, pageToken });
+      gmailCalls++;
 
-    if (!listRes.messages?.length) {
-      // Current folder done — move to next folder or complete
+      if (!listRes.messages?.length) {
+        folderDone = true;
+        break;
+      }
+
+      // Fetch raw messages in parallel (concurrency = 10)
+      const messageIds = listRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
+      for (let i = 0; i < messageIds.length; i += 10) {
+        const batch = messageIds.slice(i, i + 10);
+        const results = await Promise.all(
+          batch.map(async (id) => {
+            try {
+              gmailCalls++;
+              return await getRawMessage(gmail, id);
+            } catch {
+              return null;
+            }
+          })
+        );
+        allRawMessages.push(...results.filter((m): m is NonNullable<typeof m> => m !== null));
+      }
+
+      pageToken = listRes.nextPageToken || undefined;
+      if (!pageToken) {
+        folderDone = true;
+        break;
+      }
+    }
+
+    if (folderDone && allRawMessages.length === 0) {
+      // Current folder done with no messages — move to next folder or complete
       const folders = job.folders || ['inbox', 'sent'];
       const currentIdx = folders.indexOf(folder);
 
       if (currentIdx < folders.length - 1) {
-        // Move to next folder
         await admin.from(TABLES.BACKUP_JOBS).update({
           current_folder: folders[currentIdx + 1],
           resume_page_token: null,
@@ -210,54 +242,62 @@ export async function PUT(request: NextRequest) {
       return apiSuccess({ status: 'done', messagesProcessed: job.messages_processed, gmailCalls });
     }
 
-    // Fetch raw messages in parallel (concurrency = 10)
-    const messageIds = listRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
-    const rawMessages: { id: string; raw: string; internalDate: string }[] = [];
-
-    for (let i = 0; i < messageIds.length; i += 10) {
-      const batch = messageIds.slice(i, i + 10);
-      const results = await Promise.all(
-        batch.map(async (id) => {
-          try {
-            gmailCalls++;
-            return await getRawMessage(gmail, id);
-          } catch {
-            return null;
-          }
-        })
-      );
-      rawMessages.push(...results.filter((m): m is NonNullable<typeof m> => m !== null));
-    }
-
     // Track newest message date for incremental
     let newestDate = job.newest_message_date || null;
-    for (const msg of rawMessages) {
+    for (const msg of allRawMessages) {
       const msgDate = new Date(parseInt(msg.internalDate)).toISOString();
       if (!newestDate || msgDate > newestDate) newestDate = msgDate;
     }
 
-    // Assemble MBOX
-    const mboxBuffer = assembleMbox(rawMessages);
-    const totalProcessed = (job.messages_processed || 0) + rawMessages.length;
-    const partNum = (job.drive_file_ids?.length || 0) + 1;
-
-    // Upload if buffer is meaningful (>0 messages) and either:
-    // - No more pages (last batch)
-    // - Buffer would exceed max size threshold
-    const shouldUpload = rawMessages.length > 0;
+    // Assemble MBOX and upload
+    const totalProcessed = (job.messages_processed || 0) + allRawMessages.length;
     let newFileIds = [...(job.drive_file_ids || [])];
 
-    if (shouldUpload) {
+    if (allRawMessages.length > 0) {
+      const mboxBuffer = assembleMbox(allRawMessages);
+      const partNum = (job.drive_file_ids?.length || 0) + 1;
       const dateStr = new Date().toISOString().split('T')[0];
-      const fileName = `${job.account_email}_${folder}_${dateStr}_part${partNum}.mbox`;
+      // Only add part number if folder isn't done (more parts coming)
+      const fileName = folderDone
+        ? `${job.account_email}_${folder}_${dateStr}.mbox`
+        : `${job.account_email}_${folder}_${dateStr}_part${partNum}.mbox`;
       const fileId = await uploadMboxFile(drive, folderId, fileName, mboxBuffer);
       newFileIds.push(fileId);
+    }
+
+    // If folder just finished, move to next or complete
+    if (folderDone) {
+      const folders = job.folders || ['inbox', 'sent'];
+      const currentIdx = folders.indexOf(folder);
+
+      if (currentIdx < folders.length - 1) {
+        await admin.from(TABLES.BACKUP_JOBS).update({
+          messages_processed: totalProcessed,
+          current_folder: folders[currentIdx + 1],
+          resume_page_token: null,
+          drive_file_ids: newFileIds,
+          newest_message_date: newestDate,
+        }).eq('id', job.id);
+        return apiSuccess({ status: 'processing', folder: folders[currentIdx + 1], messagesProcessed: totalProcessed, messagesTotal: job.messages_total, gmailCalls });
+      }
+
+      // All folders done
+      await admin.from(TABLES.BACKUP_JOBS).update({
+        status: 'done',
+        completed_at: new Date().toISOString(),
+        messages_processed: totalProcessed,
+        drive_file_ids: newFileIds,
+        last_message_date: newestDate,
+        newest_message_date: newestDate,
+      }).eq('id', job.id);
+
+      return apiSuccess({ status: 'done', messagesProcessed: totalProcessed, gmailCalls });
     }
 
     // Save resume token and progress
     await admin.from(TABLES.BACKUP_JOBS).update({
       messages_processed: totalProcessed,
-      resume_page_token: listRes.nextPageToken || null,
+      resume_page_token: pageToken || null,
       drive_file_ids: newFileIds,
       newest_message_date: newestDate,
     }).eq('id', job.id);
@@ -267,8 +307,7 @@ export async function PUT(request: NextRequest) {
       folder,
       messagesProcessed: totalProcessed,
       messagesTotal: job.messages_total,
-      batchSize: rawMessages.length,
-      uploaded: shouldUpload,
+      batchSize: allRawMessages.length,
       gmailCalls,
     });
   } catch (err) {
