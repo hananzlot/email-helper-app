@@ -1120,6 +1120,15 @@ export default function Dashboard() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlAccount = params.get('account');
+
+    // Handle backup_started BEFORE replaceState clears params
+    const backupAccount = params.get('backup_started');
+    if (backupAccount) {
+      showToast('Drive authorized', 'Starting backup...');
+      setActiveTab('accounts');
+      sessionStorage.setItem('pending_backup', backupAccount);
+    }
+
     if (urlAccount) {
       setAccount(urlAccount);
       setCurrentAccount(urlAccount);
@@ -1130,14 +1139,6 @@ export default function Dashboard() {
       if (added) {
         showToast('Account connected', added);
         window.history.replaceState({}, '', '/dashboard');
-      }
-      const backupAccount = params.get('backup_started');
-      if (backupAccount) {
-        showToast('Drive authorized', 'Starting backup...');
-        window.history.replaceState({}, '', '/dashboard');
-        // Switch to accounts tab and store pending backup for AccountsTab to pick up
-        setActiveTab('accounts');
-        sessionStorage.setItem('pending_backup', backupAccount);
       }
       const dashError = params.get('error');
       if (dashError) {
