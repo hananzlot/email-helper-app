@@ -2437,14 +2437,14 @@ export default function Dashboard() {
         </div>
 
 
-        {/* Per-account sync progress — stacked right, fixed so no layout shift */}
+        {/* Per-account sync progress — horizontal row below badges, overlays without pushing content */}
         {Object.keys(syncProgress).length > 0 && (
-          <div className="fixed right-6 z-30 flex flex-col gap-1.5" style={{ top: 80, width: 260 }}>
+          <div className="flex flex-wrap justify-end gap-2" style={{ marginTop: -2, marginBottom: -48, position: 'relative', zIndex: 20 }}>
             {Object.entries(syncProgress).map(([email, s]) => {
               const pct = s.total > 0 ? Math.min(100, Math.round((Math.min(s.cached, s.total) / s.total) * 100)) : 0;
               const isDone = s.done || pct >= 100;
               return (
-                <div key={email} className="px-3 py-2 rounded-lg border shadow-sm" style={{ background: isDone ? '#f0fdf4' : '#fefce8', borderColor: isDone ? '#bbf7d0' : '#fde68a' }}>
+                <div key={email} className="px-3 py-2 rounded-lg border shadow-sm" style={{ background: isDone ? '#f0fdf4' : '#fefce8', borderColor: isDone ? '#bbf7d0' : '#fde68a', width: 240 }}>
                   <div className="flex items-center gap-1.5 mb-1.5">
                     {!isDone && <div className="w-2.5 h-2.5 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
                     {isDone && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
