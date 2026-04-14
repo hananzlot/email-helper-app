@@ -56,10 +56,12 @@ export async function POST(request: NextRequest) {
     .single();
   if (doneJob) {
     const completedAt = new Date(doneJob.completed_at).getTime();
-    if (Date.now() - completedAt < SYNC_COOLDOWN_MS) {
-      return apiSuccess(doneJob); // Still fresh — don't restart
+    const isComplete = (doneJob.messages_cached || 0) >= (doneJob.total_inbox || 1);
+    const isFresh = Date.now() - completedAt < SYNC_COOLDOWN_MS;
+    if (isComplete && isFresh) {
+      return apiSuccess(doneJob); // Fully synced and fresh — don't restart
     }
-    // Expired — delete so a new sync can begin
+    // Incomplete or expired — delete so a new sync picks up remaining messages
     await admin.from(SYNC_QUEUE).delete().eq('id', doneJob.id);
   }
 
