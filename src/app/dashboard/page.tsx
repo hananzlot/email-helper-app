@@ -746,7 +746,7 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
 
   return (
     <div className="relative inline-block">
-      <button ref={btnRef} onClick={toggleOpen}
+      <button ref={btnRef} onClick={(e) => { e.stopPropagation(); toggleOpen(); }}
         className="text-[10px] font-bold px-2 py-0.5 rounded-full cursor-pointer hover:opacity-80 transition-opacity"
         style={{ background: current.bg, color: current.color, border: `1px solid ${current.border}` }}>
         {current.label} ▾

@@ -199,7 +199,7 @@ export async function PUT(request: NextRequest) {
       .select('reply_count')
       .eq('user_id', userId)
       .eq('sender_email', sender_email)
-      .single();
+      .maybeSingle();
     const upsertItem = encryptFields({
       user_id: userId,
       sender_email,
