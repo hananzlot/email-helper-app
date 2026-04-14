@@ -54,74 +54,83 @@ export async function POST(request: NextRequest) {
 
   const admin = createSupabaseAdmin();
 
-  // Create log entry
-  const { data: logEntry, error: logError } = await admin
-    .from(UNSUB_TABLE)
-    .insert({
-      user_id: userId,
-      sender_email: sender_email || '',
-      domain: domain || '',
-      method: 'pending',
-      status: 'processing',
-      message_id,
-      account_email,
-    })
-    .select()
-    .single();
+  // Create log entry (non-blocking — don't fail the unsubscribe if logging fails)
+  let logId: string | null = null;
+  try {
+    const { data: logEntry, error: logError } = await admin
+      .from(UNSUB_TABLE)
+      .insert({
+        user_id: userId,
+        sender_email: sender_email || '',
+        domain: domain || '',
+        method: 'pending',
+        status: 'processing',
+        message_id,
+        account_email,
+      })
+      .select('id')
+      .single();
 
-  if (logError) {
-    console.error('Unsubscribe log insert failed:', logError.message);
-    return apiError('Failed to log unsubscribe attempt', 500);
+    if (logError) {
+      console.error('Unsubscribe log insert failed:', logError.message);
+    } else {
+      logId = logEntry.id;
+    }
+  } catch (logErr) {
+    console.error('Unsubscribe log insert threw:', logErr);
+  }
+
+  const updateLog = async (fields: Record<string, unknown>) => {
+    if (!logId) return;
+    try { await admin.from(UNSUB_TABLE).update(fields).eq('id', logId); } catch {}
+  };
+
+  let accessToken: string;
+  try {
+    accessToken = await getValidGmailToken(userId, account_email);
+  } catch (err) {
+    console.error('Unsubscribe token error:', err);
+    await updateLog({ status: 'failed', error_message: `Token error: ${String(err)}`, completed_at: new Date().toISOString() });
+    return apiError(`Gmail token error for ${account_email}: ${(err as Error).message}`, 500);
   }
 
   try {
-    const accessToken = await getValidGmailToken(userId, account_email);
     const gmail = getGmailClient(accessToken);
 
-    // Fetch full message to get headers
-    const msg = await getMessage(gmail, message_id, 'full');
+    // Fetch full message to get headers and body
+    let msg;
+    try {
+      msg = await getMessage(gmail, message_id, 'full');
+    } catch (msgErr) {
+      console.error('Unsubscribe getMessage error:', msgErr);
+      await updateLog({ status: 'failed', error_message: `getMessage error: ${String(msgErr)}`, completed_at: new Date().toISOString() });
+      return apiError(`Failed to fetch message: ${(msgErr as Error).message}`, 500);
+    }
 
     // Strategy 1: Check List-Unsubscribe header
     const result = await tryListUnsubscribeHeader(gmail, message_id, accessToken);
     if (result.success) {
       const isVerified = result.method !== 'header_url_needs_interaction';
-      await admin.from(UNSUB_TABLE).update({
-        method: result.method,
-        status: isVerified ? 'success' : 'attempted',
-        unsubscribe_url: result.url || null,
-        completed_at: new Date().toISOString(),
-      }).eq('id', logEntry.id);
-      return apiSuccess({ status: isVerified ? 'success' : 'attempted', method: result.method, logId: logEntry.id });
+      await updateLog({ method: result.method, status: isVerified ? 'success' : 'attempted', unsubscribe_url: result.url || null, completed_at: new Date().toISOString() });
+      return apiSuccess({ status: isVerified ? 'success' : 'attempted', method: result.method, logId });
     }
 
     // Strategy 2: Parse email body for unsubscribe link
     const bodyResult = await tryBodyUnsubscribeLink(msg);
     if (bodyResult.success && bodyResult.url) {
-      // Try simple GET first — many unsubscribe URLs just need to be visited
-      await admin.from(UNSUB_TABLE).update({
-        method: 'body_link',
-        status: 'success',
-        unsubscribe_url: bodyResult.url,
-        completed_at: new Date().toISOString(),
-      }).eq('id', logEntry.id);
-      return apiSuccess({ status: 'success', method: 'body_link', url: bodyResult.url, logId: logEntry.id });
+      await updateLog({ method: 'body_link', status: 'success', unsubscribe_url: bodyResult.url, completed_at: new Date().toISOString() });
+      return apiSuccess({ status: 'success', method: 'body_link', url: bodyResult.url, logId });
     }
 
     // Strategy 3: AI Agent with headless browser (for complex pages)
-    // Find any unsubscribe URL (from header or body) and let the AI handle it
     const anyUrl = result.url || bodyResult.url;
     if (anyUrl) {
       try {
         const { aiUnsubscribe } = await import('@/lib/unsubscribe-agent');
         const aiResult = await aiUnsubscribe(anyUrl, account_email);
         if (aiResult.success) {
-          await admin.from(UNSUB_TABLE).update({
-            method: aiResult.method,
-            status: 'success',
-            unsubscribe_url: anyUrl,
-            completed_at: new Date().toISOString(),
-          }).eq('id', logEntry.id);
-          return apiSuccess({ status: 'success', method: aiResult.method, details: aiResult.details, logId: logEntry.id });
+          await updateLog({ method: aiResult.method, status: 'success', unsubscribe_url: anyUrl, completed_at: new Date().toISOString() });
+          return apiSuccess({ status: 'success', method: aiResult.method, details: aiResult.details, logId });
         }
       } catch (aiErr) {
         console.error('AI unsubscribe failed:', aiErr);
@@ -129,22 +138,12 @@ export async function POST(request: NextRequest) {
     }
 
     // All strategies failed
-    await admin.from(UNSUB_TABLE).update({
-      method: 'failed',
-      status: 'failed',
-      error_message: 'No unsubscribe method found',
-      completed_at: new Date().toISOString(),
-    }).eq('id', logEntry.id);
-
-    return apiSuccess({ status: 'failed', reason: 'No unsubscribe link found in headers or body', logId: logEntry.id });
+    await updateLog({ method: 'failed', status: 'failed', error_message: 'No unsubscribe method found', completed_at: new Date().toISOString() });
+    return apiSuccess({ status: 'failed', reason: 'No unsubscribe link found in headers or body', logId });
   } catch (err) {
-    await admin.from(UNSUB_TABLE).update({
-      status: 'failed',
-      error_message: String(err),
-      completed_at: new Date().toISOString(),
-    }).eq('id', logEntry.id);
+    await updateLog({ status: 'failed', error_message: String(err), completed_at: new Date().toISOString() });
     console.error('Unsubscribe failed:', err);
-    return apiError('Unsubscribe failed', 500);
+    return apiError(`Unsubscribe failed: ${(err as Error).message}`, 500);
   }
 }
 

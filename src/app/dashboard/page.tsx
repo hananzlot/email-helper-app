@@ -2059,6 +2059,37 @@ export default function Dashboard() {
     setTriageVersion(v => v + 1); // reload snoozed tab
   }
 
+  // Handle tier change from any context (search, preview, etc.)
+  // Ensures queue + tab counts stay in sync
+  async function handleTierChanged(msg: { id: string; threadId?: string; sender: string; senderEmail: string; subject: string; snippet?: string; accountEmail?: string; isUnread?: boolean }, newTier: string) {
+    const isSignal = ['A', 'B', 'C'].includes(newTier);
+    const acctEmail = msg.accountEmail || _currentAccount;
+
+    if (isSignal) {
+      // Add to reply queue so it appears in Top Tier
+      await apiPost('queue', {
+        message_id: msg.id,
+        thread_id: msg.threadId || null,
+        account_email: acctEmail,
+        status: 'active',
+        sender: msg.sender || '',
+        sender_email: msg.senderEmail || '',
+        subject: msg.subject || '',
+        summary: msg.snippet || '',
+        priority: newTier === 'A' ? 'urgent' : newTier === 'B' ? 'important' : 'normal',
+        priority_score: newTier === 'A' ? 9 : newTier === 'B' ? 7 : 5,
+        tier: newTier,
+      }).catch(() => {});
+    } else {
+      // Remove from reply queue (demoted to D/noise)
+      await apiPut('queue', { message_id: msg.id, status: 'done' }).catch(() => {});
+    }
+
+    // Refresh tab counts and triage tab
+    setTriageVersion(v => v + 1);
+    loadAllTabCounts();
+  }
+
   async function runTriage() {
     setTriageLoading(true);
     const accts = (unified && accounts.length > 1) ? accounts : [{ email: _currentAccount }];
@@ -2750,14 +2781,14 @@ export default function Dashboard() {
               )}
               {activeTab === 'inbox' && (
                 <InboxTab messages={messages.filter(m => m.isUnread)} loading={loading} actionLoading={actionLoading}
-                  onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} onDialogPreview={openDialogPreview} />
+                  onAction={handleAction} onRefresh={unified && accounts.length > 1 ? loadUnifiedInbox : loadInbox} showToast={showToast} animatingOut={animatingOut} onPreview={openPreview} onDialogPreview={openDialogPreview} onSenderTierChanged={handleTierChanged} />
               )}
               {activeTab === 'reply-queue' && <ReplyQueueTab key={`triage-${account}-${unified}`} onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} onAdvancePreview={advancePreview} />}
               {activeTab === 'follow-up' && <FollowUpTab key={`followup-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
               {activeTab === 'snoozed' && <SnoozedTab key={`snoozed-${account}-${unified}`} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
               {activeTab === 'cleanup' && <CleanupTab unified={unified} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
               {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}-${sentVersion}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
-              {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} />}
+              {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} onSenderTierChanged={handleTierChanged} />}
               {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${triageVersion}`} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
               {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
             </>
@@ -3654,13 +3685,14 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   );
 }
 
-function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast, animatingOut, onPreview, onDialogPreview }: {
+function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showToast, animatingOut, onPreview, onDialogPreview, onSenderTierChanged }: {
   messages: GmailMessage[]; loading: boolean; actionLoading: string | null;
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; onRefresh: () => void;
   showToast: (title: string, subtitle?: string) => void;
   animatingOut: Record<string, 'trash' | 'delete' | 'archive'>;
   onPreview: (messageId: string, accountEmail?: string) => void;
   onDialogPreview?: (messageId: string, accountEmail?: string) => void;
+  onSenderTierChanged?: (msg: any, newTier: string) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -3744,6 +3776,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                   senderName={msg.sender}
                   onTierChanged={(newTier) => {
                     setSenderTiers(prev => ({ ...prev, [msg.senderEmail.toLowerCase()]: newTier }));
+                    onSenderTierChanged?.(msg, newTier);
                     showToast(`Set to Tier ${newTier}`, msg.sender);
                   }}
                 />
@@ -6291,7 +6324,7 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
 
 // ============ SEARCH REVIEWS TAB ============
 
-function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPreview, quickReplyTemplates, onClose, onRemove }: {
+function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPreview, quickReplyTemplates, onClose, onRemove, onSenderTierChanged }: {
   messages: GmailMessage[];
   onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void;
   showToast: (title: string, subtitle?: string) => void;
@@ -6300,6 +6333,7 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
   quickReplyTemplates: { id: string; label: string; body: string }[];
   onClose: () => void;
   onRemove: (id: string) => void;
+  onSenderTierChanged?: (msg: GmailMessage, newTier: string) => void;
 }) {
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyAllTo, setReplyAllTo] = useState<string | null>(null);
@@ -6383,6 +6417,7 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                     <TierDropdown currentTier={tier} senderEmail={msg.senderEmail} senderName={msg.sender}
                       onTierChanged={(newTier) => {
                         setSenderTiers(prev => ({ ...prev, [msg.senderEmail.toLowerCase()]: newTier }));
+                        onSenderTierChanged?.(msg, newTier);
                         showToast(`Set to Tier ${newTier}`, msg.sender);
                       }} />
                     {msg.isUnread && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: 'var(--accent)' }} />}
