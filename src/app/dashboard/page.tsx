@@ -2076,27 +2076,34 @@ export default function Dashboard() {
     const isSignal = ['A', 'B', 'C'].includes(newTier);
     const acctEmail = msg.accountEmail || _currentAccount;
 
-    if (isSignal) {
-      // Add to reply queue so it appears in Top Tier
-      await apiPost('queue', {
-        message_id: msg.id,
-        thread_id: msg.threadId || null,
-        account_email: acctEmail,
-        status: 'active',
-        sender: msg.sender || '',
-        sender_email: msg.senderEmail || '',
-        subject: msg.subject || '',
-        summary: msg.snippet || '',
-        priority: newTier === 'A' ? 'urgent' : newTier === 'B' ? 'important' : 'normal',
-        priority_score: newTier === 'A' ? 9 : newTier === 'B' ? 7 : 5,
-        tier: newTier,
-      }).catch(() => {});
-    } else {
-      // Remove from reply queue (demoted to D/noise)
-      await apiPut('queue', { message_id: msg.id, status: 'done' }).catch(() => {});
+    try {
+      if (isSignal) {
+        // Add to reply queue so it appears in Top Tier
+        const res = await apiPost('queue', {
+          message_id: msg.id,
+          thread_id: msg.threadId || null,
+          account_email: acctEmail,
+          status: 'active',
+          sender: msg.sender || '',
+          sender_email: msg.senderEmail || '',
+          subject: msg.subject || '',
+          summary: msg.snippet || '',
+          priority: newTier === 'A' ? 'urgent' : newTier === 'B' ? 'important' : 'normal',
+          priority_score: newTier === 'A' ? 9 : newTier === 'B' ? 7 : 5,
+          tier: newTier,
+        });
+        if (!res.success) console.error('[handleTierChanged] Queue POST failed:', res.error);
+      } else {
+        // Remove from reply queue (demoted to D/noise)
+        const res = await apiPut('queue', { message_id: msg.id, status: 'done' });
+        if (!res.success) console.error('[handleTierChanged] Queue PUT failed:', res.error);
+      }
+    } catch (e) {
+      console.error('[handleTierChanged] Error:', e);
     }
 
-    // Refresh tab counts and triage tab
+    // Wait a moment for DB to settle, then refresh tab counts and triage tab
+    await new Promise(r => setTimeout(r, 500));
     setTriageVersion(v => v + 1);
     loadAllTabCounts();
   }
