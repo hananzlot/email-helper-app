@@ -47,8 +47,8 @@ export async function GET(request: NextRequest) {
     return {
       ...decrypted,
       reply_count: replyCountMap[senderEmail] || 0,
-      // Use sender's current tier if queue tier is missing
-      tier: (item.tier as string) || tierMap[senderEmail] || null,
+      // Always use current sender tier (reflects latest threshold settings)
+      tier: tierMap[senderEmail] || (item.tier as string) || null,
     };
   });
 

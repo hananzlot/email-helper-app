@@ -35,6 +35,25 @@ export async function POST(request: NextRequest) {
     if (action === 'scan_sent') {
       const tierMins: TierMinimums = body.tierMinimums || DEFAULT_TIER_MINIMUMS;
       const result = await scanSentMail(gmail, userId, account, tierMins);
+
+      // Clean up queue: remove active entries for senders now below signal tier (D or untiered)
+      const admin = createSupabaseAdmin();
+      const { data: dTierSenders } = await admin
+        .from(TABLES.SENDER_PRIORITIES)
+        .select('sender_email')
+        .eq('user_id', userId)
+        .eq('tier', 'D');
+      if (dTierSenders && dTierSenders.length > 0) {
+        const dEmails = dTierSenders.map((s: { sender_email: string }) => s.sender_email.toLowerCase());
+        // Delete active queue items for D-tier senders (they belong in Easy-Clear now)
+        for (let i = 0; i < dEmails.length; i += 50) {
+          await admin.from(TABLES.REPLY_QUEUE).delete()
+            .eq('user_id', userId)
+            .eq('status', 'active')
+            .in('sender_email', dEmails.slice(i, i + 50));
+        }
+      }
+
       return apiSuccess(result);
     }
 
