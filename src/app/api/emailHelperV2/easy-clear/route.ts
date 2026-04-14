@@ -24,15 +24,24 @@ export async function GET(request: NextRequest) {
   const admin = createSupabaseAdmin();
 
   // Get sender tiers (A/B/C senders are NOT noise — exclude them)
+  // Also load aliases so merged addresses are excluded too
   const { data: senders } = await admin
     .from(TABLES.SENDER_PRIORITIES)
-    .select('sender_email, tier')
+    .select('sender_email, tier, aliases')
     .eq('user_id', userId)
     .in('tier', ['A', 'B', 'C']);
 
   const signalSenders = new Set<string>();
+  const signalDomains = new Set<string>();
   if (senders) {
-    for (const s of senders) signalSenders.add(s.sender_email.toLowerCase());
+    for (const s of senders) {
+      signalSenders.add(s.sender_email.toLowerCase());
+      // Also exclude aliases of signal senders
+      for (const alias of (s.aliases || [])) signalSenders.add(alias.toLowerCase());
+      // Exclude entire domain if a signal sender belongs to it (non-common domains only)
+      const domain = s.sender_email.split('@')[1]?.toLowerCase();
+      if (domain && !COMMON_DOMAINS.has(domain)) signalDomains.add(domain);
+    }
   }
 
   // Get actioned message IDs to exclude
@@ -78,6 +87,8 @@ export async function GET(request: NextRequest) {
     if (actionedIds.has(m.gmail_id)) return false;
     if (seenIds.has(m.gmail_id)) return false;
     if (signalSenders.has(m.sender_email.toLowerCase())) return false;
+    const domain = m.sender_email.split('@')[1]?.toLowerCase();
+    if (domain && signalDomains.has(domain)) return false;
     seenIds.add(m.gmail_id);
     return true;
   });
