@@ -87,7 +87,52 @@ export default async () => {
     }
   }
 
-  console.log(`Done: ${pagesProcessed} pages in ${Math.round((Date.now() - startTime) / 1000)}s`);
+  console.log(`Sync done: ${pagesProcessed} pages in ${Math.round((Date.now() - startTime) / 1000)}s`);
+
+  // 4. Process pending unsubscribe queue (5s between each, up to 8 min)
+  const unsubStart = Date.now();
+  const UNSUB_BUDGET = 8 * 60 * 1000;
+  let unsubProcessed = 0;
+
+  while ((Date.now() - unsubStart) < UNSUB_BUDGET) {
+    try {
+      // Check if queue has items
+      const checkRes = await fetch(
+        `${supabaseUrl}/rest/v1/emailHelperV2_unsubscribe_log?status=eq.pending&select=id&limit=1`,
+        { headers: { apikey: srk, Authorization: `Bearer ${srk}` } }
+      );
+      const pending = await checkRes.json().catch(() => []);
+      if (!pending.length) break;
+
+      // Process one entry
+      const putRes = await fetch(`${appUrl}/api/emailHelperV2/unsubscribe`, {
+        method: "PUT",
+        headers: authHeaders,
+      });
+      const putData = await putRes.json().catch(() => ({}));
+
+      if (putData.data?.idle) break;
+
+      if (putData.data?.status === "quota_retry") {
+        console.log("Unsub quota hit — waiting 60s");
+        await new Promise(r => setTimeout(r, 60_000));
+        continue;
+      }
+
+      unsubProcessed++;
+      console.log(`Unsub ${unsubProcessed}: ${putData.data?.senderEmail || "?"} → ${putData.data?.status || "?"}`);
+
+      // 5s pacing between unsubscribes
+      await new Promise(r => setTimeout(r, 5000));
+    } catch (e) {
+      console.error("Unsub queue error:", e);
+      break;
+    }
+  }
+
+  if (unsubProcessed > 0) {
+    console.log(`Unsub done: ${unsubProcessed} processed in ${Math.round((Date.now() - unsubStart) / 1000)}s`);
+  }
 };
 
 export const config = {
