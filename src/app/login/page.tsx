@@ -35,9 +35,16 @@ function LoginContent() {
             </p>
           </div>
         ) : (
-          <p className="text-sm mb-6" style={{ color: 'var(--muted)' }}>
-            Sign in to manage your inbox.
-          </p>
+          <div className="mb-6">
+            <p className="text-sm mb-3" style={{ color: 'var(--muted)' }}>
+              Sign in to manage your inbox.
+            </p>
+            <div className="flex flex-col gap-1.5 text-xs" style={{ color: 'var(--muted)' }}>
+              <span>Smart triage, follow-ups, and one-click cleanup</span>
+              <span>Backup your entire Gmail to your personal Google Drive</span>
+              <span>Multi-account support with unified view</span>
+            </div>
+          </div>
         )}
 
         <a
