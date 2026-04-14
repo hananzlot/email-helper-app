@@ -158,7 +158,12 @@ export async function PUT(request: NextRequest) {
         .eq('account_email', job.account_email)
         .single();
 
-      if (syncData?.resume_page_token) pageToken = syncData.resume_page_token;
+      if (syncData?.resume_page_token) {
+        pageToken = syncData.resume_page_token;
+        console.log(`[sync] ${job.account_email} resuming from token: ${pageToken?.slice(0, 20)}... (page ${job.pages_processed})`);
+      } else {
+        console.log(`[sync] ${job.account_email} no resume token found despite ${job.pages_processed} pages processed`);
+      }
     } else {
       // Fresh sync job — clear any stale resume token so we start from the beginning
       await admin.from(TABLES.INBOX_SYNC).upsert({
@@ -204,7 +209,7 @@ export async function PUT(request: NextRequest) {
 
       await admin.from(SYNC_QUEUE).update({
         status: 'done', completed_at: new Date().toISOString(),
-        messages_cached: realTotal, // All fetchable pages exhausted — gap is unfetchable
+        messages_cached: Math.max(count || 0, realTotal),
         total_inbox: realTotal,
       }).eq('id', job.id);
 
@@ -266,12 +271,14 @@ export async function PUT(request: NextRequest) {
 
     const nextPageToken = currentPageToken;
 
-    // Update sync + job
-    await admin.from(TABLES.INBOX_SYNC).upsert({
+    // Update sync + job — save resume token for next call
+    const { error: syncUpsertErr } = await admin.from(TABLES.INBOX_SYNC).upsert({
       user_id: job.user_id, account_email: job.account_email,
       last_synced_at: new Date().toISOString(),
       resume_page_token: nextPageToken,
     }, { onConflict: 'user_id,account_email' });
+    if (syncUpsertErr) console.error(`[sync] Failed to save resume token:`, syncUpsertErr.message);
+    else console.log(`[sync] ${job.account_email} saved token: ${nextPageToken ? nextPageToken.slice(0, 20) + '...' : 'null'}, cached=${cachedThisPage} new, skipped=${skippedPages} pages`);
 
     // Always get the real Gmail inbox total and actual cache count
     let inboxTotal = 0;
@@ -290,12 +297,15 @@ export async function PUT(request: NextRequest) {
     }).eq('id', job.id);
 
     if (!nextPageToken) {
-      // All pages fetched — any gap between cached and total is unfetchable
-      // (archived/trashed messages still in Gmail's count but not in inbox query)
-      // Set messages_cached = total_inbox so progress bar shows 100%
+      // All Gmail pages exhausted — sync is complete
+      // messages_cached may be < total_inbox due to cross-account dedup
+      // (same gmail_id cached under a different account) or actioned messages
+      // Report as fully synced since there are no more pages to fetch
+      const finalCached = Math.max(actualCached || 0, inboxTotal || 0);
+      console.log(`[sync] ${job.account_email} DONE: cached=${actualCached}, total=${inboxTotal}, reported=${finalCached}, pages=${(job.pages_processed || 0) + 1}, skipped=${skippedPages}`);
       await admin.from(SYNC_QUEUE).update({
         status: 'done', completed_at: new Date().toISOString(),
-        messages_cached: inboxTotal || (actualCached || 0),
+        messages_cached: finalCached,
       }).eq('id', job.id);
     } else {
       // Reset to pending with updated requested_at so this job goes to the back of the queue (round-robin)
