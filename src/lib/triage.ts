@@ -384,11 +384,22 @@ function isLikelyNeedsReply(email: TriagedEmail): boolean {
  * header directly from each message's metadata — no thread fetches needed.
  * Processes up to 200 sent messages (~10 batches of 20), takes ~10-15 seconds.
  */
+export interface TierMinimums {
+  A: number; // Min replies for Tier A (default 7)
+  B: number; // Min replies for Tier B (default 4)
+  C: number; // Min replies for Tier C (default 2)
+  D: number; // Min replies for Tier D (default 1)
+}
+
+export const DEFAULT_TIER_MINIMUMS: TierMinimums = { A: 7, B: 4, C: 2, D: 1 };
+
 export async function scanSentMail(
   client: gmail_v1.Gmail,
   userId: string,
-  accountEmail: string
+  accountEmail: string,
+  tierMinimums?: TierMinimums
 ): Promise<{ sendersFound: number; totalReplies: number }> {
+  const mins = tierMinimums || DEFAULT_TIER_MINIMUMS;
   const admin = createSupabaseAdmin();
   const recipientCounts: Record<string, { name: string; count: number; lastDate: string }> = {};
 
@@ -479,30 +490,23 @@ export async function scanSentMail(
     return false;
   };
 
-  // Separate real contacts from gibberish — gibberish always gets Tier D
-  const realEntries = entries.filter(([email]) => !isGibberishAddress(email));
-  const gibbEntries = entries.filter(([email]) => isGibberishAddress(email));
-  const total = realEntries.length;
-
-  const tierThresholds = {
-    A: Math.ceil(total * 0.1),   // Top 10%
-    B: Math.ceil(total * 0.3),   // Next 20%
-    C: Math.ceil(total * 0.6),   // Next 30%
-  };
-
-  // Minimum reply counts: prevent single-interaction senders from ranking high
-  const MIN_REPLIES_A = 3;
-  const MIN_REPLIES_B = 2;
+  // Assign tiers based on reply count thresholds (not percentile position)
+  // Gibberish/machine-generated addresses always get Tier D max
 
   // Upsert sender priorities (encrypt display_name)
-  const upserts = [...realEntries, ...gibbEntries].map(([email, data], idx) => {
+  const upserts = entries.map(([email, data]) => {
     let tier: SenderTier = 'D';
-    // Gibberish addresses always get Tier D
-    if (!isGibberishAddress(email)) {
-      const realIdx = realEntries.findIndex(([e]) => e === email);
-      if (realIdx < tierThresholds.A && data.count >= MIN_REPLIES_A) tier = 'A';
-      else if (realIdx < tierThresholds.B && data.count >= MIN_REPLIES_B) tier = 'B';
-      else if (realIdx < tierThresholds.C) tier = 'C';
+    if (isGibberishAddress(email)) {
+      // Machine-generated addresses: Tier D if they have interactions, otherwise skip
+      tier = 'D';
+    } else if (data.count >= mins.A) {
+      tier = 'A';
+    } else if (data.count >= mins.B) {
+      tier = 'B';
+    } else if (data.count >= mins.C) {
+      tier = 'C';
+    } else if (data.count >= mins.D) {
+      tier = 'D';
     }
 
     const item = {

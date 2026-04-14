@@ -848,6 +848,11 @@ export default function Dashboard() {
   // Persisted to Supabase (encrypted) so history survives refreshes (7-day window)
   const [actionHistory, setActionHistory] = useState<ActionHistoryEntry[]>([]);
   const [showActionHistory, setShowActionHistory] = useState(false);
+  // Tier minimums — stored in localStorage, passed to scan API
+  const [showTierSettings, setShowTierSettings] = useState(false);
+  const [tierMinimums, setTierMinimums] = useState(() => {
+    try { const s = localStorage.getItem('email_helper_tier_minimums'); return s ? JSON.parse(s) : { A: 7, B: 4, C: 2, D: 1 }; } catch { return { A: 7, B: 4, C: 2, D: 1 }; }
+  });
   // Load action history from Supabase on mount
   useEffect(() => {
     (async () => {
@@ -2073,7 +2078,7 @@ export default function Dashboard() {
       for (let i = 0; i < accts.length; i++) {
         setBgTaskLabel(`Scanning sent mail ${i + 1}/${accts.length}...`);
         setCurrentAccount(accts[i].email);
-        const res = await apiPost('triage', { action: 'scan_sent' });
+        const res = await apiPost('triage', { action: 'scan_sent', tierMinimums });
         if (res.success) {
           totalSenders += res.data.sendersFound;
           totalReplies += res.data.totalReplies;
@@ -2334,6 +2339,15 @@ export default function Dashboard() {
                         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
                       </svg>
                       Accounts
+                    </button>
+                    <button
+                      onClick={() => { setShowTierSettings(true); setShowSettingsMenu(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium hover:bg-gray-50 transition-colors text-left"
+                      style={{ color: '#334155' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+                      </svg>
+                      Tier Thresholds
                     </button>
                     <div style={{ height: 1, background: 'var(--border)' }} />
                     <button
@@ -2779,6 +2793,69 @@ export default function Dashboard() {
       {previewMessageId && <EmailPreviewModal messageId={previewMessageId} accountEmail={previewAccount} onClose={() => setPreviewMessageId(null)} onAction={handleAction} showToast={showToast} onSnooze={snoozeFromPreview} onEmailSent={() => setSentVersion(v => v + 1)} />}
 
       {/* Action History Panel */}
+      {/* Tier Settings Modal */}
+      {showTierSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setShowTierSettings(false)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="relative bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-semibold text-lg mb-1">Tier Thresholds</h3>
+            <p className="text-xs mb-4" style={{ color: 'var(--muted)' }}>Minimum reply count to qualify for each tier. Changes apply on next Scan Sent Mail.</p>
+            {(['A', 'B', 'C', 'D'] as const).map((t) => {
+              const colors: Record<string, { bg: string; border: string; label: string; desc: string }> = {
+                A: { bg: '#f0fdf4', border: '#86efac', label: '#166534', desc: 'VIPs — top priority' },
+                B: { bg: '#fffbeb', border: '#fcd34d', label: '#92400e', desc: 'Important contacts' },
+                C: { bg: '#eff6ff', border: '#93c5fd', label: '#1e40af', desc: 'Regular contacts' },
+                D: { bg: '#f8fafc', border: '#e2e8f0', label: '#64748b', desc: 'Low priority' },
+              };
+              const c = colors[t];
+              return (
+                <div key={t} className="flex items-center gap-3 mb-3 p-3 rounded-lg border" style={{ background: c.bg, borderColor: c.border }}>
+                  <span className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm" style={{ background: c.border, color: c.label }}>
+                    {t}
+                  </span>
+                  <div className="flex-1">
+                    <div className="text-xs font-medium" style={{ color: c.label }}>{c.desc}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <input type="number" min={t === 'D' ? 0 : 1} value={tierMinimums[t]}
+                      onChange={(e) => setTierMinimums((prev: Record<string, number>) => ({ ...prev, [t]: Math.max(0, parseInt(e.target.value) || 0) }))}
+                      className="w-14 text-center text-sm font-semibold rounded-lg border py-1.5" style={{ borderColor: c.border }} />
+                    <span className="text-xs" style={{ color: 'var(--muted)' }}>+ replies</span>
+                  </div>
+                </div>
+              );
+            })}
+            <p className="text-[10px] mb-4" style={{ color: 'var(--muted)' }}>Senders below Tier D threshold remain untiered (shown in Cleanup).</p>
+            <div className="flex gap-2">
+              <button onClick={async () => {
+                localStorage.setItem('email_helper_tier_minimums', JSON.stringify(tierMinimums));
+                setShowTierSettings(false);
+                showToast('Tier thresholds saved', 'Re-scanning sent mail to update priorities...');
+                // Auto-rescan to apply new thresholds
+                setTriageLoading(true);
+                setBgTaskLabel('Updating sender priorities...');
+                try {
+                  const accts = (unified && accounts.length > 1) ? accounts : [{ email: _currentAccount }];
+                  const savedAccount = _currentAccount;
+                  for (const acct of accts) {
+                    setCurrentAccount(acct.email);
+                    await apiPost('triage', { action: 'scan_sent', tierMinimums });
+                  }
+                  setCurrentAccount(savedAccount);
+                  setTriageVersion(v => v + 1);
+                  showToast('All done!', 'Sender priorities updated with new thresholds');
+                } catch { showToast('Update failed', 'Try running Scan Sent Mail manually'); }
+                finally { setTriageLoading(false); setBgTaskLabel(null); }
+              }} className="flex-1 px-4 py-2 text-sm font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>
+                Save & Update
+              </button>
+              <button onClick={() => setShowTierSettings(false)} className="px-4 py-2 text-sm rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showActionHistory && (
         <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setShowActionHistory(false)}>
           <div className="w-full sm:max-w-sm bg-white shadow-2xl h-full overflow-y-auto border-l"

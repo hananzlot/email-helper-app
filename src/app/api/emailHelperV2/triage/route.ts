@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getGmailFromRequest, getRequestContext, apiSuccess, apiError } from '@/lib/api-helpers';
-import { runTriage, scanSentMail, computeFollowUps } from '@/lib/triage';
+import { runTriage, scanSentMail, computeFollowUps, DEFAULT_TIER_MINIMUMS } from '@/lib/triage';
+import type { TierMinimums } from '@/lib/triage';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { TABLES } from '@/lib/tables';
 import { decryptJson } from '@/lib/crypto';
@@ -32,7 +33,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'scan_sent') {
-      const result = await scanSentMail(gmail, userId, account);
+      const tierMins: TierMinimums = body.tierMinimums || DEFAULT_TIER_MINIMUMS;
+      const result = await scanSentMail(gmail, userId, account, tierMins);
       return apiSuccess(result);
     }
 
