@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { getRequestContext, apiSuccess, apiError } from '@/lib/api-helpers';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 import { TABLES } from '@/lib/tables';
-import { encryptFields, decryptFields, ENCRYPTED_FIELDS } from '@/lib/crypto';
+import { encrypt, encryptFields, decryptFields, ENCRYPTED_FIELDS } from '@/lib/crypto';
 
 /**
  * GET /api/emailHelperV2/senders
@@ -192,38 +192,26 @@ export async function PUT(request: NextRequest) {
     if (!sender_email || !tier) return apiError('Missing sender_email or tier');
     if (!['A', 'B', 'C', 'D'].includes(tier)) return apiError('Tier must be A, B, C, or D');
 
-    // Upsert so it works for both known and unknown senders (encrypt display_name)
     // Preserve existing reply_count if updating (don't reset to 0)
-    const { data: existingSender } = await admin
-      .from(TABLES.SENDER_PRIORITIES)
-      .select('reply_count')
-      .eq('user_id', userId)
-      .eq('sender_email', sender_email)
-      .maybeSingle();
-    const upsertData: Record<string, unknown> = {
+    let existingCount = 0;
+    try {
+      const { data: existingSender } = await admin
+        .from(TABLES.SENDER_PRIORITIES)
+        .select('reply_count')
+        .eq('user_id', userId)
+        .eq('sender_email', sender_email)
+        .maybeSingle();
+      existingCount = existingSender?.reply_count || 0;
+    } catch { /* sender doesn't exist yet — that's fine */ }
+
+    // Upsert the tier
+    const upsertItem = encryptFields({
       user_id: userId,
       sender_email,
       tier,
       display_name: display_name || sender_email,
-      reply_count: existingSender?.reply_count || 0,
-    };
-    // Only include updated_at if column exists (try-catch safe)
-    try { upsertData.updated_at = new Date().toISOString(); } catch {}
-    const upsertItem = encryptFields(upsertData, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
-
-    // Record manual tier change so scanSentMail won't overwrite user's choice
-    // Encrypt fields that are encrypted in action_history table
-    const { encrypt: enc } = await import('@/lib/crypto');
-    await admin.from(TABLES.ACTION_HISTORY).insert({
-      user_id: userId,
-      action: 'manualTier',
-      action_label: enc(`Set ${sender_email} to Tier ${tier}`, userId),
-      message_ids: [],
-      account_email: enc(sender_email, userId),
-      subjects: enc(JSON.stringify([tier]), userId),
-      undo_action: null,
-      undone: false,
-    }).catch((e: unknown) => console.error('manualTier history insert failed:', e));
+      reply_count: existingCount,
+    }, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
 
     const { data, error } = await admin
       .from(TABLES.SENDER_PRIORITIES)
@@ -231,14 +219,23 @@ export async function PUT(request: NextRequest) {
       .select()
       .single();
 
-    if (error) {
-      console.error('Senders upsert failed:', error.message, error);
-      return apiError(error.message, 500);
-    }
+    if (error) return apiError(`Upsert failed: ${error.message}`, 500);
+
+    // Record manual tier change so scanSentMail won't overwrite user's choice (fire-and-forget)
+    admin.from(TABLES.ACTION_HISTORY).insert({
+      user_id: userId,
+      action: 'manualTier',
+      action_label: encrypt(`Set ${sender_email} to Tier ${tier}`, userId),
+      message_ids: [],
+      account_email: encrypt(sender_email, userId),
+      subjects: encrypt(JSON.stringify([tier]), userId),
+      undo_action: null,
+      undone: false,
+    }).then(() => {}).catch(() => {});
+
     return apiSuccess(data);
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error('Senders tier update failed:', errMsg, err);
     return apiError(`Tier update failed: ${errMsg}`, 500);
   }
 }
