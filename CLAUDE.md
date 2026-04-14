@@ -55,6 +55,12 @@ Always prefer server-side SQL/Supabase queries over client-side JavaScript when 
 The client should receive ready-to-render results, not raw data to process.
 Supabase returns max 1000 rows per query — use `.range()` pagination to fetch all rows when needed.
 
+### IMPORTANT: Duplicate Gmail IDs Across Accounts Are Real
+Some emails appear in multiple connected accounts with the same Gmail message ID.
+This is NOT a bug — Gmail genuinely returns the same ID when the same message exists
+in multiple accounts (e.g., emails sent between the user's own accounts). Each account
+caches its own copy independently. Do NOT deduplicate across accounts in the cache.
+
 ### CRITICAL: Efficient Sync with Fast-Forward
 When syncing inbox messages from Gmail to cache:
 - Use a **sync queue** for coordinating across users and cron jobs

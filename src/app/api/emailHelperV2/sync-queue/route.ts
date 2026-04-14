@@ -209,7 +209,7 @@ export async function PUT(request: NextRequest) {
 
       await admin.from(SYNC_QUEUE).update({
         status: 'done', completed_at: new Date().toISOString(),
-        messages_cached: Math.max(count || 0, realTotal),
+        messages_cached: count || 0,
         total_inbox: realTotal,
       }).eq('id', job.id);
 
@@ -218,11 +218,12 @@ export async function PUT(request: NextRequest) {
 
     const messageIds = listRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
 
-    // Check existing (any account for this user) + actioned — dedup across accounts
+    // Check existing for THIS account only — each account caches its own messages
     const { data: existing } = await admin
       .from(TABLES.INBOX_CACHE)
       .select('gmail_id')
       .eq('user_id', job.user_id)
+      .eq('account_email', job.account_email)
       .in('gmail_id', messageIds);
     const existingSet = new Set<string>();
     if (existing) existing.forEach((r: { gmail_id: string }) => existingSet.add(r.gmail_id));
@@ -241,7 +242,7 @@ export async function PUT(request: NextRequest) {
       const skipIds = skipRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
       const { data: skipExisting } = await admin
         .from(TABLES.INBOX_CACHE).select('gmail_id')
-        .eq('user_id', job.user_id)
+        .eq('user_id', job.user_id).eq('account_email', job.account_email)
         .in('gmail_id', skipIds);
       const skipSet = new Set<string>();
       if (skipExisting) skipExisting.forEach((r: { gmail_id: string }) => skipSet.add(r.gmail_id));
@@ -298,14 +299,10 @@ export async function PUT(request: NextRequest) {
 
     if (!nextPageToken) {
       // All Gmail pages exhausted — sync is complete
-      // messages_cached may be < total_inbox due to cross-account dedup
-      // (same gmail_id cached under a different account) or actioned messages
-      // Report as fully synced since there are no more pages to fetch
-      const finalCached = Math.max(actualCached || 0, inboxTotal || 0);
-      console.log(`[sync] ${job.account_email} DONE: cached=${actualCached}, total=${inboxTotal}, reported=${finalCached}, pages=${(job.pages_processed || 0) + 1}, skipped=${skippedPages}`);
+      console.log(`[sync] ${job.account_email} DONE: cached=${actualCached}, total=${inboxTotal}, pages=${(job.pages_processed || 0) + 1}, skipped=${skippedPages}`);
       await admin.from(SYNC_QUEUE).update({
         status: 'done', completed_at: new Date().toISOString(),
-        messages_cached: finalCached,
+        messages_cached: actualCached || 0,
       }).eq('id', job.id);
     } else {
       // Reset to pending with updated requested_at so this job goes to the back of the queue (round-robin)
