@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     .from(TABLES.ACTION_HISTORY)
     .select('message_ids')
     .eq('user_id', userId)
-    .in('action', ['trash', 'archive', 'delete'])
+    .in('action', ['trash', 'archive', 'delete', 'unstar', 'dismissFollowUp'])
     .eq('undone', false);
   const actionedIds = new Set<string>();
   if (actions) {
