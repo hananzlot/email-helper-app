@@ -228,12 +228,19 @@ export async function PUT(request: NextRequest) {
       resume_page_token: nextPageToken,
     }, { onConflict: 'user_id,account_email' });
 
+    // Always get the real Gmail inbox total and actual cache count
     let inboxTotal = 0;
     try { inboxTotal = (await getLabelInfo(gmail, 'INBOX')).messagesTotal; } catch {}
 
+    const { count: actualCached } = await admin
+      .from(TABLES.INBOX_CACHE)
+      .select('gmail_id', { count: 'exact', head: true })
+      .eq('user_id', job.user_id)
+      .eq('account_email', job.account_email);
+
     await admin.from(SYNC_QUEUE).update({
       pages_processed: (job.pages_processed || 0) + 1,
-      messages_cached: (job.messages_cached || 0) + cachedThisPage,
+      messages_cached: Math.min(actualCached || 0, inboxTotal || (actualCached || 0)),
       total_inbox: inboxTotal,
     }).eq('id', job.id);
 
