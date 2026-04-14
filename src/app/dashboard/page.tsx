@@ -1691,7 +1691,11 @@ export default function Dashboard() {
             }
           }
 
-          await new Promise(r => setTimeout(r, 3000));
+          // Adaptive pacing: fast for cached pages, slow for new-message pages
+          const activeAccts = accounts.filter(a => { const p = syncProgress[a.email]; return !p?.done; }).length || 1;
+          const calls = res.data?.gmailCalls || 1;
+          const adaptiveDelay = Math.max(500, (calls / 200) * 60000 / activeAccts);
+          await new Promise(r => setTimeout(r, adaptiveDelay));
         } catch {
           await new Promise(r => setTimeout(r, 5000));
         }

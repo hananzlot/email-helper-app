@@ -148,8 +148,12 @@ export async function PUT(request: NextRequest) {
     const actionedSet = new Set<string>();
     if (actions) for (const r of actions) for (const mid of (r.message_ids || [])) actionedSet.add(mid);
 
+    // Track Gmail API calls for adaptive client pacing
+    let gmailCalls = 0;
+
     // Fetch one page
     const listRes = await listMessages(gmail, { query: 'in:inbox', maxResults: 100, pageToken });
+    gmailCalls++;
 
     if (!listRes.messages?.length) {
       // Done
@@ -170,7 +174,7 @@ export async function PUT(request: NextRequest) {
         messages_cached: count || 0, total_inbox: count || 0,
       }).eq('id', job.id);
 
-      return apiSuccess({ jobId: job.id, status: 'done', totalCached: count || 0 });
+      return apiSuccess({ jobId: job.id, status: 'done', totalCached: count || 0, gmailCalls: 1 });
     }
 
     const messageIds = listRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
@@ -194,6 +198,7 @@ export async function PUT(request: NextRequest) {
     while (newIds.length === 0 && currentPageToken && skippedPages < 50) {
       skippedPages++;
       const skipRes = await listMessages(gmail, { query: 'in:inbox', maxResults: 100, pageToken: currentPageToken });
+      gmailCalls++;
       if (!skipRes.messages?.length) { currentPageToken = null; break; }
       const skipIds = skipRes.messages.map((m: { id?: string | null }) => m.id!).filter(Boolean);
       const { data: skipExisting } = await admin
@@ -208,6 +213,7 @@ export async function PUT(request: NextRequest) {
     }
 
     if (newIds.length > 0) {
+      gmailCalls += newIds.length; // Each message is one getMessage call
       const messages = await batchGetMessageMetadata(gmail, newIds, 10);
       const rows = messages.map(m => ({
         user_id: job!.user_id, account_email: job!.account_email,
@@ -236,7 +242,7 @@ export async function PUT(request: NextRequest) {
 
     // Always get the real Gmail inbox total and actual cache count
     let inboxTotal = 0;
-    try { inboxTotal = (await getLabelInfo(gmail, 'INBOX')).messagesTotal; } catch {}
+    try { inboxTotal = (await getLabelInfo(gmail, 'INBOX')).messagesTotal; gmailCalls++; } catch {}
 
     const { count: actualCached } = await admin
       .from(TABLES.INBOX_CACHE)
@@ -266,6 +272,7 @@ export async function PUT(request: NextRequest) {
       skippedPages,
       pagesProcessed: (job.pages_processed || 0) + 1 + skippedPages,
       nextPageToken: !!nextPageToken,
+      gmailCalls,
     });
   } catch (err) {
     const errMsg = String(err);
