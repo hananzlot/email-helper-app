@@ -4599,17 +4599,30 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
   const [serverGroups, setServerGroups] = useState<{ key: string; name: string; email: string; count: number; messages: GmailMessage[] }[]>([]);
   const [totalMessages, setTotalMessages] = useState(0);
 
+  // Remove messages from local state when actioned (markRead, archive, trash, delete)
+  function removeFromGroups(ids: string[]) {
+    const removedSet = new Set(ids);
+    setServerGroups(prev => prev.map(g => ({
+      ...g,
+      count: g.messages.filter(m => !removedSet.has(m.id)).length,
+      messages: g.messages.filter(m => !removedSet.has(m.id)),
+    })).filter(g => g.count > 0));
+  }
+
+  // Wrap onAction so message-level actions in the list also remove from view
+  function handleMessageAction(action: string, ids: string[], label?: string, acct?: string) {
+    onAction(action, ids, label, acct);
+    if (['markRead', 'archive', 'trash', 'delete'].includes(action)) {
+      removeFromGroups(ids);
+      showToast({ markRead: 'Marked read', archive: 'Archived', trash: 'Trashed', delete: 'Deleted' }[action] || action);
+    }
+  }
+
   // Listen for message removals from InlinePreview actions
   useEffect(() => {
     function handleRemove(e: Event) {
       const ids = (e as CustomEvent).detail?.ids as string[];
-      if (!ids?.length) return;
-      const removedSet = new Set(ids);
-      setServerGroups(prev => prev.map(g => ({
-        ...g,
-        count: g.messages.filter(m => !removedSet.has(m.id)).length,
-        messages: g.messages.filter(m => !removedSet.has(m.id)),
-      })).filter(g => g.count > 0));
+      if (ids?.length) removeFromGroups(ids);
     }
     window.addEventListener('cleanup-remove', handleRemove);
     return () => window.removeEventListener('cleanup-remove', handleRemove);
@@ -5005,12 +5018,12 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                         <div className="flex gap-1 flex-shrink-0 items-center">
                           <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
                           <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} size="xs" />
-                          <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} size="xs" />
-                          <button onClick={(e) => { e.stopPropagation(); onAction('archive', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
+                          <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={handleMessageAction} size="xs" />
+                          <button onClick={(e) => { e.stopPropagation(); handleMessageAction('archive', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
                             title="Archive" className="p-1 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
                           </button>
-                          <button onClick={(e) => { e.stopPropagation(); onAction('trash', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
+                          <button onClick={(e) => { e.stopPropagation(); handleMessageAction('trash', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
                             title="Trash" className="p-1 rounded-lg border hover:bg-red-50 transition-colors" style={{ borderColor: 'var(--border)', color: '#dc2626' }}>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                           </button>
