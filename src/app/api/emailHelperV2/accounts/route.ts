@@ -106,12 +106,11 @@ export async function DELETE(request: NextRequest) {
       .eq('user_id', userId)
       .eq('email', email);
 
-    // Clean up ALL associated data across all tables
+    // Clean up associated data — keep inbox_cache and inbox_sync so
+    // reconnecting the same account picks up instantly without re-fetching
     await Promise.all([
       admin.from(TABLES.REPLY_QUEUE).delete().eq('user_id', userId).eq('account_email', email),
       admin.from(TABLES.TRIAGE_RESULTS).delete().eq('user_id', userId).eq('account_email', email),
-      admin.from(TABLES.INBOX_CACHE).delete().eq('user_id', userId).eq('account_email', email),
-      admin.from(TABLES.INBOX_SYNC).delete().eq('user_id', userId).eq('account_email', email),
       admin.from(TABLES.SYNC_QUEUE).delete().eq('user_id', userId).eq('account_email', email),
       admin.from(TABLES.FOLLOW_UP_CACHE).delete().eq('user_id', userId).eq('account_email', email),
       admin.from(TABLES.ACTION_HISTORY).delete().eq('user_id', userId).eq('account_email', email),
