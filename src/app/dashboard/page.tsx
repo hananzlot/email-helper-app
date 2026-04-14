@@ -46,7 +46,7 @@ let _onEmailSent: (() => void) | null = null;
 // pause until the cooldown expires. This prevents the retry storm where dozens
 // of concurrent callers each independently retry and worsen the 429 flood.
 let _rateLimitedUntil = 0;
-const RATE_LIMIT_COOLDOWN_MS = 30_000; // 30s pause after a 429
+const RATE_LIMIT_COOLDOWN_MS = 60_000; // 60s pause after a 429
 
 function setCurrentAccount(acct: string) {
   _currentAccount = acct;
@@ -2216,24 +2216,19 @@ export default function Dashboard() {
     }
   }, [messages, reportTabCount, unified, accounts]);
 
-  // Refresh tab counts whenever messages stabilize (after pagination batches)
-  // Debounce to avoid flickering during pagination (messages change every 200 batch)
+  // Load tab counts — debounced to avoid flooding API with parallel calls
+  // Triggers: mount, account switch, unified toggle, messages stabilize
   const tabCountTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    if (!account || messages.length === 0) return;
+    if (!account) return;
     if (tabCountTimerRef.current) clearTimeout(tabCountTimerRef.current);
+    // Short delay on mount/account change, longer delay during pagination
+    const delay = messages.length === 0 ? 500 : 2000;
     tabCountTimerRef.current = setTimeout(() => {
       loadAllTabCounts();
-    }, 1500);
+    }, delay);
     return () => { if (tabCountTimerRef.current) clearTimeout(tabCountTimerRef.current); };
-  }, [account, messages.length, loadAllTabCounts]);
-
-  // Load ALL tab counts immediately on mount and when unified/accounts change
-  // (don't wait for messages to load — counts come from server, not client messages)
-  useEffect(() => {
-    if (!account) return;
-    loadAllTabCounts();
-  }, [account, unified, accounts.length, loadAllTabCounts]);
+  }, [account, unified, accounts.length, messages.length, loadAllTabCounts]);
 
   // Run background cron on first load to populate follow-up cache & sender priorities
   useEffect(() => {

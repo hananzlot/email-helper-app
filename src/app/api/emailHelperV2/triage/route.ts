@@ -69,7 +69,11 @@ export async function POST(request: NextRequest) {
 
     return apiError(`Unknown action: ${action}`);
   } catch (err) {
-    console.error('Triage error:', err);
+    const errStr = String(err);
+    console.error('Triage error:', errStr);
+    if (errStr.includes('quota') || errStr.includes('Rate Limit') || errStr.includes('rateLimitExceeded') || errStr.includes('429')) {
+      return apiError('Gmail rate limit — please wait a moment', 429);
+    }
     return apiError('Triage failed', 500);
   }
 }
