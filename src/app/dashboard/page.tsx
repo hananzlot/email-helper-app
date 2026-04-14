@@ -197,6 +197,8 @@ function sanitizeEmailHtml(html: string): string {
   s = s.replace(/<script[^>]*\/>/gi, '');
   // Strip <link> tags that reference relative paths (they'd 404 against our domain)
   s = s.replace(/<link\b[^>]*\bhref\s*=\s*["'](?![a-z]+:\/\/)[^"']*["'][^>]*\/?>/gi, '');
+  // Remove unresolved cid: image references (inline attachments that couldn't be resolved)
+  s = s.replace(/<img\b[^>]*\bsrc\s*=\s*["']cid:[^"']*["'][^>]*\/?>/gi, '');
   return s;
 }
 
@@ -1400,10 +1402,10 @@ export default function Dashboard() {
       }
       if (profileRes.success) setProfile(profileRes.data);
 
-      // Fetch first page + label info from each account
+      // Fetch first page + label info from each account (sequential to avoid _currentAccount race)
       const freshMessages: GmailMessage[] = [];
       const accountTokens: { email: string; nextPageToken?: string }[] = [];
-      await Promise.all(accounts.map(async (acct) => {
+      for (const acct of accounts) {
         setCurrentAccount(acct.email);
         try {
           const res = await gmailGet('inbox', { q: 'in:inbox', max: '200' });
@@ -1418,7 +1420,7 @@ export default function Dashboard() {
         } catch (e) {
           console.error(`Failed to load inbox for ${acct.email}:`, e);
         }
-      }));
+      }
 
       if (unifiedCacheHit && unifiedCacheCount > 200) {
         // Large cache — merge newest from Gmail, then resume pagination for uncached
@@ -4766,9 +4768,9 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                       if (res.success && res.data?.status === 'success') {
                         showToast('Unsubscribed!', `${group.name} — ${res.data.method}`);
                       } else {
-                        showToast('Could not auto-unsubscribe', res.data?.reason || 'Try manually');
+                        showToast('Could not auto-unsubscribe', res.data?.reason || res.error || 'Try manually');
                       }
-                    } catch { showToast('Unsubscribe failed'); }
+                    } catch (e) { showToast('Unsubscribe failed', String(e)); }
                   }}
                     className="px-3 py-1.5 text-xs font-semibold rounded-lg border"
                     style={{ borderColor: '#8b5cf6', color: '#8b5cf6', background: '#f5f3ff' }}>
