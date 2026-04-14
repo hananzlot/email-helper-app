@@ -2444,15 +2444,15 @@ export default function Dashboard() {
               const pct = s.total > 0 ? Math.min(100, Math.round((Math.min(s.cached, s.total) / s.total) * 100)) : 0;
               const isDone = s.done || pct >= 100;
               return (
-                <div key={email} className="flex items-center gap-2 px-2.5 py-1 rounded-lg border" style={{ background: isDone ? '#f0fdf4' : '#fefce8', borderColor: isDone ? '#bbf7d0' : '#fde68a' }}>
-                  {!isDone && <div className="w-2 h-2 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
-                  {isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
-                  <span className="text-[10px] font-semibold" style={{ color: isDone ? '#166534' : '#92400e' }}>{email}</span>
-                  <div className="w-16 h-1 rounded-full overflow-hidden" style={{ background: isDone ? '#dcfce7' : '#fef3c7' }}>
+                <div key={email} className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg border" style={{ background: isDone ? '#f0fdf4' : '#fefce8', borderColor: isDone ? '#bbf7d0' : '#fde68a' }}>
+                  {!isDone && <div className="w-2.5 h-2.5 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
+                  {isDone && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
+                  <span className="text-xs font-semibold" style={{ color: isDone ? '#166534' : '#92400e' }}>{email}</span>
+                  <div className="h-2 rounded-full overflow-hidden" style={{ width: 120, background: isDone ? '#dcfce7' : '#fef3c7' }}>
                     <div className="h-full rounded-full transition-all duration-1000" style={{ background: isDone ? '#22c55e' : '#f59e0b', width: `${pct}%` }} />
                   </div>
-                  <span className="text-[9px] whitespace-nowrap" style={{ color: isDone ? '#16a34a' : '#b45309' }}>
-                    {isDone ? '100%' : `${Math.min(s.cached, s.total).toLocaleString()}/${s.total.toLocaleString()} (${pct}%)`}
+                  <span className="text-[11px] font-medium whitespace-nowrap" style={{ color: isDone ? '#16a34a' : '#b45309' }}>
+                    {isDone ? '100%' : `${Math.min(s.cached, s.total).toLocaleString()} / ${s.total.toLocaleString()} (${pct}%)`}
                   </span>
                 </div>
               );
