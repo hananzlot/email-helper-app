@@ -11,12 +11,12 @@ import { encrypt, decrypt } from './crypto';
  * After Google redirects back, we exchange the code, store the Gmail tokens
  * in our gmail_accounts table, and sign the user into Supabase.
  */
-export function getGoogleAuthUrl(state?: string, redirectUri?: string) {
+export function getGoogleAuthUrl(state?: string, redirectUri?: string, scopes?: string[]) {
   const oauth2Client = getOAuth2Client(redirectUri);
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',       // Get refresh_token for long-lived access
     prompt: 'consent',            // Always show consent to get refresh_token
-    scope: GMAIL_SCOPES,
+    scope: scopes || GMAIL_SCOPES,
     state: state || 'login',      // Can pass 'add_account' to distinguish flows
     include_granted_scopes: true,
   });

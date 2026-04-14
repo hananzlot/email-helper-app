@@ -18,4 +18,6 @@ export const TABLES = {
   SYNC_QUEUE: 'emailHelperV2_sync_queue',
   UNSUBSCRIBE_LOG: 'emailHelperV2_unsubscribe_log',
   SESSIONS: 'emailHelperV2_sessions',
+  BACKUP_JOBS: 'emailHelperV2_backup_jobs',
+  FEEDBACK: 'emailHelperV2_feedback',
 } as const;

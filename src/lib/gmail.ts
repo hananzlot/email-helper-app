@@ -20,6 +20,15 @@ export function getGmailClient(accessToken: string, refreshToken?: string) {
   return google.gmail({ version: 'v1', auth });
 }
 
+export function getDriveClient(accessToken: string, refreshToken?: string) {
+  const auth = getOAuth2Client();
+  auth.setCredentials({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+  return google.drive({ version: 'v3', auth });
+}
+
 // Gmail scopes — full access scope covers read, modify, compose, send, delete
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.modify',   // Read, write, send, trash (no permanent delete)
@@ -28,6 +37,9 @@ export const GMAIL_SCOPES = [
   'email',
   'profile',
 ];
+
+// Drive scope — only requested when user triggers a backup (incremental consent)
+export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 // ============ READ OPERATIONS ============
 
@@ -273,6 +285,23 @@ export async function batchGetMessageMetadata(
     results.push(...batchResults.filter((m): m is GmailMessage => m !== null));
   }
   return results;
+}
+
+/**
+ * Get a message in raw RFC 2822 format (base64url-encoded).
+ * Used for MBOX backup — returns the complete email as-is.
+ */
+export async function getRawMessage(gmail: gmail_v1.Gmail, messageId: string): Promise<{ id: string; raw: string; internalDate: string }> {
+  const res = await gmail.users.messages.get({
+    userId: 'me',
+    id: messageId,
+    format: 'raw',
+  });
+  return {
+    id: res.data.id!,
+    raw: res.data.raw || '',
+    internalDate: res.data.internalDate || '0',
+  };
 }
 
 /**

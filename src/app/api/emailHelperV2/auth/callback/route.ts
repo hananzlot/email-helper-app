@@ -69,6 +69,7 @@ export async function GET(request: NextRequest) {
   }
 
   const isAddAccount = stateFlow === 'add_account';
+  const isDriveBackup = stateFlow === 'drive_backup';
 
   try {
     const redirectUri = `${origin}/api/emailHelperV2/auth/callback`;
@@ -78,28 +79,30 @@ export async function GET(request: NextRequest) {
 
     let userId: string;
 
-    if (isAddAccount) {
-      // Adding another Gmail account — userId comes from server-side stored state
+    if (isAddAccount || isDriveBackup) {
+      // Adding account or drive backup — userId comes from server-side stored state
       userId = storedState.user_id;
       if (!userId) {
         return NextResponse.redirect(new URL('/login?error=missing_user_id', origin));
       }
 
-      // Guard: check if this email is already connected to a DIFFERENT user
-      const admin = createSupabaseAdmin();
-      const { data: existingAccount } = await admin
-        .from(TABLES.GMAIL_ACCOUNTS)
-        .select('user_id')
-        .eq('email', gmailProfile.email)
-        .eq('status', 'connected')
-        .neq('user_id', userId)
-        .limit(1)
-        .single();
+      if (isAddAccount) {
+        // Guard: check if this email is already connected to a DIFFERENT user
+        const admin = createSupabaseAdmin();
+        const { data: existingAccount } = await admin
+          .from(TABLES.GMAIL_ACCOUNTS)
+          .select('user_id')
+          .eq('email', gmailProfile.email)
+          .eq('status', 'connected')
+          .neq('user_id', userId)
+          .limit(1)
+          .single();
 
-      if (existingAccount) {
-        return NextResponse.redirect(
-          new URL(`/dashboard?error=${encodeURIComponent(`${gmailProfile.email} is already connected to another account. Please disconnect it there first.`)}`, origin)
-        );
+        if (existingAccount) {
+          return NextResponse.redirect(
+            new URL(`/dashboard?error=${encodeURIComponent(`${gmailProfile.email} is already connected to another account. Please disconnect it there first.`)}`, origin)
+          );
+        }
       }
     } else {
       // Primary login flow — sign in or create user
@@ -173,11 +176,15 @@ export async function GET(request: NextRequest) {
 
       return response;
     } else {
-      // Adding an account — create new session with updated account
+      // Adding an account or drive backup — create new session with updated account
       const signedSession = await createSession(userId, gmailProfile.email);
 
       const redirectUrl = new URL('/dashboard', origin);
-      redirectUrl.searchParams.set('account_added', gmailProfile.email);
+      if (isDriveBackup) {
+        redirectUrl.searchParams.set('backup_started', gmailProfile.email);
+      } else {
+        redirectUrl.searchParams.set('account_added', gmailProfile.email);
+      }
       redirectUrl.searchParams.set('account', gmailProfile.email);
       const response = NextResponse.redirect(redirectUrl);
       response.cookies.set('email_helper_session', signedSession, {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes, createHmac } from 'crypto';
 import { getGoogleAuthUrl } from '@/lib/auth';
+import { GMAIL_SCOPES, DRIVE_SCOPE } from '@/lib/gmail';
 import { validateSession } from '@/lib/session';
 import { createSupabaseAdmin } from '@/lib/supabase-server';
 
@@ -19,8 +20,8 @@ export async function GET(request: NextRequest) {
   let flow = searchParams.get('state') || 'login';
   let userId: string | null = null;
 
-  // For add_account, resolve the current userId from session
-  if (flow === 'add_account') {
+  // For add_account or drive_backup, resolve the current userId from session
+  if (flow === 'add_account' || flow === 'drive_backup') {
     const sessionCookie = request.cookies.get('email_helper_session')?.value;
     const session = await validateSession(sessionCookie);
     userId = session?.userId || null;
@@ -41,14 +42,16 @@ export async function GET(request: NextRequest) {
     expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(), // 10 min
   }, { onConflict: 'nonce_hash' });
 
-  // Build state: nonce.flow or nonce.add_account.userId
-  const state = flow === 'add_account' && userId
-    ? `${nonce}.add_account.${userId}`
+  // Build state: nonce.flow or nonce.flow.userId
+  const state = (flow === 'add_account' || flow === 'drive_backup') && userId
+    ? `${nonce}.${flow}.${userId}`
     : `${nonce}.login`;
 
   const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
   const redirectUri = `${origin}/api/emailHelperV2/auth/callback`;
 
-  const authUrl = getGoogleAuthUrl(state, redirectUri);
+  // Drive backup flow requests additional Drive scope
+  const scopes = flow === 'drive_backup' ? [...GMAIL_SCOPES, DRIVE_SCOPE] : undefined;
+  const authUrl = getGoogleAuthUrl(state, redirectUri, scopes);
   return NextResponse.redirect(authUrl);
 }
