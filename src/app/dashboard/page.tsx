@@ -6736,7 +6736,7 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
           ...prev,
           [email]: {
             processed: putRes.data?.messagesProcessed || prev[email]?.processed || 0,
-            total: putRes.data?.messagesTotal || prev[email]?.total || 0,
+            total: Math.max(putRes.data?.messagesProcessed || 0, putRes.data?.messagesTotal || prev[email]?.total || 0),
             status: 'processing',
             folder: putRes.data?.folder || prev[email]?.folder || 'inbox',
           },
@@ -6833,11 +6833,11 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>Backing up {email}</span>
               <span className="text-xs" style={{ color: 'var(--muted)' }}>
-                {p.folder === 'sent' ? 'Sent' : 'Inbox'} — {p.processed.toLocaleString()}{p.total > 0 ? ` / ${p.total.toLocaleString()}` : ''} messages
+                {p.folder === 'sent' ? 'Sent' : 'Inbox'} — {p.processed.toLocaleString()} messages backed up
               </span>
             </div>
             <div className="w-full h-2 rounded-full" style={{ background: '#c7d2fe' }}>
-              <div className="h-full rounded-full transition-all" style={{ background: 'var(--accent)', width: p.total > 0 ? `${Math.min(100, (p.processed / p.total) * 100)}%` : '10%' }} />
+              <div className="h-full rounded-full transition-all" style={{ background: 'var(--accent)', width: p.total > 0 ? `${Math.min(100, (Math.min(p.processed, p.total) / p.total) * 100)}%` : '30%' }} />
             </div>
           </div>
         ))}
