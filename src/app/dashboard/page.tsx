@@ -1131,6 +1131,13 @@ export default function Dashboard() {
         showToast('Account connected', added);
         window.history.replaceState({}, '', '/dashboard');
       }
+      const backupAccount = params.get('backup_started');
+      if (backupAccount) {
+        showToast('Drive authorized', 'Starting backup...');
+        window.history.replaceState({}, '', '/dashboard');
+        // Store for later — backup starts after accounts load
+        sessionStorage.setItem('pending_backup', backupAccount);
+      }
       const dashError = params.get('error');
       if (dashError) {
         showToast('Error', dashError);
@@ -6676,11 +6683,72 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [backupProgress, setBackupProgress] = useState<Record<string, { processed: number; total: number; status: string; folder: string }>>({});
+  const backupRunningRef = React.useRef<Set<string>>(new Set());
 
   function refreshConnection(email: string) {
     setRefreshing(email);
     // Re-auth via OAuth — tokens get upserted, all data stays intact
     window.location.href = '/api/emailHelperV2/auth/login?state=add_account';
+  }
+
+  async function startBackup(email: string) {
+    if (backupRunningRef.current.has(email)) return;
+
+    // Start backup job
+    const res = await apiPost('backup', { account_email: email });
+    if (!res.success) { showToast('Error', res.error); return; }
+
+    // Need Drive auth?
+    if (res.data?.needsDriveAuth) {
+      window.location.href = '/api/emailHelperV2/auth/login?state=drive_backup';
+      return;
+    }
+
+    backupRunningRef.current.add(email);
+    setBackupProgress(prev => ({ ...prev, [email]: { processed: 0, total: res.data?.messages_total || 0, status: 'starting', folder: 'inbox' } }));
+
+    // Poll PUT to process batches
+    let consecutiveIdles = 0;
+    while (consecutiveIdles < 10) {
+      try {
+        const putRes = await fetch('/api/emailHelperV2/backup', { method: 'PUT' }).then(r => r.json());
+        if (!putRes.success || putRes.data?.idle) { consecutiveIdles++; await new Promise(r => setTimeout(r, 3000)); continue; }
+        consecutiveIdles = 0;
+
+        if (putRes.data?.status === 'done') {
+          setBackupProgress(prev => ({ ...prev, [email]: { ...prev[email], status: 'done', processed: putRes.data.messagesProcessed || prev[email]?.processed || 0 } }));
+          showToast('Backup complete', `${email} backed up to Google Drive`);
+          break;
+        }
+        if (putRes.data?.status === 'error') {
+          setBackupProgress(prev => ({ ...prev, [email]: { ...prev[email], status: 'error' } }));
+          showToast('Backup failed', putRes.data.error);
+          break;
+        }
+        if (putRes.data?.status === 'quota_retry') {
+          await new Promise(r => setTimeout(r, 10000));
+          continue;
+        }
+
+        // Update progress
+        const gmailCalls = putRes.data?.gmailCalls || 1;
+        const delay = Math.max(500, (gmailCalls / 200) * 60000);
+        setBackupProgress(prev => ({
+          ...prev,
+          [email]: {
+            processed: putRes.data?.messagesProcessed || prev[email]?.processed || 0,
+            total: putRes.data?.messagesTotal || prev[email]?.total || 0,
+            status: 'processing',
+            folder: putRes.data?.folder || prev[email]?.folder || 'inbox',
+          },
+        }));
+        await new Promise(r => setTimeout(r, delay));
+      } catch {
+        await new Promise(r => setTimeout(r, 5000));
+      }
+    }
+    backupRunningRef.current.delete(email);
   }
 
   async function setPrimary(email: string) {
@@ -6743,6 +6811,12 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
                     style={{ borderColor: 'var(--normal)', color: '#065f46', background: refreshing === a.email ? 'var(--normal-bg)' : 'transparent' }}>
                     {refreshing === a.email ? 'Redirecting...' : 'Refresh Connection'}
                   </button>
+                  <button onClick={() => startBackup(a.email)}
+                    disabled={backupRunningRef.current.has(a.email)}
+                    className="text-xs px-3 py-1.5 rounded-lg font-medium border"
+                    style={{ borderColor: 'var(--accent)', color: 'var(--accent)', background: backupRunningRef.current.has(a.email) ? '#eef2ff' : 'transparent' }}>
+                    {backupProgress[a.email]?.status === 'processing' ? 'Backing up...' : backupProgress[a.email]?.status === 'done' ? 'Backed up' : 'Backup to Drive'}
+                  </button>
                   {accounts.length > 1 && (
                     <button onClick={() => setConfirmDisconnect(a.email)}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium text-red-600 border"
@@ -6755,6 +6829,21 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
             ))}
           </div>
         )}
+        {/* Backup progress */}
+        {Object.entries(backupProgress).filter(([, p]) => p.status === 'processing' || p.status === 'starting').map(([email, p]) => (
+          <div key={email} className="mt-3 px-4 py-3 rounded-lg border" style={{ background: '#eef2ff', borderColor: 'var(--accent)' }}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-medium" style={{ color: 'var(--accent)' }}>Backing up {email}</span>
+              <span className="text-xs" style={{ color: 'var(--muted)' }}>
+                {p.folder === 'sent' ? 'Sent' : 'Inbox'} — {p.processed.toLocaleString()}{p.total > 0 ? ` / ${p.total.toLocaleString()}` : ''} messages
+              </span>
+            </div>
+            <div className="w-full h-2 rounded-full" style={{ background: '#c7d2fe' }}>
+              <div className="h-full rounded-full transition-all" style={{ background: 'var(--accent)', width: p.total > 0 ? `${Math.min(100, (p.processed / p.total) * 100)}%` : '10%' }} />
+            </div>
+          </div>
+        ))}
+
         {/* Disconnect confirmation dialog */}
         {confirmDisconnect && (
           <div className="mt-4 p-4 rounded-lg border" style={{ background: '#fef2f2', borderColor: '#fca5a5' }}>
