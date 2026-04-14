@@ -193,14 +193,33 @@ export async function PUT(request: NextRequest) {
     if (!['A', 'B', 'C', 'D'].includes(tier)) return apiError('Tier must be A, B, C, or D');
 
     // Upsert so it works for both known and unknown senders (encrypt display_name)
+    // Preserve existing reply_count if updating (don't reset to 0)
+    const { data: existingSender } = await admin
+      .from(TABLES.SENDER_PRIORITIES)
+      .select('reply_count')
+      .eq('user_id', userId)
+      .eq('sender_email', sender_email)
+      .single();
     const upsertItem = encryptFields({
       user_id: userId,
       sender_email,
       tier,
       display_name: display_name || sender_email,
-      reply_count: 0,
+      reply_count: existingSender?.reply_count || 0,
       updated_at: new Date().toISOString(),
     }, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
+
+    // Record manual tier change so scanSentMail won't overwrite user's choice
+    await admin.from(TABLES.ACTION_HISTORY).insert({
+      user_id: userId,
+      action: 'manualTier',
+      action_label: `Set ${sender_email} to Tier ${tier}`,
+      message_ids: [],
+      account_email: sender_email,
+      subjects: [tier],
+      undo_action: null,
+      undone: false,
+    }).catch(() => {});
 
     const { data, error } = await admin
       .from(TABLES.SENDER_PRIORITIES)

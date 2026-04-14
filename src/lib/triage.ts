@@ -524,6 +524,7 @@ export async function scanSentMail(
   // Assign tiers based on reply count thresholds (not percentile position)
 
   // Load existing sender data to accumulate counts across accounts
+  // Also track manually-tiered senders so we don't overwrite user's choices
   const validEntries = entries.filter(([email]) => !isGibberishAddress(email) && !aliasedEmails.has(email.toLowerCase()));
   const validEmails = validEntries.map(([email]) => email);
   const existingMap: Record<string, { reply_count: number; accounts_seen: string[] }> = {};
@@ -545,35 +546,52 @@ export async function scanSentMail(
     }
   }
 
+  // Load manually-tiered senders from action_history — these must not be overwritten
+  const { data: manualTierActions } = await admin
+    .from(TABLES.ACTION_HISTORY)
+    .select('account_email')
+    .eq('user_id', userId)
+    .eq('action', 'manualTier')
+    .eq('undone', false);
+  const manuallyTiered = new Set<string>();
+  if (manualTierActions) {
+    for (const a of manualTierActions) {
+      if (a.account_email) manuallyTiered.add(a.account_email.toLowerCase());
+    }
+  }
+
   // Upsert sender priorities — accumulate counts across accounts
-  const upserts = validEntries.map(([email, data]) => {
-    const existing = existingMap[email.toLowerCase()];
-    const alreadyScannedThisAccount = existing?.accounts_seen?.includes(accountEmail);
+  // Skip tier changes for manually-tiered senders (user's choice takes precedence)
+  const upserts = validEntries
+    .filter(([email]) => !manuallyTiered.has(email.toLowerCase()))
+    .map(([email, data]) => {
+      const existing = existingMap[email.toLowerCase()];
+      const alreadyScannedThisAccount = existing?.accounts_seen?.includes(accountEmail);
 
-    // If this account was already scanned, replace its contribution; otherwise add to existing
-    const totalCount = alreadyScannedThisAccount
-      ? data.count + Math.max(0, (existing?.reply_count || 0) - data.count) // approximate: keep the higher
-      : data.count + (existing?.reply_count || 0);
+      // If this account was already scanned, replace its contribution; otherwise add to existing
+      const totalCount = alreadyScannedThisAccount
+        ? data.count + Math.max(0, (existing?.reply_count || 0) - data.count) // approximate: keep the higher
+        : data.count + (existing?.reply_count || 0);
 
-    let tier: SenderTier = 'D';
-    if (totalCount >= mins.A) tier = 'A';
-    else if (totalCount >= mins.B) tier = 'B';
-    else if (totalCount >= mins.C) tier = 'C';
-    else if (totalCount >= mins.D) tier = 'D';
+      let tier: SenderTier = 'D';
+      if (totalCount >= mins.A) tier = 'A';
+      else if (totalCount >= mins.B) tier = 'B';
+      else if (totalCount >= mins.C) tier = 'C';
+      else if (totalCount >= mins.D) tier = 'D';
 
-    const combinedAccounts = [...new Set([...(existing?.accounts_seen || []), accountEmail])];
+      const combinedAccounts = [...new Set([...(existing?.accounts_seen || []), accountEmail])];
 
-    const item = {
-      user_id: userId,
-      sender_email: email,
-      display_name: data.name,
-      reply_count: totalCount,
-      last_reply: data.lastDate ? new Date(data.lastDate).toISOString().split('T')[0] : null,
-      tier,
-      accounts_seen: combinedAccounts,
-    };
-    return encryptFields(item, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
-  });
+      const item = {
+        user_id: userId,
+        sender_email: email,
+        display_name: data.name,
+        reply_count: totalCount,
+        last_reply: data.lastDate ? new Date(data.lastDate).toISOString().split('T')[0] : null,
+        tier,
+        accounts_seen: combinedAccounts,
+      };
+      return encryptFields(item, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
+    });
 
   if (upserts.length > 0) {
     for (let i = 0; i < upserts.length; i += 50) {
