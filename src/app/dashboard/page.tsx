@@ -1619,11 +1619,20 @@ export default function Dashboard() {
       for (const acct of accounts) {
         if (cancelled) break;
         try {
-          await apiPost('sync-queue', { account_email: acct.email });
-          setSyncProgress(prev => ({
-            ...prev,
-            [acct.email]: prev[acct.email] || { cached: 0, total: 0, done: false, speed: 0, eta: 'Syncing...' },
-          }));
+          const postRes = await apiPost('sync-queue', { account_email: acct.email });
+          const job = postRes.data;
+          if (job?.status === 'done' && (job.total_inbox || 0) > 0) {
+            // Already synced — show completed progress immediately
+            setSyncProgress(prev => ({
+              ...prev,
+              [acct.email]: { cached: job.messages_cached || 0, total: job.total_inbox || 0, done: true, speed: 0, eta: 'Synced' },
+            }));
+          } else {
+            setSyncProgress(prev => ({
+              ...prev,
+              [acct.email]: prev[acct.email] || { cached: 0, total: 0, done: false, speed: 0, eta: 'Syncing...' },
+            }));
+          }
         } catch {}
       }
 
