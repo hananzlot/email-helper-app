@@ -6733,6 +6733,12 @@ function UnsubscribesTab() {
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="rounded-xl border p-4" style={{ background: '#f8fafc', borderColor: 'var(--border)' }}>
+        <p className="text-xs" style={{ color: 'var(--muted)' }}>
+          Unsubscribe requests are processed in the background at a pace allowed by Gmail quotas. It may take from 30 minutes to 2 hours to complete all requests. You do not need to keep this page open — processing continues automatically.
+        </p>
+      </div>
+
       {pending.length > 0 && (
         <div className="rounded-xl border p-4" style={{ background: '#eef2ff', borderColor: 'var(--accent)' }}>
           <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--accent)' }}>
