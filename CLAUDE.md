@@ -1,5 +1,9 @@
 # Email Helper App — Development Guide
 
+## HIGHEST PRIORITY — READ FIRST
+**NEVER GUESS. ALWAYS DEEP-ANALYZE BEFORE CONCLUDING.**
+Before proposing a fix, trace the full data flow end-to-end. Read every file in the chain. Verify assumptions by reading the actual code — do not assume behavior based on function names or comments. If a bug report says "X doesn't work," investigate *why* by following the data from source to UI before writing a single line of code.
+
 ## Project Location
 - **Local path**: `~/Documents/email-helper-app`
 - **GitHub**: `github.com/hananzlot/email-helper-app`
