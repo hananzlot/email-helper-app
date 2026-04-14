@@ -1731,6 +1731,48 @@ export default function Dashboard() {
     return () => { cancelled = true; clearTimeout(timer); syncRunningRef.current = false; };
   }, [accounts.length]);
 
+  // Background unsubscribe queue processor — polls every 10s while page is open
+  const unsubRunningRef = React.useRef(false);
+
+  useEffect(() => {
+    if (!account && accounts.length === 0) return;
+
+    async function processUnsubQueue() {
+      if (unsubRunningRef.current) return;
+      unsubRunningRef.current = true;
+
+      try {
+        // Check if there are pending items
+        const countRes = await apiGet('unsubscribe?pending=true');
+        const pending = countRes.data?.pendingCount || 0;
+        if (pending === 0) { unsubRunningRef.current = false; return; }
+
+        // Process all pending, one at a time with pacing
+        let consecutiveIdles = 0;
+        while (consecutiveIdles < 3) {
+          const res = await fetch('/api/emailHelperV2/unsubscribe', { method: 'PUT' }).then(r => r.json());
+          if (!res.success || res.data?.idle) { consecutiveIdles++; break; }
+          consecutiveIdles = 0;
+
+          if (res.data?.status === 'quota_retry') {
+            await new Promise(r => setTimeout(r, 60_000));
+            continue;
+          }
+
+          // 5s between unsubscribes to stay under quota
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      } catch {}
+      unsubRunningRef.current = false;
+    }
+
+    // Poll every 15 seconds
+    const interval = setInterval(processUnsubQueue, 15_000);
+    // Also run immediately on mount
+    processUnsubQueue();
+    return () => clearInterval(interval);
+  }, [account, accounts.length]);
+
   function showToast(title: string, subtitle?: string, undoAction?: () => void) {
     const isSuccess = title.startsWith('\u2714');
     const duration = undoAction ? 3500 : isSuccess ? 6000 : 3000;
@@ -4830,7 +4872,7 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
               setSelectedGroups(new Set()); setSelectedMessages(new Set());
               showToast(
                 `${queued} unsubscribe${queued !== 1 ? 's' : ''} queued`,
-                'Processing in background — no action needed'
+                'Processing in background'
               );
             }}
               className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: '#8b5cf6' }}>
