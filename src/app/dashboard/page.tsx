@@ -1200,8 +1200,7 @@ export default function Dashboard() {
     setTabCounts({});
     showToast('Unified view', 'Showing all accounts');
     loadUnifiedInbox(true);
-    // Delay tab count reload to let unified state propagate
-    setTimeout(() => loadAllTabCounts(), 1000);
+    // Tab counts will reload via the useEffect that watches unified/accounts
   }
 
   // Save messages to Supabase cache in background (fire-and-forget)
@@ -1540,30 +1539,6 @@ export default function Dashboard() {
 
   // Track whether we've done the first load (to avoid flashing spinner on re-loads)
   const hasLoadedRef = React.useRef(false);
-
-  // Fetch Easy-Clear + All Mail counts immediately (don't wait for debounced loadAllTabCounts)
-  useEffect(() => {
-    if (!account) return;
-    // Easy-Clear count
-    const ecUrl = unified ? '/api/emailHelperV2/easy-clear?limit=1&groupBy=domain' : withAccount('/api/emailHelperV2/easy-clear?limit=1&groupBy=domain');
-    fetch(ecUrl).then(r => r.json()).then(res => {
-      if (res.success) reportTabCount('cleanup', res.data.totalMessages || 0);
-    }).catch(() => {});
-    // All Mail count — fetch per account without touching _currentAccount
-    if (unified && accounts.length > 1) {
-      Promise.all(accounts.map(acct =>
-        fetch(`/api/emailHelperV2/gmail?action=labelInfo&labelId=INBOX&account=${encodeURIComponent(acct.email)}`, {
-          headers: { 'Cookie': document.cookie },
-        }).then(r => r.json()).then(r => r.success ? (r.data.messagesTotal || 0) : 0).catch(() => 0)
-      )).then(counts => {
-        reportTabCount('inbox', counts.reduce((s: number, c: number) => s + c, 0));
-      });
-    } else {
-      fetch(`/api/emailHelperV2/gmail?action=labelInfo&labelId=INBOX&account=${encodeURIComponent(_currentAccount)}`).then(r => r.json()).then(r => {
-        if (r.success) reportTabCount('inbox', r.data.messagesTotal || 0);
-      }).catch(() => {});
-    }
-  }, [account, unified, accounts.length]);
 
   // Initial load + triage on first load
   // Re-runs when accounts populate so unified view loads all accounts
@@ -2233,7 +2208,7 @@ export default function Dashboard() {
     }
   }, [messages, reportTabCount, unified, accounts]);
 
-  // Load tab counts on initial page load and whenever messages stabilize
+  // Refresh tab counts whenever messages stabilize (after pagination batches)
   // Debounce to avoid flickering during pagination (messages change every 200 batch)
   const tabCountTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
@@ -2241,9 +2216,16 @@ export default function Dashboard() {
     if (tabCountTimerRef.current) clearTimeout(tabCountTimerRef.current);
     tabCountTimerRef.current = setTimeout(() => {
       loadAllTabCounts();
-    }, 1500); // Wait 1.5s after last message batch before recalculating
+    }, 1500);
     return () => { if (tabCountTimerRef.current) clearTimeout(tabCountTimerRef.current); };
   }, [account, messages.length, loadAllTabCounts]);
+
+  // Load ALL tab counts immediately on mount and when unified/accounts change
+  // (don't wait for messages to load — counts come from server, not client messages)
+  useEffect(() => {
+    if (!account) return;
+    loadAllTabCounts();
+  }, [account, unified, accounts.length, loadAllTabCounts]);
 
   // Run background cron on first load to populate follow-up cache & sender priorities
   useEffect(() => {
@@ -2556,24 +2538,35 @@ export default function Dashboard() {
         {/* Global Search Bar — width aligned to tab bar */}
         <div className="relative mb-2" style={{ maxWidth: tabBarWidth ? tabBarWidth : undefined }}>
           <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#94a3b8' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => { handleSearchInput(e.target.value); if (!searchOpen) setSearchOpen(true); }}
-                onFocus={() => { if (searchQuery) setSearchOpen(true); }}
-                placeholder="Search emails by sender or subject..."
-                className="w-full pl-9 pr-8 py-2 text-sm rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-opacity-50"
-                style={{ borderColor: searchOpen ? 'var(--accent)' : 'var(--border)', background: 'white', ...(searchOpen ? { ringColor: 'var(--accent)' } : {}) }}
-              />
+            <div className="relative flex-1 flex">
+              <a href="https://github.com/hananzlot/email-helper-app/issues/new/choose" target="_blank" rel="noopener noreferrer"
+                title="Send feedback, request a feature, or report a bug"
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-r-0 rounded-l-lg transition-colors hover:bg-gray-50 flex-shrink-0"
+                style={{ borderColor: searchOpen ? 'var(--accent)' : 'var(--border)', background: 'white', color: '#64748b' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                Feedback
+              </a>
+              <div className="relative flex-1">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#94a3b8' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => { handleSearchInput(e.target.value); if (!searchOpen) setSearchOpen(true); }}
+                  onFocus={() => { if (searchQuery) setSearchOpen(true); }}
+                  placeholder="Search emails by sender or subject..."
+                  className="w-full pl-9 pr-8 py-2 text-sm rounded-r-lg border transition-all focus:outline-none focus:ring-2 focus:ring-opacity-50"
+                  style={{ borderColor: searchOpen ? 'var(--accent)' : 'var(--border)', background: 'white', ...(searchOpen ? { ringColor: 'var(--accent)' } : {}) }}
+                />
               {searchQuery && (
                 <button onClick={closeSearch}
                   className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full flex items-center justify-center text-xs hover:bg-gray-100"
                   style={{ color: 'var(--muted)' }}>✕</button>
               )}
+              </div>
             </div>
             {searchLoading && (
               <div className="w-5 h-5 border-2 border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
