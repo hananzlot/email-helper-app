@@ -268,9 +268,22 @@ export async function PUT(request: NextRequest) {
       nextPageToken: !!nextPageToken,
     });
   } catch (err) {
+    const errMsg = String(err);
+    const isQuotaError = errMsg.toLowerCase().includes('quota');
+
+    if (isQuotaError) {
+      // Quota errors are transient — reset to pending with a future requested_at so it retries after other accounts
+      await admin.from(SYNC_QUEUE).update({
+        status: 'pending',
+        error_message: errMsg,
+        requested_at: new Date(Date.now() + 60_000).toISOString(), // 1 min cooldown
+      }).eq('id', job.id);
+      return apiSuccess({ jobId: job.id, status: 'quota_retry', error: errMsg });
+    }
+
     await admin.from(SYNC_QUEUE).update({
-      status: 'error', error_message: String(err), completed_at: new Date().toISOString(),
+      status: 'error', error_message: errMsg, completed_at: new Date().toISOString(),
     }).eq('id', job.id);
-    return apiSuccess({ jobId: job.id, status: 'error', error: String(err) });
+    return apiSuccess({ jobId: job.id, status: 'error', error: errMsg });
   }
 }

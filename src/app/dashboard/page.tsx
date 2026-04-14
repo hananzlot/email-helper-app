@@ -1638,6 +1638,12 @@ export default function Dashboard() {
             continue;
           }
 
+          // Quota retry — server reset the job to pending with a cooldown, just wait
+          if (res.data?.status === 'quota_retry') {
+            await new Promise(r => setTimeout(r, 10_000)); // Wait 10s before next call
+            continue;
+          }
+
           // Handle errors with backoff — pause 2 min after 10 consecutive, then resume
           if (res.data?.status === 'error') {
             consecutiveErrors++;
