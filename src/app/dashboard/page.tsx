@@ -5657,17 +5657,21 @@ interface DuplicateCluster {
   reason: string;
 }
 
-function findSenderDuplicates(senders: any[]): DuplicateCluster[] {
+function findSenderDuplicates(senders: any[], mergedEmails?: Set<string>): DuplicateCluster[] {
   // Build alias set — emails that are already merged into another sender
   const aliasedEmails = new Set<string>();
   for (const s of senders) {
     for (const alias of (s.aliases || [])) aliasedEmails.add(alias.toLowerCase());
   }
+  // Also include emails from merge history (persisted across accounts)
+  if (mergedEmails) {
+    for (const email of mergedEmails) aliasedEmails.add(email);
+  }
 
   // Group by normalized full name (first + last)
   const nameGroups: Record<string, any[]> = {};
   for (const s of senders) {
-    // Skip senders that are already aliases of another sender
+    // Skip senders that are already aliases or were previously merged
     if (aliasedEmails.has(s.sender_email.toLowerCase())) continue;
     const name = (s.display_name || '').toLowerCase().replace(/[^a-z\s]/g, '').trim();
     if (!name || name.length < 3) continue;
@@ -5752,17 +5756,21 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   const [senderEmails, setSenderEmails] = useState<any[]>([]);
   const [senderEmailsLoading, setSenderEmailsLoading] = useState(false);
   const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
-  // Load dismissed duplicate suggestions from Supabase on mount
+  // Load dismissed duplicates + merge history from Supabase on mount
+  const [mergedEmails, setMergedEmails] = useState<Set<string>>(new Set());
   useEffect(() => {
     fetch('/api/emailHelperV2/action-history').then(r => r.json()).then(json => {
       if (json.data) {
         const dismissed = new Set<string>();
+        const merged = new Set<string>();
         for (const entry of json.data) {
           if (entry.action === 'dismissDuplicate' && entry.subjects?.[0]) dismissed.add(entry.subjects[0]);
+          if (entry.action === 'mergeSenders' && entry.subjects?.[0]) merged.add(entry.subjects[0].toLowerCase());
         }
         // Also load any legacy localStorage dismissals
         try { const ls = JSON.parse(localStorage.getItem('email_helper_dismissed_dupes') || '[]'); ls.forEach((k: string) => dismissed.add(k)); } catch {}
         setDismissedSuggestions(dismissed);
+        setMergedEmails(merged);
       }
     }).catch(() => {});
   }, []);
@@ -6012,7 +6020,7 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
 
         {/* Sender linking suggestions — clustered by person */}
         {(() => {
-          const clusters = findSenderDuplicates(senders).filter(c => {
+          const clusters = findSenderDuplicates(senders, mergedEmails).filter(c => {
             const key = [c.primary.sender_email, ...c.others.map((o: any) => o.sender_email)].sort().join('|');
             return !dismissedSuggestions.has(key);
           });

@@ -494,41 +494,83 @@ export async function scanSentMail(
     return false;
   };
 
-  // Load existing aliases — emails already merged into another sender should not be re-created
+  // Load merged/aliased emails — these should not be re-created as separate senders
+  const aliasedEmails = new Set<string>();
+
+  // From sender_priorities aliases field
   const { data: existingSenders } = await admin
     .from(TABLES.SENDER_PRIORITIES)
     .select('aliases')
     .eq('user_id', userId);
-  const aliasedEmails = new Set<string>();
   if (existingSenders) {
     for (const s of existingSenders) {
       for (const alias of (s.aliases || [])) aliasedEmails.add(alias.toLowerCase());
     }
   }
 
+  // From merge history in action_history (survives across account syncs)
+  const { data: mergeHistory } = await admin
+    .from(TABLES.ACTION_HISTORY)
+    .select('subjects')
+    .eq('user_id', userId)
+    .eq('action', 'mergeSenders')
+    .eq('undone', false);
+  if (mergeHistory) {
+    for (const m of mergeHistory) {
+      for (const email of (m.subjects || [])) aliasedEmails.add(email.toLowerCase());
+    }
+  }
+
   // Assign tiers based on reply count thresholds (not percentile position)
 
-  // Upsert sender priorities — skip gibberish and already-aliased addresses
-  const upserts = entries.filter(([email]) => !isGibberishAddress(email) && !aliasedEmails.has(email.toLowerCase())).map(([email, data]) => {
-    let tier: SenderTier = 'D';
-    if (data.count >= mins.A) {
-      tier = 'A';
-    } else if (data.count >= mins.B) {
-      tier = 'B';
-    } else if (data.count >= mins.C) {
-      tier = 'C';
-    } else if (data.count >= mins.D) {
-      tier = 'D';
+  // Load existing sender data to accumulate counts across accounts
+  const validEntries = entries.filter(([email]) => !isGibberishAddress(email) && !aliasedEmails.has(email.toLowerCase()));
+  const validEmails = validEntries.map(([email]) => email);
+  const existingMap: Record<string, { reply_count: number; accounts_seen: string[] }> = {};
+  // Fetch in batches of 50
+  for (let i = 0; i < validEmails.length; i += 50) {
+    const batch = validEmails.slice(i, i + 50);
+    const { data: existingBatch } = await admin
+      .from(TABLES.SENDER_PRIORITIES)
+      .select('sender_email, reply_count, accounts_seen')
+      .eq('user_id', userId)
+      .in('sender_email', batch);
+    if (existingBatch) {
+      for (const s of existingBatch) {
+        existingMap[s.sender_email.toLowerCase()] = {
+          reply_count: s.reply_count || 0,
+          accounts_seen: s.accounts_seen || [],
+        };
+      }
     }
+  }
+
+  // Upsert sender priorities — accumulate counts across accounts
+  const upserts = validEntries.map(([email, data]) => {
+    const existing = existingMap[email.toLowerCase()];
+    const alreadyScannedThisAccount = existing?.accounts_seen?.includes(accountEmail);
+
+    // If this account was already scanned, replace its contribution; otherwise add to existing
+    const totalCount = alreadyScannedThisAccount
+      ? data.count + Math.max(0, (existing?.reply_count || 0) - data.count) // approximate: keep the higher
+      : data.count + (existing?.reply_count || 0);
+
+    let tier: SenderTier = 'D';
+    if (totalCount >= mins.A) tier = 'A';
+    else if (totalCount >= mins.B) tier = 'B';
+    else if (totalCount >= mins.C) tier = 'C';
+    else if (totalCount >= mins.D) tier = 'D';
+
+    const combinedAccounts = [...new Set([...(existing?.accounts_seen || []), accountEmail])];
 
     const item = {
       user_id: userId,
       sender_email: email,
       display_name: data.name,
-      reply_count: data.count,
+      reply_count: totalCount,
       last_reply: data.lastDate ? new Date(data.lastDate).toISOString().split('T')[0] : null,
       tier,
-      accounts_seen: [accountEmail],
+      accounts_seen: combinedAccounts,
     };
     return encryptFields(item, [...ENCRYPTED_FIELDS.SENDER_PRIORITIES], userId);
   });

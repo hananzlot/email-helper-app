@@ -111,6 +111,12 @@ export async function PUT(request: NextRequest) {
           .update({ aliases, updated_at: new Date().toISOString() })
           .eq('user_id', userId)
           .eq('sender_email', primary_email);
+        // Persist merge record
+        await admin.from(TABLES.ACTION_HISTORY).insert({
+          user_id: userId, action: 'mergeSenders', action_label: 'Merged senders',
+          message_ids: [], account_email: primary_email, subjects: [secondary_email],
+          undo_action: null, undone: false,
+        }).catch(() => {});
         return apiSuccess({ merged: true, primary: primary_email, removed: secondary_email, combined_count: primaryRes.data.reply_count || 0 });
       }
 
@@ -151,6 +157,18 @@ export async function PUT(request: NextRequest) {
         .delete()
         .eq('user_id', userId)
         .eq('sender_email', secondary.sender_email);
+
+      // Persist merge record so it survives across account syncs and re-scans
+      await admin.from(TABLES.ACTION_HISTORY).insert({
+        user_id: userId,
+        action: 'mergeSenders',
+        action_label: 'Merged senders',
+        message_ids: [],
+        account_email: primary.sender_email,
+        subjects: [secondary.sender_email], // secondary email stored here for lookup
+        undo_action: null,
+        undone: false,
+      }).catch(() => {}); // fire-and-forget
 
       return apiSuccess({ merged: true, primary: primary.sender_email, removed: secondary.sender_email, combined_count: combinedCount });
     }
