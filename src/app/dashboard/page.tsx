@@ -2497,22 +2497,24 @@ export default function Dashboard() {
           <div className="flex flex-wrap justify-end gap-2 pointer-events-none" style={{ marginTop: -2, marginBottom: -48, position: 'relative', zIndex: 20 }}>
             {Object.entries(syncProgress).map(([email, s]) => {
               const pct = s.total > 0 ? Math.min(100, Math.round((Math.min(s.cached, s.total) / s.total) * 100)) : 0;
-              const isDone = s.done || pct >= 100;
+              const isComplete = pct >= 100;
+              const isSyncing = !s.done && !isComplete;
               return (
-                <div key={email} className="px-3 py-2 rounded-lg border shadow-sm pointer-events-auto" style={{ background: isDone ? '#f0fdf4' : '#fefce8', borderColor: isDone ? '#bbf7d0' : '#fde68a', width: 240 }}>
+                <div key={email} className="px-3 py-2 rounded-lg border shadow-sm pointer-events-auto" style={{ background: isComplete ? '#f0fdf4' : '#fefce8', borderColor: isComplete ? '#bbf7d0' : '#fde68a', width: 240 }}>
                   <div className="flex items-center gap-1.5 mb-1.5">
-                    {!isDone && <div className="w-2.5 h-2.5 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
-                    {isDone && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
-                    <span className="text-xs font-semibold truncate" style={{ color: isDone ? '#166534' : '#92400e' }}>{email}</span>
+                    {isSyncing && <div className="w-2.5 h-2.5 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
+                    {isComplete && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
+                    {!isSyncing && !isComplete && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>}
+                    <span className="text-xs font-semibold truncate" style={{ color: isComplete ? '#166534' : '#92400e' }}>{email}</span>
                   </div>
-                  <div className="w-full h-2 rounded-full overflow-hidden mb-1" style={{ background: isDone ? '#dcfce7' : '#fef3c7' }}>
-                    <div className="h-full rounded-full transition-all duration-1000" style={{ background: isDone ? '#22c55e' : '#f59e0b', width: `${pct}%` }} />
+                  <div className="w-full h-2 rounded-full overflow-hidden mb-1" style={{ background: isComplete ? '#dcfce7' : '#fef3c7' }}>
+                    <div className="h-full rounded-full transition-all duration-1000" style={{ background: isComplete ? '#22c55e' : '#f59e0b', width: `${pct}%` }} />
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold" style={{ color: isDone ? '#16a34a' : '#92400e' }}>
+                    <span className="text-[11px] font-semibold" style={{ color: isComplete ? '#16a34a' : '#92400e' }}>
                       {Math.min(s.cached, s.total).toLocaleString()} / {s.total.toLocaleString()}
                     </span>
-                    <span className="text-[11px] font-bold" style={{ color: isDone ? '#16a34a' : '#b45309' }}>
+                    <span className="text-[11px] font-bold" style={{ color: isComplete ? '#16a34a' : '#b45309' }}>
                       {pct}%
                     </span>
                   </div>

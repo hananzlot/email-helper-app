@@ -204,7 +204,7 @@ export async function PUT(request: NextRequest) {
 
       await admin.from(SYNC_QUEUE).update({
         status: 'done', completed_at: new Date().toISOString(),
-        messages_cached: Math.min(count || 0, realTotal),
+        messages_cached: realTotal, // All fetchable pages exhausted — gap is unfetchable
         total_inbox: realTotal,
       }).eq('id', job.id);
 
@@ -290,8 +290,12 @@ export async function PUT(request: NextRequest) {
     }).eq('id', job.id);
 
     if (!nextPageToken) {
+      // All pages fetched — any gap between cached and total is unfetchable
+      // (archived/trashed messages still in Gmail's count but not in inbox query)
+      // Set messages_cached = total_inbox so progress bar shows 100%
       await admin.from(SYNC_QUEUE).update({
         status: 'done', completed_at: new Date().toISOString(),
+        messages_cached: inboxTotal || (actualCached || 0),
       }).eq('id', job.id);
     } else {
       // Reset to pending with updated requested_at so this job goes to the back of the queue (round-robin)
