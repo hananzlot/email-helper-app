@@ -53,16 +53,20 @@ export async function POST(request: NextRequest) {
 
   if (existing) return apiSuccess(existing);
 
-  // Check if Drive scope is authorized
-  try {
-    const token = await getValidGmailToken(userId, account_email);
-    const drive = getDriveClient(token);
-    const hasAccess = await testDriveAccess(drive);
-    if (!hasAccess) {
+  // Check if Drive scope is authorized (skip if client says we just came from OAuth)
+  const skipDriveCheck = body.skipDriveCheck === true;
+  if (!skipDriveCheck) {
+    try {
+      const token = await getValidGmailToken(userId, account_email);
+      const drive = getDriveClient(token);
+      const hasAccess = await testDriveAccess(drive);
+      if (!hasAccess) {
+        return apiSuccess({ needsDriveAuth: true });
+      }
+    } catch (err) {
+      console.error('Drive access check failed:', err);
       return apiSuccess({ needsDriveAuth: true });
     }
-  } catch {
-    return apiSuccess({ needsDriveAuth: true });
   }
 
   // Determine backup type: incremental if we have a previous backup

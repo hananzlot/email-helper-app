@@ -6671,7 +6671,7 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
     if (pending) {
       sessionStorage.removeItem('pending_backup');
       // Small delay to let component fully mount
-      setTimeout(() => startBackup(pending), 500);
+      setTimeout(() => startBackup(pending, true), 500);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -6682,17 +6682,20 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
     window.location.href = '/api/emailHelperV2/auth/login?state=add_account';
   }
 
-  async function startBackup(email: string) {
+  async function startBackup(email: string, fromOAuthRedirect = false) {
     if (backupRunningRef.current.has(email)) return;
 
-    // Start backup job
-    const res = await apiPost('backup', { account_email: email });
-    if (!res.success) { showToast('Error', res.error); return; }
+    // Start backup job — skip Drive check if we just came from OAuth
+    const res = await apiPost('backup', { account_email: email, skipDriveCheck: fromOAuthRedirect });
+    if (!res.success) { showToast('Backup error', res.error || 'Failed to start backup'); return; }
 
     // Need Drive auth?
     if (res.data?.needsDriveAuth) {
+      if (fromOAuthRedirect) {
+        showToast('Drive access failed', 'Please try Refresh Connection on this account, then try backup again.');
+        return;
+      }
       showToast('Connecting to Drive', 'Redirecting to Google...');
-      // Store pending backup BEFORE redirect — survives the OAuth round-trip
       sessionStorage.setItem('pending_backup', email);
       window.location.href = `/api/emailHelperV2/auth/login?state=drive_backup&hint=${encodeURIComponent(email)}`;
       return;
