@@ -2899,7 +2899,17 @@ export default function Dashboard() {
                     key={`${splitPreviewId}-${splitPreviewAccount}`}
                     messageId={splitPreviewId}
                     accountEmail={splitPreviewAccount}
-                    onAction={handleAction}
+                    onAction={(action, ids, label, acct) => {
+                      handleAction(action, ids, label, acct);
+                      // If on cleanup tab, remove actioned message from the list and advance preview
+                      if (activeTab === 'cleanup' && ['archive', 'trash', 'delete', 'markRead'].includes(action)) {
+                        const removedSet = new Set(ids);
+                        // Dispatch removal to CleanupTab via DOM event (lightweight cross-component sync)
+                        window.dispatchEvent(new CustomEvent('cleanup-remove', { detail: { ids } }));
+                        // Advance to next preview
+                        setTimeout(() => advancePreview(ids[0]), 300);
+                      }
+                    }}
                     showToast={showToast}
                   />
                 ) : (
@@ -4628,6 +4638,22 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
   // Server-side loaded groups and messages
   const [serverGroups, setServerGroups] = useState<{ key: string; name: string; email: string; count: number; messages: GmailMessage[] }[]>([]);
   const [totalMessages, setTotalMessages] = useState(0);
+
+  // Listen for message removals from InlinePreview actions
+  useEffect(() => {
+    function handleRemove(e: Event) {
+      const ids = (e as CustomEvent).detail?.ids as string[];
+      if (!ids?.length) return;
+      const removedSet = new Set(ids);
+      setServerGroups(prev => prev.map(g => ({
+        ...g,
+        count: g.messages.filter(m => !removedSet.has(m.id)).length,
+        messages: g.messages.filter(m => !removedSet.has(m.id)),
+      })).filter(g => g.count > 0));
+    }
+    window.addEventListener('cleanup-remove', handleRemove);
+    return () => window.removeEventListener('cleanup-remove', handleRemove);
+  }, []);
 
   // Load data from server-side API (all filtering/grouping/dedup done in SQL)
   async function loadData() {
