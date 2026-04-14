@@ -2295,7 +2295,7 @@ export default function Dashboard() {
     { id: 'cleanup', label: 'Easy-Clear' },
     { id: 'sent', label: 'Sent' },
     { id: 'inbox', label: 'All Mail' },
-    { id: 'unsubscribes', label: 'Unsubscribe' },
+    { id: 'unsubscribes', label: 'Unsubscribe Queue' },
     ...(searchSelectionActive.length > 0 ? [{ id: 'search-reviews' as Tab, label: `Search Reviews (${searchSelectionActive.length})` }] : []),
   ];
 
