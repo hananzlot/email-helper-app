@@ -105,10 +105,10 @@ export async function GET(request: NextRequest) {
       console.error('Cache cleanup failed:', e);
     }
 
-    // Process pending unsubscribe queue (max 2 minutes, 3s between each)
+    // Process pending unsubscribe queue (max 8 minutes, 5s between each)
     let unsubProcessed = 0;
     const unsubStart = Date.now();
-    const UNSUB_BUDGET = 2 * 60 * 1000; // 2 minutes
+    const UNSUB_BUDGET = 8 * 60 * 1000; // 8 minutes — enough for ~90 unsubscribes
     try {
       while (Date.now() - unsubStart < UNSUB_BUDGET) {
         const { data: pending } = await admin
@@ -136,8 +136,8 @@ export async function GET(request: NextRequest) {
         }
 
         unsubProcessed++;
-        // Pace: 3s between unsubscribes to stay under quota
-        await new Promise(r => setTimeout(r, 3000));
+        // Pace: 5s between unsubscribes (~12/min = 24-36 Gmail calls/min, safe cushion)
+        await new Promise(r => setTimeout(r, 5000));
       }
     } catch (e) {
       console.error('Unsubscribe queue processing failed:', e);
