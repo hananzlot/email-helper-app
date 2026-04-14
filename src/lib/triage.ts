@@ -486,8 +486,8 @@ export async function scanSentMail(
     if (/[0-9a-f]{8,}-[0-9a-f]{4,}/i.test(local)) return true;
     // Known transactional/noreply patterns in local part
     if (/noreply|no-reply|donotreply|do-not-reply|mailer-daemon/i.test(local)) return true;
-    // Bounce/transactional domains
-    if (/^bounce\./i.test(domain)) return true;
+    // Bounce/transactional domains (catches bounce.link.com, bounces.google.com, etc.)
+    if (/bounce/i.test(domain)) return true;
     if (/amazonses\.com|sendgrid\.net|mailgun\.org|mandrillapp\.com|postmarkapp\.com|constantcontact\.com|mailchimp\.com|cmail\d+\.com|mcsv\.net|mcdlv\.net/i.test(domain)) return true;
     // Local part starting with "bounce" or containing "bounce-"
     if (/^bounce/i.test(local)) return true;

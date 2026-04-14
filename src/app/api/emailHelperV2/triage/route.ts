@@ -29,6 +29,8 @@ export async function POST(request: NextRequest) {
       const result = await runTriage(gmail, userId, account);
       // Also refresh follow-up cache in the background (don't block triage response)
       computeFollowUps(gmail, userId, account).catch(err => console.error('Follow-up cache refresh failed:', err));
+      // Clean gibberish senders in background (don't block triage response)
+      cleanGibberishSenders(userId).catch(() => {});
       return apiSuccess(result);
     }
 
@@ -38,33 +40,7 @@ export async function POST(request: NextRequest) {
 
       const admin = createSupabaseAdmin();
 
-      // Clean up gibberish senders from DB (local part > 30 chars, UUIDs, bounce, noreply, etc.)
-      const { data: allSenders } = await admin
-        .from(TABLES.SENDER_PRIORITIES)
-        .select('sender_email')
-        .eq('user_id', userId);
-      if (allSenders) {
-        const gibberishEmails = allSenders
-          .map((s: { sender_email: string }) => s.sender_email)
-          .filter((email: string) => {
-            const local = email.split('@')[0];
-            const domain = email.split('@')[1] || '';
-            if (local.length > 30) return true;
-            if (/[0-9a-f]{8,}-[0-9a-f]{4,}/i.test(local)) return true;
-            if (/noreply|no-reply|donotreply|do-not-reply|mailer-daemon/i.test(local)) return true;
-            if (/^bounce/i.test(local) || /^bounce\./i.test(domain)) return true;
-            if (/amazonses\.com|sendgrid\.net|mailgun\.org|mandrillapp\.com|postmarkapp\.com|constantcontact\.com|mailchimp\.com/i.test(domain)) return true;
-            return false;
-          });
-        for (let i = 0; i < gibberishEmails.length; i += 50) {
-          await admin.from(TABLES.SENDER_PRIORITIES).delete()
-            .eq('user_id', userId)
-            .in('sender_email', gibberishEmails.slice(i, i + 50));
-        }
-        if (gibberishEmails.length > 0) {
-          console.log(`[scan_sent] Cleaned up ${gibberishEmails.length} gibberish senders for user ${userId}`);
-        }
-      }
+      await cleanGibberishSenders(userId);
 
       // Clean up queue: remove active entries for senders now below signal tier (D or untiered)
       const { data: dTierSenders } = await admin
@@ -125,6 +101,42 @@ export async function GET(request: NextRequest) {
   }
 
   return apiSuccess(data);
+}
+
+/**
+ * Clean up gibberish sender entries from sender_priorities.
+ * Gibberish = local part >30 chars, UUID patterns, noreply, bounce domains, transactional services.
+ */
+async function cleanGibberishSenders(userId: string) {
+  const admin = createSupabaseAdmin();
+  const { data: allSenders } = await admin
+    .from(TABLES.SENDER_PRIORITIES)
+    .select('sender_email')
+    .eq('user_id', userId);
+  if (!allSenders) return;
+
+  const gibberishEmails = allSenders
+    .map((s: { sender_email: string }) => s.sender_email)
+    .filter((email: string) => {
+      const local = email.split('@')[0];
+      const domain = email.split('@')[1] || '';
+      if (local.length > 30) return true;
+      if (/[0-9a-f]{8,}-[0-9a-f]{4,}/i.test(local)) return true;
+      if (/noreply|no-reply|donotreply|do-not-reply|mailer-daemon/i.test(local)) return true;
+      if (/^bounce/i.test(local)) return true;
+      if (/bounce/i.test(domain)) return true; // catches bounces.google.com, bounce.link.com, etc.
+      if (/amazonses\.com|sendgrid\.net|mailgun\.org|mandrillapp\.com|postmarkapp\.com|constantcontact\.com|mailchimp\.com|cmail\d+\.com|mcsv\.net|mcdlv\.net/i.test(domain)) return true;
+      return false;
+    });
+
+  for (let i = 0; i < gibberishEmails.length; i += 50) {
+    await admin.from(TABLES.SENDER_PRIORITIES).delete()
+      .eq('user_id', userId)
+      .in('sender_email', gibberishEmails.slice(i, i + 50));
+  }
+  if (gibberishEmails.length > 0) {
+    console.log(`[cleanup] Removed ${gibberishEmails.length} gibberish senders for user ${userId}`);
+  }
 }
 
 /**
