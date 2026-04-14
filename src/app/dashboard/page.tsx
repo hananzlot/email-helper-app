@@ -1594,7 +1594,7 @@ export default function Dashboard() {
   const syncRunningRef = React.useRef(false);
 
   useEffect(() => {
-    if (accounts.length === 0 || !account) return;
+    if (accounts.length === 0) return;
     if (syncRunningRef.current) return;
     syncRunningRef.current = true;
 
@@ -1620,13 +1620,20 @@ export default function Dashboard() {
 
       let consecutiveErrors = 0;
 
-      while (!cancelled && consecutiveIdles < 5) {
+      while (!cancelled) {
         try {
           const res = await fetch('/api/emailHelperV2/sync-queue', { method: 'PUT' }).then(r => r.json());
 
           if (!res.success || res.data?.idle) {
+            // Check if all accounts are actually done before giving up
+            const statusCheck = await apiGet('sync-queue');
+            const allDone = statusCheck.success && statusCheck.data?.length > 0 &&
+              statusCheck.data.every((j: { status: string }) => j.status === 'done' || j.status === 'error');
+            if (allDone) break;
+
             consecutiveIdles++;
-            await new Promise(r => setTimeout(r, 5000));
+            if (consecutiveIdles >= 15) break; // Safety cap
+            await new Promise(r => setTimeout(r, 3000));
             continue;
           }
 
@@ -1691,7 +1698,7 @@ export default function Dashboard() {
 
     const timer = setTimeout(runSync, 3000);
     return () => { cancelled = true; clearTimeout(timer); syncRunningRef.current = false; };
-  }, [accounts.length, account]);
+  }, [accounts.length]);
 
   function showToast(title: string, subtitle?: string, undoAction?: () => void) {
     const expiresAt = undoAction ? Date.now() + 3000 : undefined;
@@ -5731,10 +5738,21 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [senderEmails, setSenderEmails] = useState<any[]>([]);
   const [senderEmailsLoading, setSenderEmailsLoading] = useState(false);
-  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('email_helper_dismissed_dupes') || '[]')); }
-    catch { return new Set(); }
-  });
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
+  // Load dismissed duplicate suggestions from Supabase on mount
+  useEffect(() => {
+    fetch('/api/emailHelperV2/action-history').then(r => r.json()).then(json => {
+      if (json.data) {
+        const dismissed = new Set<string>();
+        for (const entry of json.data) {
+          if (entry.action === 'dismissDuplicate' && entry.subjects?.[0]) dismissed.add(entry.subjects[0]);
+        }
+        // Also load any legacy localStorage dismissals
+        try { const ls = JSON.parse(localStorage.getItem('email_helper_dismissed_dupes') || '[]'); ls.forEach((k: string) => dismissed.add(k)); } catch {}
+        setDismissedSuggestions(dismissed);
+      }
+    }).catch(() => {});
+  }, []);
   const [merging, setMerging] = useState<string | null>(null);
   // Manual merge state
   const [showManualMerge, setShowManualMerge] = useState(false);
@@ -6035,7 +6053,14 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
                             className="px-4 py-2 text-xs font-semibold rounded-lg text-white transition-all active:scale-95" style={{ background: isMerging ? 'var(--muted)' : '#16a34a' }}>
                             {isMerging ? 'Merging...' : `Merge ${c.others.length === 1 ? '2' : c.others.length + 1} into 1`}
                           </button>
-                          <button onClick={() => setDismissedSuggestions(prev => { const next = new Set([...prev, clusterKey]); localStorage.setItem('email_helper_dismissed_dupes', JSON.stringify([...next])); return next; })}
+                          <button onClick={() => {
+                              setDismissedSuggestions(prev => { const next = new Set([...prev, clusterKey]); return next; });
+                              // Persist to Supabase so it survives across sessions
+                              fetch('/api/emailHelperV2/action-history', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'dismissDuplicate', label: 'Dismissed duplicate suggestion', messageIds: [], accountEmail: _currentAccount, subjects: [clusterKey] }),
+                              }).catch(() => {});
+                            }}
                             className="px-3 py-2 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
                             Not same
                           </button>
