@@ -42,6 +42,12 @@ function getMaxEmails(): number {
 let _currentAccount = '';
 let _onEmailSent: (() => void) | null = null;
 
+// Global rate-limit circuit breaker: when ANY request gets a 429, all requests
+// pause until the cooldown expires. This prevents the retry storm where dozens
+// of concurrent callers each independently retry and worsen the 429 flood.
+let _rateLimitedUntil = 0;
+const RATE_LIMIT_COOLDOWN_MS = 30_000; // 30s pause after a 429
+
 function setCurrentAccount(acct: string) {
   _currentAccount = acct;
 }
@@ -52,18 +58,41 @@ function withAccount(url: string): string {
   return `${url}${sep}account=${encodeURIComponent(_currentAccount)}`;
 }
 
+/** Wait if we're in a rate-limit cooldown, then return true if caller should proceed */
+async function waitForRateLimit(): Promise<void> {
+  const now = Date.now();
+  if (_rateLimitedUntil > now) {
+    const waitMs = _rateLimitedUntil - now;
+    console.log(`[rate-limit] Pausing ${Math.ceil(waitMs / 1000)}s before next API call`);
+    await new Promise(r => setTimeout(r, waitMs));
+  }
+}
+
+function handleRateLimitResponse(res: Response): boolean {
+  if (res.status === 429) {
+    _rateLimitedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+    console.warn(`[rate-limit] 429 received — pausing all requests for ${RATE_LIMIT_COOLDOWN_MS / 1000}s`);
+    return true;
+  }
+  return false;
+}
+
 async function gmailGet(action: string, params: Record<string, string> = {}) {
+  await waitForRateLimit();
   const searchParams = new URLSearchParams({ action, ...params });
   const res = await fetch(withAccount(`/api/emailHelperV2/gmail?${searchParams}`));
+  handleRateLimitResponse(res);
   return res.json();
 }
 
 async function gmailPost(action: string, data: Record<string, unknown> = {}) {
+  await waitForRateLimit();
   const res = await fetch(withAccount('/api/emailHelperV2/gmail'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...data }),
   });
+  handleRateLimitResponse(res);
   return res.json();
 }
 
@@ -2126,9 +2155,13 @@ export default function Dashboard() {
       // All Mail count — from Gmail labels.get (per-account fetch, no _currentAccount race)
       try {
         if (unified && accounts.length > 1) {
-          const counts = await Promise.all(accounts.map(acct =>
-            fetch(`/api/emailHelperV2/gmail?action=labelInfo&labelId=INBOX&account=${encodeURIComponent(acct.email)}`).then(r => r.json()).then(r => r.success ? (r.data.messagesTotal || 0) : 0).catch(() => 0)
-          ));
+          const counts = await Promise.all(accounts.map(async acct => {
+            await waitForRateLimit();
+            const r = await fetch(`/api/emailHelperV2/gmail?action=labelInfo&labelId=INBOX&account=${encodeURIComponent(acct.email)}`);
+            handleRateLimitResponse(r);
+            const data = await r.json();
+            return data.success ? (data.data.messagesTotal || 0) : 0;
+          }).map(p => p.catch(() => 0)));
           reportTabCount('inbox', counts.reduce((s: number, c: number) => s + c, 0));
         } else {
           const labelRes = await gmailGet('labelInfo', { labelId: 'INBOX' });
