@@ -58,7 +58,12 @@ function withAccount(url: string): string {
   return `${url}${sep}account=${encodeURIComponent(_currentAccount)}`;
 }
 
-/** Wait if we're in a rate-limit cooldown, then return true if caller should proceed */
+/** Check if we're currently in a rate-limit cooldown */
+function isRateLimited(): boolean {
+  return _rateLimitedUntil > Date.now();
+}
+
+/** Wait if we're in a rate-limit cooldown */
 async function waitForRateLimit(): Promise<void> {
   const now = Date.now();
   if (_rateLimitedUntil > now) {
@@ -1282,19 +1287,13 @@ export default function Dashboard() {
             let totalLoaded = cachedMsgCount;
             // Paginate through Gmail, skipping pages we already have in cache
             while (nextToken && totalLoaded < MAX_MESSAGES) {
+              if (isRateLimited()) { console.log('[rate-limit] Stopping pagination — rate limited'); break; }
               // Rate limit: 2s delay between pages to stay within Gmail quota
               await new Promise(r => setTimeout(r, 2000));
-              let pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-              // On rate limit, wait longer and retry once
-              if (!pageRes.success && String(pageRes.error || '').includes('rate limit')) {
-                await new Promise(r => setTimeout(r, 15000));
-                pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-              }
-              if (!pageRes.success || !pageRes.data?.messages?.length) {
-                // Try smaller batch to get past problematic page
-                pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '50', pageToken: nextToken });
-                if (!pageRes.success || !pageRes.data?.messages?.length) break;
-              }
+              const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+              // On rate limit, stop pagination entirely — circuit breaker will handle cooldown
+              if (isRateLimited() || !pageRes.success) break;
+              if (!pageRes.data?.messages?.length) break;
               const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
               // Filter out messages already in cache
               const newPageMsgs = pageMsgs.filter((m: GmailMessage) => !cachedIds.has(m.id));
@@ -1326,24 +1325,10 @@ export default function Dashboard() {
             setLoadingProgress({ loaded: totalLoaded, total: Math.min(totalToLoad, MAX_MESSAGES), phase: `Loading ${Math.min(totalToLoad, MAX_MESSAGES).toLocaleString()} emails...` });
           }
           while (nextToken && totalLoaded < MAX_MESSAGES) {
+            if (isRateLimited()) { console.log('[rate-limit] Stopping pagination — rate limited'); break; }
             await new Promise(r => setTimeout(r, 2000)); // Rate limit between pages
             const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-            if (!pageRes.success || !pageRes.data?.messages?.length) {
-              // On rate limit, wait and retry once
-              if (!pageRes.success && String(pageRes.error || '').includes('rate limit')) {
-                await new Promise(r => setTimeout(r, 15000));
-                const retry = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-                if (retry.success && retry.data?.messages?.length) {
-                  const retryMsgs = retry.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
-                  setMessages(prev => [...prev, ...retryMsgs]);
-                  totalLoaded += retryMsgs.length;
-                  nextToken = retry.data.nextPageToken;
-                  saveToCacheBackground(account, retryMsgs);
-                  continue;
-                }
-              }
-              break;
-            }
+            if (isRateLimited() || !pageRes.success || !pageRes.data?.messages?.length) break;
             const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: account }));
             setMessages(prev => [...prev, ...pageMsgs]);
             totalLoaded += pageMsgs.length;
@@ -1456,19 +1441,11 @@ export default function Dashboard() {
             let nextToken = at.nextPageToken;
             let loaded = 0;
             while (nextToken && loaded < MAX_PER_ACCOUNT) {
+              if (isRateLimited()) { console.log('[rate-limit] Stopping unified pagination — rate limited'); break; }
               setCurrentAccount(at.email);
-              let pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-              // Retry on failure (Gmail rate limit / transient errors)
-              let retryFailed = false;
-              for (let retry = 0; retry < 3 && !pageRes.success; retry++) {
-                await new Promise(r => setTimeout(r, 5000 * (retry + 1)));
-                pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-              }
-              if (!pageRes.success || !pageRes.data?.messages?.length) {
-                // Try smaller batch to get past problematic page
-                pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '50', pageToken: nextToken });
-                if (!pageRes.success || !pageRes.data?.messages?.length) break;
-              }
+              await new Promise(r => setTimeout(r, 2000));
+              const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
+              if (isRateLimited() || !pageRes.success || !pageRes.data?.messages?.length) break;
               const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: at.email }));
               const newPageMsgs = pageMsgs.filter((m: GmailMessage) => !cachedIds.has(m.id));
               if (newPageMsgs.length > 0) {
@@ -1506,9 +1483,11 @@ export default function Dashboard() {
           let nextToken = at.nextPageToken;
           let loaded = freshMessages.filter(m => m.accountEmail === at.email).length;
           while (nextToken && loaded < MAX_PER_ACCOUNT) {
+            if (isRateLimited()) break;
             setCurrentAccount(at.email);
+            await new Promise(r => setTimeout(r, 2000));
             const pageRes = await gmailGet('inbox', { q: 'in:inbox', max: '200', pageToken: nextToken });
-            if (!pageRes.success || !pageRes.data?.messages?.length) break;
+            if (isRateLimited() || !pageRes.success || !pageRes.data?.messages?.length) break;
             const pageMsgs = pageRes.data.messages.map((m: GmailMessage) => ({ ...m, accountEmail: at.email }));
             setMessages(prev => [...prev, ...pageMsgs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
             saveToCacheBackground(at.email, pageMsgs);
@@ -1599,6 +1578,7 @@ export default function Dashboard() {
     if (!account) return;
     const interval = setInterval(() => {
       if (activeTab === 'cleanup') return; // Don't refresh while user is clearing emails
+      if (isRateLimited()) return; // Don't refresh while rate-limited
       if (unified && accounts.length > 1) {
         loadUnifiedInbox(true, true);
       } else {
@@ -1848,12 +1828,12 @@ export default function Dashboard() {
 
       // Execute Gmail action with silent retry on quota errors
       const executeGmailAction = async (attempt = 0): Promise<void> => {
+        if (isRateLimited() && attempt > 0) return; // Don't retry when globally rate-limited
         const sa = _currentAccount;
         if (overrideAccount && overrideAccount !== _currentAccount) setCurrentAccount(overrideAccount);
         try {
           const res = await gmailPost(action, { action, messageIds });
-          if (!res.success && res.error?.includes('Quota exceeded') && attempt < 5) {
-            // Quota error — retry silently after exponential backoff
+          if (!res.success && res.error?.includes('Quota exceeded') && attempt < 3 && !isRateLimited()) {
             await new Promise(r => setTimeout(r, (attempt + 1) * 15000));
             if (overrideAccount) setCurrentAccount(sa);
             return executeGmailAction(attempt + 1);
@@ -1915,9 +1895,10 @@ export default function Dashboard() {
         setCurrentAccount(overrideAccount);
       }
       let res = await gmailPost(action, params);
-      // Silent retry on quota errors
-      if (!res.success && res.error?.includes('Quota exceeded')) {
-        for (let retry = 0; retry < 3; retry++) {
+      // Silent retry on quota errors (skip if globally rate-limited)
+      if (!res.success && res.error?.includes('Quota exceeded') && !isRateLimited()) {
+        for (let retry = 0; retry < 2; retry++) {
+          if (isRateLimited()) break;
           await new Promise(r => setTimeout(r, (retry + 1) * 15000));
           res = await gmailPost(action, params);
           if (res.success || !res.error?.includes('Quota exceeded')) break;
@@ -2118,6 +2099,7 @@ export default function Dashboard() {
 
   // Load all tab counts upfront (not just when each tab is visited)
   const loadAllTabCounts = useCallback(async () => {
+    if (isRateLimited()) return; // Skip tab count refresh when rate-limited
     try {
       // Fetch queue data for Triage + Snoozed counts
       const queueRes = await apiGet('queue');
