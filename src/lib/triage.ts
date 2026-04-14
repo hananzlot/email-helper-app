@@ -484,22 +484,23 @@ export async function scanSentMail(
     if (/[0-9a-f]{8,}-[0-9a-f]{4,}/i.test(local)) return true;
     // Very long local parts with lots of numbers/hyphens (machine-generated)
     if (local.length > 30 && (local.match(/[0-9-]/g) || []).length > local.length * 0.4) return true;
-    // Known transactional/noreply domains and patterns
-    if (/noreply|no-reply|donotreply|do-not-reply|bounce|mailer-daemon/i.test(local)) return true;
-    if (/amazonses\.com|sendgrid\.net|mailgun\.org|mandrillapp\.com|postmarkapp\.com/i.test(domain)) return true;
+    // Known transactional/noreply patterns in local part
+    if (/noreply|no-reply|donotreply|do-not-reply|mailer-daemon/i.test(local)) return true;
+    // Bounce/transactional domains
+    if (/^bounce\./i.test(domain)) return true;
+    if (/amazonses\.com|sendgrid\.net|mailgun\.org|mandrillapp\.com|postmarkapp\.com|constantcontact\.com|mailchimp\.com|cmail\d+\.com|mcsv\.net|mcdlv\.net/i.test(domain)) return true;
+    // Local part starting with "bounce" or containing "bounce-"
+    if (/^bounce/i.test(local)) return true;
     return false;
   };
 
   // Assign tiers based on reply count thresholds (not percentile position)
   // Gibberish/machine-generated addresses always get Tier D max
 
-  // Upsert sender priorities (encrypt display_name)
-  const upserts = entries.map(([email, data]) => {
+  // Upsert sender priorities — skip gibberish addresses entirely
+  const upserts = entries.filter(([email]) => !isGibberishAddress(email)).map(([email, data]) => {
     let tier: SenderTier = 'D';
-    if (isGibberishAddress(email)) {
-      // Machine-generated addresses: Tier D if they have interactions, otherwise skip
-      tier = 'D';
-    } else if (data.count >= mins.A) {
+    if (data.count >= mins.A) {
       tier = 'A';
     } else if (data.count >= mins.B) {
       tier = 'B';
