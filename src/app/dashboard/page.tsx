@@ -1581,17 +1581,24 @@ export default function Dashboard() {
     if (isFirstLoad) localStorage.setItem('email_helper_visited', '1');
   }, [account, unified, accounts.length]);
 
-  // Auto-refresh every 5 minutes for inbox data (skip while on Easy-Clear to prevent list jumping)
+  // Auto-refresh every 5 minutes — load from CACHE only (sync-queue keeps cache updated)
+  // This avoids hitting Gmail API directly, which causes 429 quota errors
   useEffect(() => {
     if (!account) return;
-    const interval = setInterval(() => {
-      if (activeTab === 'cleanup') return; // Don't refresh while user is clearing emails
-      if (isRateLimited()) return; // Don't refresh while rate-limited
-      if (unified && accounts.length > 1) {
-        loadUnifiedInbox(true, true);
-      } else {
-        loadInbox(true, true);
-      }
+    const interval = setInterval(async () => {
+      if (activeTab === 'cleanup') return;
+      try {
+        const cacheRes = await apiGet('inbox-cache');
+        if (cacheRes.success && cacheRes.data?.messages?.length > 0) {
+          const cachedMsgs = cacheRes.data.messages.map((m: { gmail_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; is_unread: boolean; label_ids: string[]; account_email: string }) => ({
+            id: m.gmail_id, threadId: m.thread_id, sender: m.sender, senderEmail: m.sender_email,
+            subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.is_unread,
+            labelIds: m.label_ids, accountEmail: m.account_email, body: '', bodyHtml: '', to: '', cc: '',
+          }));
+          cachedMsgs.sort((a: { date: string }, b: { date: string }) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          setMessages(cachedMsgs);
+        }
+      } catch {}
     }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [account, unified, accounts.length, loadInbox, loadUnifiedInbox, activeTab]);
