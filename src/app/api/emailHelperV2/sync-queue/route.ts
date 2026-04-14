@@ -247,8 +247,8 @@ export async function PUT(request: NextRequest) {
         status: 'done', completed_at: new Date().toISOString(),
       }).eq('id', job.id);
     } else {
-      // Reset to pending so next PUT call picks a different account (round-robin)
-      await admin.from(SYNC_QUEUE).update({ status: 'pending' }).eq('id', job.id);
+      // Reset to pending with updated requested_at so this job goes to the back of the queue (round-robin)
+      await admin.from(SYNC_QUEUE).update({ status: 'pending', requested_at: new Date().toISOString() }).eq('id', job.id);
     }
 
     return apiSuccess({
