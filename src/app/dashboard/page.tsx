@@ -838,6 +838,17 @@ export default function Dashboard() {
   const searchTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const [searchSelectedIds, setSearchSelectedIds] = useState<Set<string>>(new Set());
   const [searchSelectionActive, setSearchSelectionActive] = useState<GmailMessage[]>([]);
+  // Sender tiers for search results (loaded from API)
+  const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
+  useEffect(() => {
+    apiGet('senders').then(res => {
+      if (res.success && res.data) {
+        const tiers: Record<string, string> = {};
+        for (const s of res.data) { if (s.tier) tiers[s.sender_email.toLowerCase()] = s.tier; }
+        setSenderTiers(tiers);
+      }
+    }).catch(() => {});
+  }, []);
   // Auth error state — show login prompt instead of auto-redirect loop
   const [authError, setAuthError] = useState(false);
   // Tab counts — each tab reports its count for display in tab bar
@@ -2660,6 +2671,13 @@ export default function Dashboard() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-sm truncate" style={{ fontWeight: msg.isUnread ? 700 : 500 }}>{msg.sender}</span>
+                            {(() => {
+                              const t = senderTiers[msg.senderEmail?.toLowerCase()];
+                              if (!t) return null;
+                              const colors: Record<string, { bg: string; color: string }> = { A: { bg: '#dcfce7', color: '#166534' }, B: { bg: '#fef3c7', color: '#92400e' }, C: { bg: '#e0f2fe', color: '#075985' }, D: { bg: '#f1f5f9', color: '#475569' } };
+                              const c = colors[t] || colors.D;
+                              return <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0" style={{ background: c.bg, color: c.color }}>{t}</span>;
+                            })()}
                             <span className="text-[10px] whitespace-nowrap flex-shrink-0" style={{ color: 'var(--muted)' }}>
                               {new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                             </span>
