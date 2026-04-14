@@ -791,8 +791,10 @@ interface ConnectedAccount {
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('home');
-  // Returning users land on Top Tiers tab
+  // Returning users land on Top Tiers tab (skip if backup redirect)
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('backup_started')) return; // Let backup handler control the tab
     if (localStorage.getItem('email_helper_visited')) setActiveTab('reply-queue');
   }, []);
   const [layoutMode, setLayoutMode] = useState<'cards' | 'split'>('split');
