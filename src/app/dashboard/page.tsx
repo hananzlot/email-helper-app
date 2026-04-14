@@ -2765,6 +2765,28 @@ export default function Dashboard() {
               </button>
             );
           })}
+          <button
+            onClick={async () => {
+              try {
+                const cacheRes = await apiGet('inbox-cache');
+                if (cacheRes.success && cacheRes.data?.messages?.length > 0) {
+                  const cachedMsgs = cacheRes.data.messages.map((m: { gmail_id: string; thread_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; is_unread: boolean; label_ids: string[]; account_email: string }) => ({
+                    id: m.gmail_id, threadId: m.thread_id, sender: m.sender, senderEmail: m.sender_email,
+                    subject: m.subject, snippet: m.snippet, date: m.date, isUnread: m.is_unread,
+                    labelIds: m.label_ids, accountEmail: m.account_email, body: '', bodyHtml: '', to: '', cc: '',
+                  }));
+                  cachedMsgs.sort((a: { date: string }, b: { date: string }) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                  setMessages(cachedMsgs);
+                  showToast('Refreshed', 'Loaded latest from cache');
+                }
+              } catch {}
+            }}
+            className="px-2.5 py-2 text-xs rounded-lg transition-all flex-shrink-0"
+            style={{ color: '#64748b', border: '1.5px solid #e2e8f0', background: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+            title="Refresh from cache"
+          >
+            &#x21bb;
+          </button>
         </div>
         {/* Bottom shadow to visually separate sticky header from scrolling content */}
         <div style={{ height: 4, background: 'linear-gradient(to bottom, rgba(0,0,0,0.04), transparent)', marginBottom: 12 }} />
