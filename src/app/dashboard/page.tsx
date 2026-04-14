@@ -6366,6 +6366,13 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
 }) {
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [refreshing, setRefreshing] = useState<string | null>(null);
+
+  function refreshConnection(email: string) {
+    setRefreshing(email);
+    // Re-auth via OAuth — tokens get upserted, all data stays intact
+    window.location.href = '/api/emailHelperV2/auth/login?state=add_account';
+  }
 
   async function setPrimary(email: string) {
     const res = await apiPut('accounts', { email, action: 'set_primary' });
@@ -6430,6 +6437,12 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
                       Set Primary
                     </button>
                   )}
+                  <button onClick={() => refreshConnection(a.email)}
+                    disabled={refreshing === a.email}
+                    className="text-xs px-3 py-1.5 rounded-lg font-medium border"
+                    style={{ borderColor: 'var(--normal)', color: '#065f46', background: refreshing === a.email ? 'var(--normal-bg)' : 'transparent' }}>
+                    {refreshing === a.email ? 'Redirecting...' : 'Refresh Connection'}
+                  </button>
                   {accounts.length > 1 && (
                     <button onClick={() => setConfirmDisconnect(a.email)}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium text-red-600 border"
@@ -6446,7 +6459,7 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
         {confirmDisconnect && (
           <div className="mt-4 p-4 rounded-lg border" style={{ background: '#fef2f2', borderColor: '#fca5a5' }}>
             <p className="text-sm font-medium text-red-800 mb-2">Disconnect {confirmDisconnect}?</p>
-            <p className="text-xs text-red-700 mb-3">This will remove the account and all associated triage data and queue items. Your Gmail account itself will not be affected.</p>
+            <p className="text-xs text-red-700 mb-3">This will <strong>wipe all cached emails</strong> for this account. Re-syncing may take several minutes when you reconnect. If you just need to fix a token issue, use <strong>Refresh Connection</strong> instead — it keeps all your data.</p>
             <div className="flex gap-2">
               <button onClick={() => disconnectAccount(confirmDisconnect)} disabled={disconnecting}
                 className="px-4 py-1.5 text-xs font-semibold rounded-lg text-white"
