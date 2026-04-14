@@ -875,6 +875,7 @@ export default function Dashboard() {
     })();
   }, []);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [showProTips, setShowProTips] = useState(false);
 
   // Global search — searches Gmail via API across all accounts
   async function performSearch(query: string) {
@@ -2434,6 +2435,15 @@ export default function Dashboard() {
                         </span>
                       )}
                     </button>
+                    <button
+                      onClick={() => { setShowProTips(true); setShowSettingsMenu(false); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium hover:bg-gray-50 transition-colors text-left"
+                      style={{ color: '#334155' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                      </svg>
+                      Tips &amp; Help
+                    </button>
                     <div style={{ height: 1, background: 'var(--border)' }} />
                     <button
                       onClick={() => { window.location.href = '/api/emailHelperV2/auth/logout'; }}
@@ -2976,6 +2986,32 @@ export default function Dashboard() {
         </div>
       )}
 
+      {showProTips && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setShowProTips(false)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white rounded-t-2xl border-b px-5 py-4 flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+              <h3 className="font-semibold text-base">Tips &amp; Help</h3>
+              <button onClick={() => setShowProTips(false)} className="p-1 rounded-lg hover:bg-gray-100 transition-colors" style={{ color: 'var(--muted)' }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div className="p-5 flex flex-col gap-3 text-sm" style={{ color: '#334155' }}>
+              <div><strong>Snooze</strong> — emails you need to deal with but not right now. They&apos;ll pop back into your queue at the time you choose.</div>
+              <div><strong>Quick Reply</strong> — in Top Tiers, use the dropdown to send a template response and auto-archive in one click.</div>
+              <div><strong>Drag to reorder</strong> — drag Top Tiers cards to rearrange priority. Pin important emails to keep them at top.</div>
+              <div><strong>Undo</strong> — after archiving or trashing, you get a 5-second window to undo.</div>
+              <div><strong>Unsubscribe</strong> — in Easy-Clear, hit Unsubscribe on any sender. If successful, their messages are automatically archived.</div>
+              <div><strong>Auto-Clean</strong> — in Sender Priorities, enable Auto-Clean for senders whose update emails should be auto-archived during triage.</div>
+              <div><strong>Merge Senders</strong> — in Sender Priorities, combine duplicate contacts manually or use auto-detected suggestions.</div>
+              <div><strong>Search</strong> — press <strong>⌘K</strong> or <strong>/</strong> to search all emails across all connected accounts.</div>
+              <div><strong>Sent</strong> — groups your outgoing mail into conversations so you don&apos;t see duplicates.</div>
+              <div><strong>Top Tiers</strong> — runs automatically every 2 minutes, or trigger it manually.</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toast && <UndoToast toast={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
@@ -3369,23 +3405,6 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
                   <strong> All Accounts (Unified)</strong> to see everything merged together. Each email shows which account it came from,
                   and replies go through the correct account automatically.
                 </p>
-              </div>
-            </div>
-
-            {/* Pro tips */}
-            <div className="mt-2 p-4 rounded-xl" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-              <div className="font-semibold text-xs mb-2" style={{ color: '#166534' }}>Pro tips</div>
-              <div className="flex flex-col gap-1.5 text-xs" style={{ color: '#15803d' }}>
-                <div>• <strong>Snooze</strong> emails you need to deal with but not right now — they&apos;ll pop back into your queue at the time you choose.</div>
-                <div>• <strong>Quick Reply</strong> — in Top Tiers, use the &quot;Quick Reply&quot; dropdown to send a template response and auto-archive in one click.</div>
-                <div>• <strong>Drag to reorder</strong> — drag Top Tiers cards to rearrange priority. Pin important emails with the 📌 button to keep them at top.</div>
-                <div>• <strong>Undo</strong> — after archiving or trashing, you get a 5-second window to undo. Go fast, undo if needed.</div>
-                <div>• <strong>Unsubscribe</strong> — in Easy-Clear, hit &quot;Unsubscribe&quot; on any sender. If successful, their messages are automatically archived too.</div>
-                <div>• <strong>Auto-Clean</strong> — in Priorities, enable &quot;Auto-Clean&quot; for high-tier senders whose update emails should be auto-archived during triage.</div>
-                <div>• <strong>Merge Senders</strong> — in Priorities, click &quot;Merge Senders&quot; to manually combine duplicate contacts, or use the auto-detected suggestions.</div>
-                <div>• <strong>Search</strong> — press <strong>⌘K</strong> (or <strong>/</strong>) to open global search. It searches all emails across all connected accounts by sender or subject.</div>
-                <div>• The <strong>Sent</strong> tab groups your outgoing mail into conversations — no more scrolling through duplicates.</div>
-                <div>• Top Tiers runs automatically every 2 minutes. You can also trigger it manually from the button above.</div>
               </div>
             </div>
 
