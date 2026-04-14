@@ -42,13 +42,26 @@ export async function POST(request: NextRequest) {
 
   const admin = createSupabaseAdmin();
 
-  // Clean up old done/error jobs for this account to prevent queue bloat
+  // Check if there's a recent done job — if so, return it instead of creating a new one
+  // This prevents resetting progress bars when sync is already complete
+  const { data: doneJob } = await admin
+    .from(SYNC_QUEUE)
+    .select('*')
+    .eq('user_id', userId)
+    .eq('account_email', account_email)
+    .eq('status', 'done')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .single();
+  if (doneJob) return apiSuccess(doneJob);
+
+  // Clean up old error jobs for this account
   await admin
     .from(SYNC_QUEUE)
     .delete()
     .eq('user_id', userId)
     .eq('account_email', account_email)
-    .in('status', ['done', 'error']);
+    .eq('status', 'error');
 
   // Check if there's already a pending/processing job
   const { data: existing } = await admin
