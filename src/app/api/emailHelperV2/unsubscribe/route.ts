@@ -9,17 +9,13 @@ const UNSUB_TABLE = 'emailHelperV2_unsubscribe_log';
 
 /**
  * Validate a URL is safe to fetch (SSRF protection).
- * Rejects non-HTTP(S), private/internal IPs, and localhost.
- * Uses hostname pattern matching (no DNS lookup — compatible with serverless).
  */
 function isSafeUrl(urlStr: string): boolean {
   try {
     const url = new URL(urlStr);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     const hostname = url.hostname.toLowerCase();
-    // Block localhost and loopback
     if (hostname === 'localhost' || hostname === '::1' || hostname === '[::1]') return false;
-    // Block IP addresses that are private/internal
     const ipMatch = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
     if (ipMatch) {
       const [, a, b] = ipMatch.map(Number);
@@ -36,13 +32,8 @@ function isSafeUrl(urlStr: string): boolean {
 
 /**
  * POST /api/emailHelperV2/unsubscribe
- * Attempts to unsubscribe from a sender using the best available method.
+ * Queue an unsubscribe request. Returns immediately — processing happens in PUT/cron.
  * Body: { message_id, account_email, sender_email, domain }
- *
- * Strategy:
- * 1. Check List-Unsubscribe header → mailto or URL
- * 2. Parse email body for unsubscribe link
- * 3. Follow the link via HTTP
  */
 export async function POST(request: NextRequest) {
   const { userId } = await getRequestContext(request);
@@ -54,83 +45,99 @@ export async function POST(request: NextRequest) {
 
   const admin = createSupabaseAdmin();
 
-  // Create log entry (non-blocking — don't fail the unsubscribe if logging fails)
-  let logId: string | null = null;
-  try {
-    const { data: logEntry, error: logError } = await admin
-      .from(UNSUB_TABLE)
-      .insert({
-        user_id: userId,
-        sender_email: sender_email || '',
-        domain: domain || '',
-        method: 'pending',
-        status: 'processing',
-        message_id,
-        account_email,
-      })
-      .select('id')
-      .single();
+  // Create queue entry with status=pending
+  const { data: logEntry, error: logError } = await admin
+    .from(UNSUB_TABLE)
+    .insert({
+      user_id: userId,
+      sender_email: sender_email || '',
+      domain: domain || '',
+      method: 'pending',
+      status: 'pending',
+      message_id,
+      account_email,
+    })
+    .select('id')
+    .single();
 
-    if (logError) {
-      console.error('Unsubscribe log insert failed:', logError.message);
-    } else {
-      logId = logEntry.id;
-    }
-  } catch (logErr) {
-    console.error('Unsubscribe log insert threw:', logErr);
+  if (logError) {
+    console.error('Unsubscribe queue insert failed:', logError.message);
+    return apiError('Failed to queue unsubscribe', 500);
   }
+
+  return apiSuccess({ queued: true, logId: logEntry.id });
+}
+
+/**
+ * PUT /api/emailHelperV2/unsubscribe
+ * Process ONE pending unsubscribe from the queue.
+ * Called by cron job or client polling. Accepts CRON_SECRET or session auth.
+ */
+export async function PUT(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  const cronSecret = process.env.CRON_SECRET;
+  const isCron = cronSecret && authHeader === `Bearer ${cronSecret}`;
+
+  let filterUserId: string | null = null;
+  if (!isCron) {
+    const { userId } = await getRequestContext(request);
+    if (!userId) return apiError('Not authenticated', 401);
+    filterUserId = userId;
+  }
+
+  const admin = createSupabaseAdmin();
+
+  // Pick the oldest pending entry
+  let query = admin.from(UNSUB_TABLE).select('*').eq('status', 'pending').order('attempted_at', { ascending: true }).limit(1);
+  if (filterUserId) query = query.eq('user_id', filterUserId);
+  const { data: entry } = await query.single();
+
+  if (!entry) return apiSuccess({ idle: true });
+
+  // Mark as processing
+  await admin.from(UNSUB_TABLE).update({ status: 'processing' }).eq('id', entry.id);
 
   const updateLog = async (fields: Record<string, unknown>) => {
-    if (!logId) return;
-    try { await admin.from(UNSUB_TABLE).update(fields).eq('id', logId); } catch {}
+    try { await admin.from(UNSUB_TABLE).update(fields).eq('id', entry.id); } catch {}
   };
 
-  let accessToken: string;
   try {
-    accessToken = await getValidGmailToken(userId, account_email);
-  } catch (err) {
-    console.error('Unsubscribe token error:', err);
-    await updateLog({ status: 'failed', error_message: `Token error: ${String(err)}`, completed_at: new Date().toISOString() });
-    return apiError(`Gmail token error for ${account_email}: ${(err as Error).message}`, 500);
-  }
-
-  try {
+    const accessToken = await getValidGmailToken(entry.user_id, entry.account_email);
     const gmail = getGmailClient(accessToken);
 
-    // Fetch full message to get headers and body
+    // Fetch full message
     let msg;
     try {
-      msg = await getMessage(gmail, message_id, 'full');
+      msg = await getMessage(gmail, entry.message_id, 'full');
     } catch (msgErr) {
-      console.error('Unsubscribe getMessage error:', msgErr);
       await updateLog({ status: 'failed', error_message: `getMessage error: ${String(msgErr)}`, completed_at: new Date().toISOString() });
-      return apiError(`Failed to fetch message: ${(msgErr as Error).message}`, 500);
+      return apiSuccess({ logId: entry.id, status: 'failed', error: String(msgErr) });
     }
 
     // Strategy 1: Check List-Unsubscribe header
-    const result = await tryListUnsubscribeHeader(gmail, message_id, accessToken);
+    const result = await tryListUnsubscribeHeader(gmail, entry.message_id, accessToken);
     if (result.success) {
       const isVerified = result.method !== 'header_url_needs_interaction';
       await updateLog({ method: result.method, status: isVerified ? 'success' : 'attempted', unsubscribe_url: result.url || null, completed_at: new Date().toISOString() });
-      return apiSuccess({ status: isVerified ? 'success' : 'attempted', method: result.method, logId });
+      return apiSuccess({ logId: entry.id, status: isVerified ? 'success' : 'attempted', method: result.method, senderEmail: entry.sender_email });
     }
 
     // Strategy 2: Parse email body for unsubscribe link
     const bodyResult = await tryBodyUnsubscribeLink(msg);
     if (bodyResult.success && bodyResult.url) {
       await updateLog({ method: 'body_link', status: 'success', unsubscribe_url: bodyResult.url, completed_at: new Date().toISOString() });
-      return apiSuccess({ status: 'success', method: 'body_link', url: bodyResult.url, logId });
+      return apiSuccess({ logId: entry.id, status: 'success', method: 'body_link', senderEmail: entry.sender_email });
     }
 
-    // Strategy 3: AI Agent with headless browser (for complex pages)
+    // Strategy 3: AI Agent with headless browser
     const anyUrl = result.url || bodyResult.url;
     if (anyUrl) {
       try {
         const { aiUnsubscribe } = await import('@/lib/unsubscribe-agent');
-        const aiResult = await aiUnsubscribe(anyUrl, account_email);
+        const aiResult = await aiUnsubscribe(anyUrl, entry.account_email);
         if (aiResult.success) {
           await updateLog({ method: aiResult.method, status: 'success', unsubscribe_url: anyUrl, completed_at: new Date().toISOString() });
-          return apiSuccess({ status: 'success', method: aiResult.method, details: aiResult.details, logId });
+          return apiSuccess({ logId: entry.id, status: 'success', method: aiResult.method, senderEmail: entry.sender_email });
         }
       } catch (aiErr) {
         console.error('AI unsubscribe failed:', aiErr);
@@ -139,24 +146,67 @@ export async function POST(request: NextRequest) {
 
     // All strategies failed
     await updateLog({ method: 'failed', status: 'failed', error_message: 'No unsubscribe method found', completed_at: new Date().toISOString() });
-    return apiSuccess({ status: 'failed', reason: 'No unsubscribe link found in headers or body', logId });
+    return apiSuccess({ logId: entry.id, status: 'failed', senderEmail: entry.sender_email });
   } catch (err) {
-    await updateLog({ status: 'failed', error_message: String(err), completed_at: new Date().toISOString() });
-    console.error('Unsubscribe failed:', err);
-    return apiError(`Unsubscribe failed: ${(err as Error).message}`, 500);
+    const errMsg = String(err);
+    const isQuota = errMsg.toLowerCase().includes('quota');
+
+    if (isQuota) {
+      // Reset to pending — will be retried later
+      await updateLog({ status: 'pending' });
+      return apiSuccess({ logId: entry.id, status: 'quota_retry' });
+    }
+
+    await updateLog({ status: 'failed', error_message: errMsg, completed_at: new Date().toISOString() });
+    return apiSuccess({ logId: entry.id, status: 'failed', error: errMsg });
   }
 }
 
 /**
- * Strategy 1: Use List-Unsubscribe header
+ * GET /api/emailHelperV2/unsubscribe
+ * Returns unsubscribe history/status.
+ * ?logId=X — status of specific entry
+ * ?pending=true — count of pending entries
+ * Default — full history
  */
+export async function GET(request: NextRequest) {
+  const { userId } = await getRequestContext(request);
+  if (!userId) return apiError('Not authenticated', 401);
+
+  const admin = createSupabaseAdmin();
+  const logId = request.nextUrl.searchParams.get('logId');
+  const pending = request.nextUrl.searchParams.get('pending');
+
+  if (logId) {
+    const { data, error } = await admin.from(UNSUB_TABLE).select('*').eq('id', logId).eq('user_id', userId).single();
+    if (error) return apiError('Not found', 404);
+    return apiSuccess(data);
+  }
+
+  if (pending) {
+    const { count } = await admin.from(UNSUB_TABLE).select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'pending');
+    return apiSuccess({ pendingCount: count || 0 });
+  }
+
+  const { data, error } = await admin
+    .from(UNSUB_TABLE)
+    .select('*')
+    .eq('user_id', userId)
+    .order('attempted_at', { ascending: false })
+    .limit(100);
+
+  if (error) return apiError(error.message, 500);
+  return apiSuccess(data || []);
+}
+
+// ============ UNSUBSCRIBE STRATEGIES ============
+
 async function tryListUnsubscribeHeader(
   gmail: ReturnType<typeof getGmailClient>,
   messageId: string,
   accessToken: string
 ): Promise<{ success: boolean; method?: string; url?: string }> {
   try {
-    // Get raw message headers
     const res = await gmail.users.messages.get({
       userId: 'me',
       id: messageId,
@@ -170,7 +220,6 @@ async function tryListUnsubscribeHeader(
 
     if (!unsubHeader) return { success: false };
 
-    // Parse the header — can contain mailto: and/or https: URLs
     const urls: string[] = [];
     const mailtos: string[] = [];
     const parts = unsubHeader.split(',').map(s => s.trim());
@@ -184,11 +233,7 @@ async function tryListUnsubscribeHeader(
       }
     }
 
-    // Filter URLs through SSRF check
-    const safeUrls: string[] = [];
-    for (const u of urls) {
-      if (isSafeUrl(u)) safeUrls.push(u);
-    }
+    const safeUrls = urls.filter(u => isSafeUrl(u));
 
     // Prefer one-click HTTP unsubscribe (RFC 8058)
     if (safeUrls.length > 0 && unsubPostHeader) {
@@ -205,7 +250,7 @@ async function tryListUnsubscribeHeader(
       } catch {}
     }
 
-    // Try HTTP GET on the unsubscribe URL
+    // Try HTTP GET
     if (safeUrls.length > 0) {
       try {
         const response = await fetch(safeUrls[0], {
@@ -219,14 +264,12 @@ async function tryListUnsubscribeHeader(
           if (looksSuccessful) {
             return { success: true, method: 'header_url', url: safeUrls[0] };
           }
-          // Page visited but no confirmation — don't claim success, let AI agent try
-          // Return the URL so the AI can interact with the page
           return { success: false, method: 'header_url_needs_interaction', url: safeUrls[0] };
         }
       } catch {}
     }
 
-    // Try mailto — send an unsubscribe email
+    // Try mailto
     if (mailtos.length > 0) {
       try {
         const mailto = mailtos[0].replace('mailto:', '');
@@ -235,7 +278,6 @@ async function tryListUnsubscribeHeader(
         const subject = params.get('subject') || 'Unsubscribe';
         const body = params.get('body') || 'Unsubscribe';
 
-        // Send email via Gmail API
         const raw = Buffer.from(
           `To: ${toAddr}\r\nSubject: ${subject}\r\nContent-Type: text/plain\r\n\r\n${body}`
         ).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -255,20 +297,14 @@ async function tryListUnsubscribeHeader(
   }
 }
 
-/**
- * Strategy 2: Parse email body for unsubscribe link
- */
 async function tryBodyUnsubscribeLink(
   msg: { bodyHtml?: string; body?: string }
 ): Promise<{ success: boolean; url?: string }> {
   const html = msg.bodyHtml || msg.body || '';
   if (!html) return { success: false };
 
-  // Find links containing "unsubscribe" in text or URL
   const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>[^<]*unsubscrib[^<]*/gi;
   const matches = [...html.matchAll(linkRegex)];
-
-  // Also try: links where the URL contains "unsubscribe"
   const urlRegex = /<a[^>]+href=["']([^"']*unsubscrib[^"']*)["']/gi;
   const urlMatches = [...html.matchAll(urlRegex)];
 
@@ -280,7 +316,6 @@ async function tryBodyUnsubscribeLink(
 
   if (allUrls.size === 0) return { success: false };
 
-  // SSRF check: only allow safe URLs
   let safeUrl: string | null = null;
   for (const u of allUrls) {
     if (isSafeUrl(u)) { safeUrl = u; break; }
@@ -301,22 +336,5 @@ async function tryBodyUnsubscribeLink(
   return { success: true, url: safeUrl };
 }
 
-/**
- * GET /api/emailHelperV2/unsubscribe
- * Returns unsubscribe history for the current user
- */
-export async function GET(request: NextRequest) {
-  const { userId } = await getRequestContext(request);
-  if (!userId) return apiError('Not authenticated', 401);
-
-  const admin = createSupabaseAdmin();
-  const { data, error } = await admin
-    .from(UNSUB_TABLE)
-    .select('*')
-    .eq('user_id', userId)
-    .order('attempted_at', { ascending: false })
-    .limit(100);
-
-  if (error) return apiError(error.message, 500);
-  return apiSuccess(data || []);
-}
+// Suppress unused variable warning — accessToken is passed for potential future use
+void ((_: string) => _);

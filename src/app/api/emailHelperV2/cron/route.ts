@@ -105,6 +105,44 @@ export async function GET(request: NextRequest) {
       console.error('Cache cleanup failed:', e);
     }
 
+    // Process pending unsubscribe queue (max 2 minutes, 3s between each)
+    let unsubProcessed = 0;
+    const unsubStart = Date.now();
+    const UNSUB_BUDGET = 2 * 60 * 1000; // 2 minutes
+    try {
+      while (Date.now() - unsubStart < UNSUB_BUDGET) {
+        const { data: pending } = await admin
+          .from('emailHelperV2_unsubscribe_log')
+          .select('id')
+          .eq('status', 'pending')
+          .order('attempted_at', { ascending: true })
+          .limit(1)
+          .single();
+
+        if (!pending) break; // Queue empty
+
+        // Call the unsubscribe PUT endpoint to process one entry
+        const origin = process.env.NEXT_PUBLIC_APP_URL || 'https://emaihelper.netlify.app';
+        const putRes = await fetch(`${origin}/api/emailHelperV2/unsubscribe`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${cronSecret}` },
+        });
+        const putData = await putRes.json();
+
+        if (putData.data?.status === 'quota_retry') {
+          // Hit quota — wait 60s then continue
+          await new Promise(r => setTimeout(r, 60_000));
+          continue;
+        }
+
+        unsubProcessed++;
+        // Pace: 3s between unsubscribes to stay under quota
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    } catch (e) {
+      console.error('Unsubscribe queue processing failed:', e);
+    }
+
     const totalSenders = results.reduce((sum, r) => sum + r.sendersFound, 0);
     const totalReplies = results.reduce((sum, r) => sum + r.totalReplies, 0);
 
@@ -114,6 +152,7 @@ export async function GET(request: NextRequest) {
       totalSenders,
       totalReplies,
       cacheCleanedCount,
+      unsubProcessed,
       results,
     });
   } catch (err) {

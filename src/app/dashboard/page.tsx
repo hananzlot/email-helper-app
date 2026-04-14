@@ -4802,9 +4802,8 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
           </span>
           <div className="flex gap-2">
             <button onClick={async () => {
-              // Bulk unsubscribe — one per selected sender group
-              showToast('Unsubscribing...', `${selectedGroups.size} sender${selectedGroups.size > 1 ? 's' : ''}`);
-              let success = 0;
+              // Bulk unsubscribe — queue all, process in background
+              let queued = 0;
               for (const email of selectedGroups) {
                 const group = senderGroups[email.toLowerCase()];
                 if (!group || !group.messages[0]) continue;
@@ -4815,9 +4814,9 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                     sender_email: group.email,
                     domain: group.email.includes('@') ? group.email.split('@')[1] : group.email.replace('@', ''),
                   });
-                  if (res.success && res.data?.status === 'success') {
-                    success++;
-                    // Auto-archive all messages from this sender
+                  if (res.success && res.data?.queued) {
+                    queued++;
+                    // Auto-archive all messages from this sender immediately
                     const msgIds = group.messages.map((m: { id: string }) => m.id);
                     actionByAccount('archive', msgIds);
                   }
@@ -4825,8 +4824,8 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
               }
               setSelectedGroups(new Set()); setSelectedMessages(new Set());
               showToast(
-                success > 0 ? `\u2714 Successfully unsubscribed from ${success} sender${success !== 1 ? 's' : ''}!` : 'No unsubscribes succeeded',
-                success < selectedGroups.size ? `${selectedGroups.size - success} failed` : 'All confirmed & archived'
+                `${queued} unsubscribe${queued !== 1 ? 's' : ''} queued`,
+                'Processing in background — no action needed'
               );
             }}
               className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: '#8b5cf6' }}>
@@ -4922,7 +4921,6 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                   <button onClick={async () => {
                     const latest = group.messages[0];
                     if (!latest) return;
-                    showToast('Unsubscribing...', group.name);
                     try {
                       const res = await apiPost('unsubscribe', {
                         message_id: latest.id,
@@ -4930,17 +4928,12 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                         sender_email: group.email,
                         domain: group.email.includes('@') ? group.email.split('@')[1] : group.email.replace('@', ''),
                       });
-                      if (res.success && res.data?.status === 'success') {
-                        const methodLabel = res.data.method === 'header_oneclick' ? 'One-click confirmed'
-                          : res.data.method === 'header_mailto' ? 'Unsubscribe email sent'
-                          : res.data.method === 'header_url' ? 'Confirmed via link'
-                          : res.data.method === 'body_link' ? 'Link visited'
-                          : res.data.method;
-                        // Auto-archive all messages from this sender after successful unsubscribe
+                      if (res.success && res.data?.queued) {
+                        // Archive immediately, unsubscribe processes in background
                         actionByAccount('archive', allIds);
-                        showToast('\u2714 Successfully unsubscribed!', `${group.name} — ${methodLabel} — ${allIds.length} archived`);
+                        showToast('Unsubscribe queued', `${group.name} — ${allIds.length} archived`);
                       } else {
-                        showToast('Could not auto-unsubscribe', res.data?.reason || res.error || 'Try manually');
+                        showToast('Could not queue unsubscribe', res.error || 'Try manually');
                       }
                     } catch (e) { showToast('Unsubscribe failed', String(e)); }
                   }}
