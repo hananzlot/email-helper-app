@@ -1135,7 +1135,8 @@ export default function Dashboard() {
       if (backupAccount) {
         showToast('Drive authorized', 'Starting backup...');
         window.history.replaceState({}, '', '/dashboard');
-        // Store for later — backup starts after accounts load
+        // Switch to accounts tab and store pending backup for AccountsTab to pick up
+        setActiveTab('accounts');
         sessionStorage.setItem('pending_backup', backupAccount);
       }
       const dashError = params.get('error');
@@ -6680,6 +6681,17 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [backupProgress, setBackupProgress] = useState<Record<string, { processed: number; total: number; status: string; folder: string }>>({});
   const backupRunningRef = React.useRef<Set<string>>(new Set());
+
+  // Auto-start backup after Drive OAuth redirect
+  useEffect(() => {
+    const pending = sessionStorage.getItem('pending_backup');
+    if (pending) {
+      sessionStorage.removeItem('pending_backup');
+      // Small delay to let component fully mount
+      setTimeout(() => startBackup(pending), 500);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function refreshConnection(email: string) {
     setRefreshing(email);
