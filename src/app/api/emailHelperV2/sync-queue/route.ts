@@ -42,8 +42,9 @@ export async function POST(request: NextRequest) {
 
   const admin = createSupabaseAdmin();
 
-  // Check if there's a recent done job — if so, return it instead of creating a new one
-  // This prevents resetting progress bars when sync is already complete
+  // If there's a recent done job (< 30 min old), return it — prevents progress bar resets
+  // Older done jobs get deleted so a fresh sync can start for new emails
+  const SYNC_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
   const { data: doneJob } = await admin
     .from(SYNC_QUEUE)
     .select('*')
@@ -53,7 +54,14 @@ export async function POST(request: NextRequest) {
     .order('completed_at', { ascending: false })
     .limit(1)
     .single();
-  if (doneJob) return apiSuccess(doneJob);
+  if (doneJob) {
+    const completedAt = new Date(doneJob.completed_at).getTime();
+    if (Date.now() - completedAt < SYNC_COOLDOWN_MS) {
+      return apiSuccess(doneJob); // Still fresh — don't restart
+    }
+    // Expired — delete so a new sync can begin
+    await admin.from(SYNC_QUEUE).delete().eq('id', doneJob.id);
+  }
 
   // Clean up old error jobs for this account
   await admin
