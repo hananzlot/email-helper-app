@@ -91,30 +91,28 @@ export async function PUT(request: NextRequest) {
 
   const admin = createSupabaseAdmin();
 
-  // Get the next pending job (or continue a processing one)
+  // Round-robin: pick pending jobs first (rotates across accounts), then continue processing ones
   // When authenticated via session (not cron), only process the user's own jobs
-  let processingQuery = admin.from(SYNC_QUEUE).select('*').eq('status', 'processing').order('started_at', { ascending: true }).limit(1);
-  if (sessionUserId) processingQuery = processingQuery.eq('user_id', sessionUserId);
-  let { data: job } = await processingQuery.single();
+  let pendingQuery = admin.from(SYNC_QUEUE).select('*').eq('status', 'pending').order('priority', { ascending: true }).order('requested_at', { ascending: true }).limit(1);
+  if (sessionUserId) pendingQuery = pendingQuery.eq('user_id', sessionUserId);
+  let { data: job } = await pendingQuery.single();
 
-  if (!job) {
-    // No processing job — pick the next pending one
-    let pendingQuery = admin.from(SYNC_QUEUE).select('*').eq('status', 'pending').order('priority', { ascending: true }).order('requested_at', { ascending: true }).limit(1);
-    if (sessionUserId) pendingQuery = pendingQuery.eq('user_id', sessionUserId);
-    const { data: pending } = await pendingQuery
-      .single();
-
-    if (!pending) return apiSuccess({ message: 'Queue empty', idle: true });
-
+  if (job) {
     // Mark as processing
     const { data: started } = await admin
       .from(SYNC_QUEUE)
       .update({ status: 'processing', started_at: new Date().toISOString() })
-      .eq('id', pending.id)
+      .eq('id', job.id)
       .select()
       .single();
-
-    job = started || pending;
+    job = started || job;
+  } else {
+    // No pending — continue a processing one (single account remaining)
+    let processingQuery = admin.from(SYNC_QUEUE).select('*').eq('status', 'processing').order('started_at', { ascending: true }).limit(1);
+    if (sessionUserId) processingQuery = processingQuery.eq('user_id', sessionUserId);
+    const { data: processing } = await processingQuery.single();
+    if (!processing) return apiSuccess({ message: 'Queue empty', idle: true });
+    job = processing;
   }
 
   try {
@@ -248,6 +246,9 @@ export async function PUT(request: NextRequest) {
       await admin.from(SYNC_QUEUE).update({
         status: 'done', completed_at: new Date().toISOString(),
       }).eq('id', job.id);
+    } else {
+      // Reset to pending so next PUT call picks a different account (round-robin)
+      await admin.from(SYNC_QUEUE).update({ status: 'pending' }).eq('id', job.id);
     }
 
     return apiSuccess({
