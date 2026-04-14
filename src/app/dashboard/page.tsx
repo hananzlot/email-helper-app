@@ -778,7 +778,7 @@ function TierDropdown({ currentTier, senderEmail, senderName, onTierChanged }: {
 
 // ============ MAIN DASHBOARD ============
 
-type Tab = 'home' | 'inbox' | 'reply-queue' | 'snoozed' | 'cleanup' | 'sent' | 'follow-up' | 'priorities' | 'accounts' | 'search-reviews';
+type Tab = 'home' | 'inbox' | 'reply-queue' | 'snoozed' | 'cleanup' | 'sent' | 'follow-up' | 'priorities' | 'accounts' | 'search-reviews' | 'unsubscribes';
 // Note: 'priorities' and 'accounts' are accessible via the Settings gear menu, not the tab bar.
 
 interface ConnectedAccount {
@@ -2293,6 +2293,7 @@ export default function Dashboard() {
     { id: 'cleanup', label: 'Easy-Clear' },
     { id: 'sent', label: 'Sent' },
     { id: 'inbox', label: 'All Mail' },
+    { id: 'unsubscribes', label: 'Unsubscribes' },
     ...(searchSelectionActive.length > 0 ? [{ id: 'search-reviews' as Tab, label: `Search Reviews (${searchSelectionActive.length})` }] : []),
   ];
 
@@ -2818,6 +2819,7 @@ export default function Dashboard() {
               {activeTab === 'cleanup' && <CleanupTab unified={unified} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
               {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}-${sentVersion}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} onSenderTierChanged={handleTierChanged} />}
+              {activeTab === 'unsubscribes' && <UnsubscribesTab />}
               {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${triageVersion}`} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
               {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
             </>
@@ -6646,6 +6648,115 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
           />
         );
       })()}
+    </div>
+  );
+}
+
+// ============ UNSUBSCRIBES TAB ============
+
+function UnsubscribesTab() {
+  const [entries, setEntries] = useState<{ id: string; sender_email: string; domain: string; method: string; status: string; error_message: string | null; account_email: string; attempted_at: string; completed_at: string | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const res = await apiGet('unsubscribe');
+      if (res.success && res.data) {
+        setEntries(res.data);
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const statusColor = (status: string) => {
+    if (status === 'success') return { bg: '#f0fdf4', color: '#16a34a', label: 'Success' };
+    if (status === 'attempted') return { bg: '#fffbeb', color: '#d97706', label: 'Attempted' };
+    if (status === 'pending') return { bg: '#eef2ff', color: '#4f46e5', label: 'Queued' };
+    if (status === 'processing') return { bg: '#eef2ff', color: '#4f46e5', label: 'Processing' };
+    if (status === 'failed') return { bg: '#fef2f2', color: '#dc2626', label: 'Failed' };
+    return { bg: '#f1f5f9', color: '#64748b', label: status };
+  };
+
+  const methodLabel = (method: string) => {
+    if (method === 'header_oneclick') return 'One-click';
+    if (method === 'header_mailto') return 'Email sent';
+    if (method === 'header_url') return 'Link confirmed';
+    if (method === 'body_link') return 'Body link';
+    if (method === 'ai_agent') return 'AI agent';
+    if (method === 'pending') return '-';
+    return method || '-';
+  };
+
+  if (loading) return <div className="text-center py-16" style={{ color: 'var(--muted)' }}>Loading unsubscribe history...</div>;
+
+  if (entries.length === 0) return (
+    <div className="text-center py-16" style={{ color: 'var(--muted)' }}>
+      <p className="text-lg mb-2">No unsubscribe requests yet</p>
+      <p className="text-sm">Use the Easy-Clear tab to unsubscribe from unwanted senders.</p>
+    </div>
+  );
+
+  const pending = entries.filter(e => e.status === 'pending' || e.status === 'processing');
+  const completed = entries.filter(e => e.status !== 'pending' && e.status !== 'processing');
+
+  return (
+    <div className="flex flex-col gap-4">
+      {pending.length > 0 && (
+        <div className="rounded-xl border p-4" style={{ background: '#eef2ff', borderColor: 'var(--accent)' }}>
+          <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--accent)' }}>
+            {pending.length} queued — processing in background
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {pending.map(e => (
+              <span key={e.id} className="text-xs px-2 py-1 rounded-full" style={{ background: 'white', color: 'var(--accent)' }}>
+                {e.sender_email || e.domain}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ background: 'var(--bg)' }}>
+              <th className="text-left px-4 py-2 font-medium" style={{ color: 'var(--muted)' }}>Sender</th>
+              <th className="text-left px-4 py-2 font-medium" style={{ color: 'var(--muted)' }}>Account</th>
+              <th className="text-left px-4 py-2 font-medium" style={{ color: 'var(--muted)' }}>Method</th>
+              <th className="text-left px-4 py-2 font-medium" style={{ color: 'var(--muted)' }}>Status</th>
+              <th className="text-left px-4 py-2 font-medium" style={{ color: 'var(--muted)' }}>Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...pending, ...completed].map(e => {
+              const s = statusColor(e.status);
+              return (
+                <tr key={e.id} className="border-t" style={{ borderColor: 'var(--border)' }}>
+                  <td className="px-4 py-2.5">
+                    <span className="font-medium">{e.sender_email || e.domain}</span>
+                  </td>
+                  <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--muted)' }}>{e.account_email}</td>
+                  <td className="px-4 py-2.5 text-xs">{methodLabel(e.method)}</td>
+                  <td className="px-4 py-2.5">
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: s.bg, color: s.color }}>
+                      {s.label}
+                    </span>
+                    {e.error_message && e.status === 'failed' && (
+                      <span className="text-[10px] ml-1" style={{ color: '#dc2626' }} title={e.error_message}>
+                        {e.error_message.length > 30 ? e.error_message.slice(0, 30) + '...' : e.error_message}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--muted)' }}>
+                    {new Date(e.attempted_at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
