@@ -417,7 +417,7 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
                 {(email.bodyHtml || email.body) ? (
                   <iframe
                     ref={iframeRef}
-                    sandbox="allow-same-origin"
+                    sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
                     className="w-full border rounded-lg"
                     style={{ borderColor: 'var(--border)', background: 'white', minHeight: 150 }}
                     title="Email content"
@@ -812,7 +812,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState<{ loaded: number; total: number | null; phase: string } | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ title: string; subtitle?: string; undoAction?: () => void; expiresAt?: number } | null>(null);
+  const [toast, setToast] = useState<{ title: string; subtitle?: string; undoAction?: () => void; expiresAt?: number; variant?: 'default' | 'success' } | null>(null);
   // Pending undo actions — delayed destructive operations that can be cancelled
   const [pendingUndo, setPendingUndo] = useState<{ key: string; timer: NodeJS.Timeout; action: () => Promise<void> } | null>(null);
   // Quick reply templates
@@ -1729,13 +1729,14 @@ export default function Dashboard() {
   }, [accounts.length]);
 
   function showToast(title: string, subtitle?: string, undoAction?: () => void) {
-    const expiresAt = undoAction ? Date.now() + 3000 : undefined;
-    setToast({ title, subtitle, undoAction, expiresAt });
+    const isSuccess = title.startsWith('\u2714');
+    const duration = undoAction ? 3500 : isSuccess ? 6000 : 3000;
+    const expiresAt = undoAction ? Date.now() + duration : undefined;
+    setToast({ title, subtitle, undoAction, expiresAt, variant: isSuccess ? 'success' : 'default' });
     setTimeout(() => setToast(prev => {
-      // Only clear if this is still the same toast
       if (prev?.title === title && prev?.subtitle === subtitle) return null;
       return prev;
-    }), undoAction ? 3500 : 3000);
+    }), duration);
   }
 
   // Load quick reply templates from localStorage on mount
@@ -3033,7 +3034,7 @@ function HistoryEntryCard({ entry, onUndo }: { entry: ActionHistoryEntry; onUndo
 // ============ UNDO TOAST ============
 
 function UndoToast({ toast, onDismiss }: {
-  toast: { title: string; subtitle?: string; undoAction?: () => void; expiresAt?: number };
+  toast: { title: string; subtitle?: string; undoAction?: () => void; expiresAt?: number; variant?: 'default' | 'success' };
   onDismiss: () => void;
 }) {
   const [secondsLeft, setSecondsLeft] = useState(5);
@@ -3052,9 +3053,9 @@ function UndoToast({ toast, onDismiss }: {
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in"
       style={{ maxWidth: '90vw' }}>
       <div className="flex items-center gap-4 px-5 py-3 rounded-xl text-white text-sm font-medium shadow-2xl"
-        style={{ background: '#1e293b', minWidth: 200 }}>
+        style={{ background: toast.variant === 'success' ? '#059669' : '#1e293b', minWidth: 200 }}>
         <div className="flex-1">
-          <div className="font-semibold">{toast.title}</div>
+          <div className="font-semibold">{toast.variant === 'success' && '\u2714 '}{toast.title}</div>
           {toast.subtitle && <div className="text-xs opacity-70 mt-0.5">{toast.subtitle}</div>}
         </div>
         {toast.undoAction && (
@@ -3379,6 +3380,7 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
                 <div>• <strong>Quick Reply</strong> — in Top Tiers, use the &quot;Quick Reply&quot; dropdown to send a template response and auto-archive in one click.</div>
                 <div>• <strong>Drag to reorder</strong> — drag Top Tiers cards to rearrange priority. Pin important emails with the 📌 button to keep them at top.</div>
                 <div>• <strong>Undo</strong> — after archiving or trashing, you get a 5-second window to undo. Go fast, undo if needed.</div>
+                <div>• <strong>Unsubscribe</strong> — in Easy-Clear, hit &quot;Unsubscribe&quot; on any sender. If successful, their messages are automatically archived too.</div>
                 <div>• <strong>Auto-Clean</strong> — in Priorities, enable &quot;Auto-Clean&quot; for high-tier senders whose update emails should be auto-archived during triage.</div>
                 <div>• <strong>Merge Senders</strong> — in Priorities, click &quot;Merge Senders&quot; to manually combine duplicate contacts, or use the auto-detected suggestions.</div>
                 <div>• <strong>Search</strong> — press <strong>⌘K</strong> (or <strong>/</strong>) to open global search. It searches all emails across all connected accounts by sender or subject.</div>
@@ -3702,7 +3704,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
           ref={iframeRef}
           className="w-full border-0"
           style={{ minHeight: 200 }}
-          sandbox="allow-same-origin"
+          sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
           title="Email content"
         />
       </div>
@@ -4717,10 +4719,19 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                     sender_email: group.email,
                     domain: group.email.includes('@') ? group.email.split('@')[1] : group.email.replace('@', ''),
                   });
-                  if (res.success && res.data?.status === 'success') success++;
+                  if (res.success && res.data?.status === 'success') {
+                    success++;
+                    // Auto-archive all messages from this sender
+                    const msgIds = group.messages.map((m: { id: string }) => m.id);
+                    actionByAccount('archive', msgIds);
+                  }
                 } catch {}
               }
-              showToast(`Unsubscribed from ${success} sender${success !== 1 ? 's' : ''}`, success < selectedGroups.size ? `${selectedGroups.size - success} failed` : undefined);
+              setSelectedGroups(new Set()); setSelectedMessages(new Set());
+              showToast(
+                success > 0 ? `\u2714 Successfully unsubscribed from ${success} sender${success !== 1 ? 's' : ''}!` : 'No unsubscribes succeeded',
+                success < selectedGroups.size ? `${selectedGroups.size - success} failed` : 'All confirmed & archived'
+              );
             }}
               className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: '#8b5cf6' }}>
               Unsubscribe ({selectedGroups.size})
@@ -4824,7 +4835,14 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                         domain: group.email.includes('@') ? group.email.split('@')[1] : group.email.replace('@', ''),
                       });
                       if (res.success && res.data?.status === 'success') {
-                        showToast('Unsubscribed!', `${group.name} — ${res.data.method}`);
+                        const methodLabel = res.data.method === 'header_oneclick' ? 'One-click confirmed'
+                          : res.data.method === 'header_mailto' ? 'Unsubscribe email sent'
+                          : res.data.method === 'header_url' ? 'Confirmed via link'
+                          : res.data.method === 'body_link' ? 'Link visited'
+                          : res.data.method;
+                        // Auto-archive all messages from this sender after successful unsubscribe
+                        actionByAccount('archive', allIds);
+                        showToast('\u2714 Successfully unsubscribed!', `${group.name} — ${methodLabel} — ${allIds.length} archived`);
                       } else {
                         showToast('Could not auto-unsubscribe', res.data?.reason || res.error || 'Try manually');
                       }
