@@ -2441,31 +2441,28 @@ export default function Dashboard() {
         </div>
 
 
-        {/* Per-account sync progress bars — always visible when accounts have sync data */}
+        {/* Per-account sync progress bars — fixed left column, doesn't push content */}
         {Object.keys(syncProgress).length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="fixed left-3 top-20 z-30 flex flex-col gap-1.5" style={{ width: 220 }}>
             {Object.entries(syncProgress).map(([email, s]) => {
               const pct = s.total > 0 ? Math.min(100, Math.round((Math.min(s.cached, s.total) / s.total) * 100)) : 0;
-              const shortEmail = email.split('@')[0];
               const isDone = s.done || pct >= 100;
               return (
-                <div key={email} className="flex-1 min-w-[180px] max-w-[320px] px-3 py-2 rounded-lg border" style={{ background: isDone ? '#f0fdf4' : '#fefce8', borderColor: isDone ? '#bbf7d0' : '#fde68a' }}>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5">
-                      {!isDone && <div className="w-2.5 h-2.5 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
-                      {isDone && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
-                      <span className="text-[11px] font-semibold truncate" style={{ color: isDone ? '#166534' : '#92400e' }}>{shortEmail}</span>
-                    </div>
-                    <span className="text-[10px] font-medium ml-2 whitespace-nowrap" style={{ color: isDone ? '#16a34a' : '#b45309' }}>
-                      {isDone ? 'Synced' : `${Math.min(s.cached, s.total).toLocaleString()} / ${s.total.toLocaleString()}`}
-                    </span>
+                <div key={email} className="px-2.5 py-1.5 rounded-lg border shadow-sm" style={{ background: isDone ? '#f0fdf4' : '#fefce8', borderColor: isDone ? '#bbf7d0' : '#fde68a' }}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    {!isDone && <div className="w-2 h-2 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
+                    {isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
+                    <span className="text-[10px] font-semibold truncate" style={{ color: isDone ? '#166534' : '#92400e' }}>{email}</span>
                   </div>
-                  <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: isDone ? '#dcfce7' : '#fef3c7' }}>
+                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: isDone ? '#dcfce7' : '#fef3c7' }}>
                     <div className="h-full rounded-full transition-all duration-1000" style={{ background: isDone ? '#22c55e' : '#f59e0b', width: `${pct}%` }} />
                   </div>
-                  {!isDone && s.eta && (
-                    <div className="text-[9px] mt-0.5 text-right" style={{ color: '#b45309' }}>{s.eta}</div>
-                  )}
+                  <div className="flex items-center justify-between mt-0.5">
+                    <span className="text-[9px]" style={{ color: isDone ? '#16a34a' : '#b45309' }}>
+                      {isDone ? `${s.total.toLocaleString()} — 100%` : `${Math.min(s.cached, s.total).toLocaleString()} / ${s.total.toLocaleString()} (${pct}%)`}
+                    </span>
+                    {!isDone && s.eta && <span className="text-[9px]" style={{ color: '#b45309' }}>{s.eta}</span>}
+                  </div>
                 </div>
               );
             })}
@@ -6502,27 +6499,18 @@ function AccountsTab({ currentAccount, accounts, onSwitch, onRefresh, showToast,
             {accounts.map((a) => (
               <div key={a.email} className="flex items-center justify-between px-4 py-3 rounded-lg border"
                 style={{
-                  background: a.email === currentAccount ? 'var(--normal-bg)' : 'var(--bg)',
-                  borderColor: a.email === currentAccount ? 'var(--normal)' : 'var(--border)',
+                  background: 'var(--bg)',
+                  borderColor: 'var(--border)',
                 }}>
                 <div className="flex items-center gap-3">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: a.email === currentAccount ? 'var(--normal)' : 'var(--border)' }} />
                   <div>
                     <span className="font-medium">{a.email}</span>
                     <div className="flex gap-2 mt-0.5">
                       {a.is_primary && <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--accent)', color: 'white' }}>Primary</span>}
-                      {a.email === currentAccount && <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: 'var(--normal-bg)', color: '#065f46' }}>Active</span>}
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {a.email !== currentAccount && (
-                    <button onClick={() => onSwitch(a.email)}
-                      className="text-xs px-3 py-1.5 rounded-lg font-medium border"
-                      style={{ borderColor: 'var(--border)' }}>
-                      Switch
-                    </button>
-                  )}
                   {!a.is_primary && (
                     <button onClick={() => setPrimary(a.email)}
                       className="text-xs px-3 py-1.5 rounded-lg font-medium text-white"
