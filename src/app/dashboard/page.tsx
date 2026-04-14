@@ -4639,7 +4639,10 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
     for (const [acct, ids] of byAccount) {
       onAction(action, ids, undefined, acct);
     }
-    // Remove from local state
+    // Show confirmation toast
+    const labels: Record<string, string> = { markRead: 'Marked read', archive: 'Archived', trash: 'Trashed', delete: 'Deleted' };
+    showToast(labels[action] || action, `${msgIds.length} message${msgIds.length !== 1 ? 's' : ''}`);
+    // Remove from local state (Easy-Clear only shows unread, so markRead also removes)
     const removedIds = new Set(msgIds);
     setServerGroups(prev => prev.map(g => ({
       ...g,
