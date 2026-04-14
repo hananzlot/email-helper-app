@@ -1200,6 +1200,8 @@ export default function Dashboard() {
     setTabCounts({});
     showToast('Unified view', 'Showing all accounts');
     loadUnifiedInbox(true);
+    // Delay tab count reload to let unified state propagate
+    setTimeout(() => loadAllTabCounts(), 1000);
   }
 
   // Save messages to Supabase cache in background (fire-and-forget)
@@ -2229,7 +2231,7 @@ export default function Dashboard() {
     } catch (e) {
       console.error('Failed to load tab counts:', e);
     }
-  }, [messages, reportTabCount]);
+  }, [messages, reportTabCount, unified, accounts]);
 
   // Load tab counts on initial page load and whenever messages stabilize
   // Debounce to avoid flickering during pagination (messages change every 200 batch)
