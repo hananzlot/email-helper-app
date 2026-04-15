@@ -9,22 +9,27 @@ const COMMON_DOMAINS = new Set([
 ]);
 
 /**
- * GET /api/emailHelperV2/easy-clear?limit=50&offset=0&groupBy=domain
- * Returns pre-grouped noise emails from cache using SQL aggregation.
- * All filtering, deduplication, and grouping happens server-side.
+ * GET /api/emailHelperV2/easy-clear
+ *
+ * Two modes:
+ *   Default — returns grouped sender counts (fast SQL, no message bodies)
+ *   ?mode=messages&sender=email — returns messages for a specific sender/domain
+ *
+ * Groups mode handles 76K+ messages by only fetching sender_email for counting.
+ * Messages mode is called per-group when user expands or client pre-fetches.
  */
 export async function GET(request: NextRequest) {
   const { userId, account } = await getRequestContext(request);
   if (!userId) return apiError('Not authenticated', 401);
 
+  const mode = request.nextUrl.searchParams.get('mode') || 'groups';
   const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50');
   const offset = parseInt(request.nextUrl.searchParams.get('offset') || '0');
   const groupBy = request.nextUrl.searchParams.get('groupBy') || 'domain';
 
   const admin = createSupabaseAdmin();
 
-  // Get sender tiers (A/B/C senders are NOT noise — exclude them)
-  // Also load aliases so merged addresses are excluded too
+  // Get signal senders (A/B/C) + their domains to exclude
   const { data: senders } = await admin
     .from(TABLES.SENDER_PRIORITIES)
     .select('sender_email, tier, aliases')
@@ -36,38 +41,51 @@ export async function GET(request: NextRequest) {
   if (senders) {
     for (const s of senders) {
       signalSenders.add(s.sender_email.toLowerCase());
-      // Also exclude aliases of signal senders
       for (const alias of (s.aliases || [])) signalSenders.add(alias.toLowerCase());
-      // Exclude entire domain if a signal sender belongs to it (non-common domains only)
       const domain = s.sender_email.split('@')[1]?.toLowerCase();
       if (domain && !COMMON_DOMAINS.has(domain)) signalDomains.add(domain);
     }
   }
 
-  // Get actioned message IDs to exclude
-  const { data: actions } = await admin
-    .from(TABLES.ACTION_HISTORY)
-    .select('message_ids')
-    .eq('user_id', userId)
-    .in('action', ['trash', 'archive', 'delete'])
-    .eq('undone', false);
+  // ============ MESSAGES MODE: fetch messages for a specific sender/domain ============
+  if (mode === 'messages') {
+    const senderFilter = request.nextUrl.searchParams.get('sender') || '';
+    if (!senderFilter) return apiError('Missing sender param');
 
-  const actionedIds = new Set<string>();
-  if (actions) {
-    for (const row of actions) {
-      for (const mid of (row.message_ids || [])) actionedIds.add(mid);
-    }
-  }
-
-  // Fetch unread messages in batches of 1000, capped at 10,000 to avoid function timeout
-  const MAX_MESSAGES = 10_000;
-  let allMessages: { gmail_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; account_email: string }[] = [];
-  let from = 0;
-  const batchSize = 1000;
-  while (allMessages.length < MAX_MESSAGES) {
+    const isDomain = senderFilter.startsWith('@');
     const query = admin
       .from(TABLES.INBOX_CACHE)
       .select('gmail_id, sender, sender_email, subject, snippet, date, account_email')
+      .eq('user_id', userId)
+      .eq('is_unread', true);
+    if (account) query.eq('account_email', account);
+    if (isDomain) {
+      query.ilike('sender_email', `%${senderFilter.slice(1)}`);
+    } else {
+      query.eq('sender_email', senderFilter);
+    }
+    const { data, error } = await query.order('date', { ascending: false }).limit(500);
+    if (error) return apiError(error.message, 500);
+
+    return apiSuccess({
+      messages: (data || []).map((m: { gmail_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; account_email: string }) => ({
+        id: m.gmail_id, sender: m.sender, senderEmail: m.sender_email,
+        subject: m.subject, snippet: m.snippet, date: m.date, accountEmail: m.account_email,
+      })),
+    });
+  }
+
+  // ============ GROUPS MODE: count by sender, fast ============
+  // Fetch only sender_email column in batches (minimal payload for 76K+ rows)
+  const senderCounts: Record<string, { sender: string; senderEmail: string; count: number; accountEmail: string }> = {};
+  let from = 0;
+  const batchSize = 1000;
+  let totalScanned = 0;
+
+  while (true) {
+    const query = admin
+      .from(TABLES.INBOX_CACHE)
+      .select('sender, sender_email, account_email')
       .eq('user_id', userId)
       .eq('is_unread', true);
     if (account) query.eq('account_email', account);
@@ -77,82 +95,51 @@ export async function GET(request: NextRequest) {
 
     if (error) return apiError(error.message, 500);
     if (!batch || batch.length === 0) break;
-    allMessages.push(...batch);
-    from += batchSize;
-    if (batch.length < batchSize) break; // Last page
-  }
 
-  // Filter: exclude signal senders (A/B/C), actioned, and deduplicate
-  const seenIds = new Set<string>();
-  const noiseMessages = allMessages.filter(m => {
-    if (actionedIds.has(m.gmail_id)) return false;
-    if (seenIds.has(m.gmail_id)) return false;
-    if (signalSenders.has(m.sender_email.toLowerCase())) return false;
-    const domain = m.sender_email.split('@')[1]?.toLowerCase();
-    if (domain && signalDomains.has(domain)) return false;
-    seenIds.add(m.gmail_id);
-    return true;
-  });
+    for (const m of batch) {
+      const email = (m.sender_email || '').toLowerCase();
+      if (signalSenders.has(email)) continue;
+      const domain = email.split('@')[1] || '';
+      if (domain && signalDomains.has(domain)) continue;
 
-  // Group by domain or sender
-  type MsgType = typeof noiseMessages[number];
-  const groups: Record<string, { key: string; name: string; email: string; count: number; messages: MsgType[] }> = {};
+      const key = groupBy === 'domain' && !COMMON_DOMAINS.has(domain)
+        ? `@${domain}` : email;
 
-  for (const m of noiseMessages) {
-    let key: string;
-    let name: string;
-    let email: string;
-
-    if (groupBy === 'domain') {
-      const domain = (m.sender_email.split('@')[1] || '').toLowerCase();
-      if (COMMON_DOMAINS.has(domain)) {
-        key = m.sender_email.toLowerCase();
-        name = m.sender || m.sender_email;
-        email = m.sender_email;
-      } else {
-        key = `@${domain}`;
-        name = domain;
-        email = `@${domain}`;
+      if (!senderCounts[key]) {
+        senderCounts[key] = {
+          sender: groupBy === 'domain' && !COMMON_DOMAINS.has(domain) ? domain : (m.sender || email),
+          senderEmail: key,
+          count: 0,
+          accountEmail: m.account_email,
+        };
       }
-    } else {
-      key = m.sender_email.toLowerCase();
-      name = m.sender || m.sender_email;
-      email = m.sender_email;
+      senderCounts[key].count++;
     }
 
-    if (!groups[key]) {
-      groups[key] = { key, name, email, count: 0, messages: [] };
-    }
-    groups[key].count++;
-    groups[key].messages.push(m);
+    totalScanned += batch.length;
+    from += batchSize;
+    if (batch.length < batchSize) break;
   }
 
   // Sort by count DESC
-  const sorted = Object.values(groups).sort((a, b) => b.count - a.count);
-  const total = sorted.length;
-  const totalMessages = noiseMessages.length;
+  const sorted = Object.values(senderCounts).sort((a, b) => b.count - a.count);
+  const totalGroups = sorted.length;
+  const totalMessages = sorted.reduce((s, g) => s + g.count, 0);
 
-  // Paginate groups
+  // Paginate
   const page = sorted.slice(offset, offset + limit);
 
   return apiSuccess({
     groups: page.map(g => ({
-      key: g.key,
-      name: g.name,
-      email: g.email,
+      key: g.senderEmail,
+      name: g.sender,
+      email: g.senderEmail,
       count: g.count,
-      messages: g.messages.map((m: MsgType) => ({
-        id: m.gmail_id,
-        sender: m.sender,
-        senderEmail: m.sender_email,
-        subject: m.subject,
-        snippet: m.snippet,
-        date: m.date,
-        accountEmail: m.account_email,
-      })),
+      messages: [], // Fetched separately via mode=messages
     })),
-    totalGroups: total,
+    totalGroups,
     totalMessages,
-    hasMore: offset + limit < total,
+    totalScanned,
+    hasMore: offset + limit < totalGroups,
   });
 }

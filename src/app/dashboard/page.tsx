@@ -4666,24 +4666,33 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
     return () => window.removeEventListener('cleanup-remove', handleRemove);
   }, []);
 
-  // Load data from server-side API (all filtering/grouping/dedup done in SQL)
+  // Progressive loading: groups first (fast counts), then messages in background batches
+  const bgFetchRef = React.useRef(false);
+
   async function loadData() {
     setLoading(true);
     try {
+      // Phase 1: Load top 50 groups (counts only — fast) + sender tiers
       const [ecRes, sendersRes] = await Promise.all([
-        fetch(unified ? `/api/emailHelperV2/easy-clear?limit=10000&groupBy=${sortBy}` : withAccount(`/api/emailHelperV2/easy-clear?limit=10000&groupBy=${sortBy}`)).then(r => r.json()),
+        fetch(unified ? `/api/emailHelperV2/easy-clear?limit=50&groupBy=${sortBy}` : withAccount(`/api/emailHelperV2/easy-clear?limit=50&groupBy=${sortBy}`)).then(r => r.json()),
         apiGet('senders'),
       ]);
       if (ecRes.success && ecRes.data) {
-        const groups = ecRes.data.groups.map((g: { key: string; name: string; email: string; count: number; messages: { id: string; sender: string; senderEmail: string; subject: string; snippet: string; date: string; accountEmail: string }[] }) => ({
-          ...g,
-          messages: g.messages.map(m => ({
-            ...m, threadId: '', isUnread: true, labelIds: [], body: '', bodyHtml: '', to: '', cc: '',
-          } as GmailMessage)),
+        const groups = ecRes.data.groups.map((g: { key: string; name: string; email: string; count: number }) => ({
+          ...g, messages: [] as GmailMessage[],
         }));
         setServerGroups(groups);
         setTotalMessages(ecRes.data.totalMessages || 0);
         reportCount?.(ecRes.data.totalMessages || 0);
+
+        // Phase 2: Fetch messages for these 50 groups in background
+        fetchMessagesForGroups(groups.map((g: { email: string }) => g.email));
+
+        // Phase 3: Load remaining groups in background batches (50 at a time, 15s apart)
+        if (ecRes.data.hasMore) {
+          bgFetchRef.current = true;
+          loadRemainingGroups(50, ecRes.data.totalGroups);
+        }
       }
       if (sendersRes.success && sendersRes.data) {
         const tiers: Record<string, string> = {};
@@ -4701,10 +4710,76 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
     setLoading(false);
   }
 
-  useEffect(() => { loadData(); }, [sortBy]);
+  async function fetchMessagesForGroups(senderEmails: string[]) {
+    // Fetch messages for each group — 5 concurrent requests
+    const batches: string[][] = [];
+    for (let i = 0; i < senderEmails.length; i += 5) batches.push(senderEmails.slice(i, i + 5));
+    for (const batch of batches) {
+      const results = await Promise.all(batch.map(email => {
+        const url = unified
+          ? `/api/emailHelperV2/easy-clear?mode=messages&sender=${encodeURIComponent(email)}`
+          : withAccount(`/api/emailHelperV2/easy-clear?mode=messages&sender=${encodeURIComponent(email)}`);
+        return fetch(url).then(r => r.json()).then(r => ({ email, messages: r.success ? r.data.messages : [] })).catch(() => ({ email, messages: [] }));
+      }));
+      // Merge messages into groups
+      setServerGroups(prev => prev.map(g => {
+        const match = results.find(r => r.email === g.email);
+        if (!match || g.messages.length > 0) return g; // Already loaded
+        return { ...g, messages: match.messages.map((m: { id: string; sender: string; senderEmail: string; subject: string; snippet: string; date: string; accountEmail: string }) => ({ ...m, threadId: '', isUnread: true, labelIds: [], body: '', bodyHtml: '', to: '', cc: '' } as GmailMessage)) };
+      }));
+    }
+  }
+
+  async function loadRemainingGroups(currentOffset: number, totalGroups: number) {
+    let offset = currentOffset;
+    while (offset < totalGroups && bgFetchRef.current) {
+      await new Promise(r => setTimeout(r, 15000)); // 15s between batches
+      if (!bgFetchRef.current) break;
+      try {
+        const url = unified
+          ? `/api/emailHelperV2/easy-clear?limit=50&offset=${offset}&groupBy=${sortBy}`
+          : withAccount(`/api/emailHelperV2/easy-clear?limit=50&offset=${offset}&groupBy=${sortBy}`);
+        const res = await fetch(url).then(r => r.json());
+        if (res.success && res.data?.groups?.length > 0) {
+          const newGroups = res.data.groups.map((g: { key: string; name: string; email: string; count: number }) => ({
+            ...g, messages: [] as GmailMessage[],
+          }));
+          setServerGroups(prev => [...prev, ...newGroups]);
+          // Fetch messages for the new batch
+          fetchMessagesForGroups(newGroups.map((g: { email: string }) => g.email));
+          offset += 50;
+        } else break;
+      } catch { break; }
+    }
+  }
+
+  useEffect(() => {
+    bgFetchRef.current = false; // Cancel any ongoing background fetch
+    loadData();
+    return () => { bgFetchRef.current = false; };
+  }, [sortBy]);
 
   // Use server groups directly — no client-side filtering needed
   const cleanupMessages = serverGroups.flatMap(g => g.messages);
+
+  // Fetch messages for a group if not loaded yet, returns message IDs
+  async function ensureGroupMessages(groupEmail: string): Promise<string[]> {
+    const group = serverGroups.find(g => g.email === groupEmail);
+    if (group && group.messages.length > 0) return group.messages.map(m => m.id);
+    // Fetch on demand
+    const url = unified
+      ? `/api/emailHelperV2/easy-clear?mode=messages&sender=${encodeURIComponent(groupEmail)}`
+      : withAccount(`/api/emailHelperV2/easy-clear?mode=messages&sender=${encodeURIComponent(groupEmail)}`);
+    const res = await fetch(url).then(r => r.json()).catch(() => null);
+    if (res?.success && res.data?.messages?.length > 0) {
+      const msgs = res.data.messages.map((m: { id: string; sender: string; senderEmail: string; subject: string; snippet: string; date: string; accountEmail: string }) => ({
+        ...m, threadId: '', isUnread: true, labelIds: [], body: '', bodyHtml: '', to: '', cc: '',
+      } as GmailMessage));
+      setServerGroups(prev => prev.map(g => g.email === groupEmail ? { ...g, messages: msgs } : g));
+      return msgs.map((m: GmailMessage) => m.id);
+    }
+    return [];
+  }
 
   // Execute action grouped by account
   function actionByAccount(action: string, msgIds: string[]) {
@@ -4940,7 +5015,8 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
         {groups.slice(0, visibleGroups).map(group => {
           const isExpanded = expandedSender === group.email;
           const isGroupSelected = selectedGroups.has(group.email);
-          const allIds = group.messages.map(m => m.id);
+          let allIds = group.messages.map(m => m.id);
+          const ensureIds = async () => { if (allIds.length === 0) { allIds = await ensureGroupMessages(group.email); } return allIds; };
           return (
             <div key={group.email} className="rounded-xl border overflow-hidden transition-all"
               style={{ background: isGroupSelected ? '#eff6ff' : 'var(--card)', borderColor: isGroupSelected ? 'var(--accent)' : 'var(--border)' }}>
@@ -4993,14 +5069,15 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                       }
                     }}
                   />
-                  <SnoozeDropdown onSnooze={(hours, label) => {
+                  <SnoozeDropdown onSnooze={async (hours, label) => {
+                    const ids = await ensureIds();
+                    const msgs = serverGroups.find(g => g.email === group.email)?.messages || [];
                     const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
-                    for (const m of group.messages) {
+                    for (const m of msgs) {
                       apiPost('queue', { message_id: m.id, account_email: m.accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: group.name, sender_email: group.email, subject: m.subject });
                     }
-                    // Mark as read to remove from Easy-Clear (unread-only) and update cache
-                    actionByAccount('markRead', allIds);
-                    showToast('Snoozed', `${group.messages.length} message${group.messages.length > 1 ? 's' : ''} will reappear ${label}`);
+                    if (ids.length) actionByAccount('markRead', ids);
+                    showToast('Snoozed', `${ids.length} message${ids.length !== 1 ? 's' : ''} will reappear ${label}`);
                   }} />
                   <button onClick={async () => {
                     const latest = group.messages[0];
@@ -5025,11 +5102,11 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                     style={{ borderColor: '#8b5cf6', color: '#8b5cf6', background: '#f5f3ff' }}>
                     Unsubscribe
                   </button>
-                  <button onClick={() => actionByAccount('archive', allIds)}
+                  <button onClick={async () => { const ids = await ensureIds(); if (ids.length) actionByAccount('archive', ids); }}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)' }}>
                     Archive
                   </button>
-                  <button onClick={() => actionByAccount('trash', allIds)}
+                  <button onClick={async () => { const ids = await ensureIds(); if (ids.length) actionByAccount('trash', ids); }}
                     className="px-3 py-1.5 text-xs font-medium rounded-lg border text-red-500" style={{ borderColor: 'var(--border)' }}>
                     Trash
                   </button>
