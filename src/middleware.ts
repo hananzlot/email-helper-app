@@ -14,6 +14,9 @@ export function middleware(request: NextRequest) {
   // Skip cron route — it uses CRON_SECRET bearer auth, not cookies
   if (pathname === '/api/emailHelperV2/cron') return NextResponse.next();
 
+  // Skip unsubscribe route — it accepts CRON_SECRET bearer auth for server-to-server calls
+  if (pathname === '/api/emailHelperV2/unsubscribe') return NextResponse.next();
+
   // Skip admin auth route — it verifies password server-side
   if (pathname === '/api/emailHelperV2/admin/auth') return NextResponse.next();
 
