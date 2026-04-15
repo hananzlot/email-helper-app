@@ -59,11 +59,12 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Fetch ALL unread messages in batches of 1000 (Supabase default limit)
+  // Fetch unread messages in batches of 1000, capped at 10,000 to avoid function timeout
+  const MAX_MESSAGES = 10_000;
   let allMessages: { gmail_id: string; sender: string; sender_email: string; subject: string; snippet: string; date: string; account_email: string }[] = [];
   let from = 0;
   const batchSize = 1000;
-  while (true) {
+  while (allMessages.length < MAX_MESSAGES) {
     const query = admin
       .from(TABLES.INBOX_CACHE)
       .select('gmail_id, sender, sender_email, subject, snippet, date, account_email')
