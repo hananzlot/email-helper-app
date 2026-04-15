@@ -4257,7 +4257,17 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     if (snoozedUntil) payload.snoozed_until = snoozedUntil;
     const res = await apiPut('queue', payload);
     if (res.success) {
-      setQueue(prev => prev.map(q => q.id === id ? { ...q, status, snoozed_until: snoozedUntil || q.snoozed_until } : q));
+      if (status === 'snoozed' || status === 'done') {
+        // Remove from the queue list immediately
+        setQueue(prev => {
+          const updated = prev.filter(q => q.id !== id);
+          const activeSignalCount = updated.filter((q: any) => q.status === 'active' && q.priority !== 'low' && ['A', 'B', 'C'].includes(q.tier)).length;
+          reportCount?.(activeSignalCount);
+          return updated;
+        });
+      } else {
+        setQueue(prev => prev.map(q => q.id === id ? { ...q, status, snoozed_until: snoozedUntil || q.snoozed_until } : q));
+      }
       showToast(`Marked ${status}`);
     }
   }
