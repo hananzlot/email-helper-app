@@ -6,6 +6,20 @@ import { getGmailClient, getMessage } from '@/lib/gmail';
 import { TABLES } from '@/lib/tables';
 
 const UNSUB_TABLE = 'emailHelperV2_unsubscribe_log';
+const FETCH_TIMEOUT_MS = 12_000; // 12s timeout for unsubscribe URL fetches
+
+/**
+ * Fetch with a timeout via AbortController.
+ */
+async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Validate a URL is safe to fetch (SSRF protection).
@@ -71,7 +85,7 @@ export async function POST(request: NextRequest) {
 /**
  * PUT /api/emailHelperV2/unsubscribe
  * Process ONE pending unsubscribe from the queue.
- * Called by cron job or client polling. Accepts CRON_SECRET or session auth.
+ * Called by Supabase cron Edge Function or client. Accepts CRON_SECRET or session auth.
  */
 export async function PUT(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
@@ -87,12 +101,19 @@ export async function PUT(request: NextRequest) {
 
   const admin = createSupabaseAdmin();
 
+  // Reset any entries stuck in "processing" for >5 min (crashed previous handler)
+  await admin
+    .from(UNSUB_TABLE)
+    .update({ status: 'pending' })
+    .eq('status', 'processing')
+    .lt('attempted_at', new Date(Date.now() - 5 * 60_000).toISOString());
+
   // Pick the oldest pending entry
   let query = admin.from(UNSUB_TABLE).select('*').eq('status', 'pending').order('attempted_at', { ascending: true }).limit(1);
   if (filterUserId) query = query.eq('user_id', filterUserId);
-  const { data: entry } = await query.single();
+  const { data: entry, error: fetchError } = await query.single();
 
-  if (!entry) return apiSuccess({ idle: true });
+  if (fetchError || !entry) return apiSuccess({ idle: true });
 
   // Mark as processing
   await admin.from(UNSUB_TABLE).update({ status: 'processing' }).eq('id', entry.id);
@@ -115,7 +136,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Strategy 1: Check List-Unsubscribe header
-    const result = await tryListUnsubscribeHeader(gmail, entry.message_id, accessToken);
+    const result = await tryListUnsubscribeHeader(gmail, entry.message_id);
     if (result.success) {
       const isVerified = result.method !== 'header_url_needs_interaction';
       await updateLog({ method: result.method, status: isVerified ? 'success' : 'attempted', unsubscribe_url: result.url || null, completed_at: new Date().toISOString() });
@@ -129,19 +150,12 @@ export async function PUT(request: NextRequest) {
       return apiSuccess({ logId: entry.id, status: 'success', method: 'body_link', senderEmail: entry.sender_email });
     }
 
-    // Strategy 3: AI Agent with headless browser
+    // Strategy 3: AI Agent with headless browser (skip — too slow and unreliable for cron)
+    // If we have a URL but couldn't confirm unsubscribe, mark as attempted
     const anyUrl = result.url || bodyResult.url;
     if (anyUrl) {
-      try {
-        const { aiUnsubscribe } = await import('@/lib/unsubscribe-agent');
-        const aiResult = await aiUnsubscribe(anyUrl, entry.account_email);
-        if (aiResult.success) {
-          await updateLog({ method: aiResult.method, status: 'success', unsubscribe_url: anyUrl, completed_at: new Date().toISOString() });
-          return apiSuccess({ logId: entry.id, status: 'success', method: aiResult.method, senderEmail: entry.sender_email });
-        }
-      } catch (aiErr) {
-        console.error('AI unsubscribe failed:', aiErr);
-      }
+      await updateLog({ method: 'attempted', status: 'attempted', unsubscribe_url: anyUrl, completed_at: new Date().toISOString() });
+      return apiSuccess({ logId: entry.id, status: 'attempted', method: 'url_found', senderEmail: entry.sender_email });
     }
 
     // All strategies failed
@@ -157,7 +171,7 @@ export async function PUT(request: NextRequest) {
       return apiSuccess({ logId: entry.id, status: 'quota_retry' });
     }
 
-    await updateLog({ status: 'failed', error_message: errMsg, completed_at: new Date().toISOString() });
+    await updateLog({ status: 'failed', error_message: errMsg.slice(0, 500), completed_at: new Date().toISOString() });
     return apiSuccess({ logId: entry.id, status: 'failed', error: errMsg });
   }
 }
@@ -204,7 +218,6 @@ export async function GET(request: NextRequest) {
 async function tryListUnsubscribeHeader(
   gmail: ReturnType<typeof getGmailClient>,
   messageId: string,
-  accessToken: string
 ): Promise<{ success: boolean; method?: string; url?: string }> {
   try {
     const res = await gmail.users.messages.get({
@@ -238,7 +251,7 @@ async function tryListUnsubscribeHeader(
     // Prefer one-click HTTP unsubscribe (RFC 8058)
     if (safeUrls.length > 0 && unsubPostHeader) {
       try {
-        const response = await fetch(safeUrls[0], {
+        const response = await fetchWithTimeout(safeUrls[0], {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: 'List-Unsubscribe=One-Click',
@@ -253,16 +266,30 @@ async function tryListUnsubscribeHeader(
     // Try HTTP GET
     if (safeUrls.length > 0) {
       try {
-        const response = await fetch(safeUrls[0], {
+        const response = await fetchWithTimeout(safeUrls[0], {
           method: 'GET',
           redirect: 'follow',
           headers: { 'User-Agent': 'Clearbox-Unsubscribe/1.0' },
         });
         if (response.ok) {
-          const html = await response.text();
-          const looksSuccessful = /unsubscrib(ed|e success|e confirm|tion complete|tion success)/i.test(html);
-          if (looksSuccessful) {
-            return { success: true, method: 'header_url', url: safeUrls[0] };
+          // Read max 500KB to avoid OOM on huge responses
+          const reader = response.body?.getReader();
+          if (reader) {
+            let html = '';
+            let bytesRead = 0;
+            const MAX_BYTES = 512_000;
+            const decoder = new TextDecoder();
+            while (bytesRead < MAX_BYTES) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              bytesRead += value.byteLength;
+              html += decoder.decode(value, { stream: true });
+            }
+            reader.cancel();
+            const looksSuccessful = /unsubscrib(ed|e success|e confirm|tion complete|tion success)/i.test(html);
+            if (looksSuccessful) {
+              return { success: true, method: 'header_url', url: safeUrls[0] };
+            }
           }
           return { success: false, method: 'header_url_needs_interaction', url: safeUrls[0] };
         }
@@ -323,7 +350,7 @@ async function tryBodyUnsubscribeLink(
   if (!safeUrl) return { success: false };
 
   try {
-    const response = await fetch(safeUrl, {
+    const response = await fetchWithTimeout(safeUrl, {
       method: 'GET',
       redirect: 'follow',
       headers: { 'User-Agent': 'Clearbox-Unsubscribe/1.0' },
@@ -335,6 +362,3 @@ async function tryBodyUnsubscribeLink(
 
   return { success: true, url: safeUrl };
 }
-
-// Suppress unused variable warning — accessToken is passed for potential future use
-void ((_: string) => _);
