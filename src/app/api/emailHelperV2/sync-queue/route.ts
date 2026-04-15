@@ -303,18 +303,46 @@ export async function PUT(request: NextRequest) {
       .eq('user_id', job.user_id)
       .eq('account_email', job.account_email);
 
-    await admin.from(SYNC_QUEUE).update({
+    // Only update total_inbox if we got a real value from Gmail (not 0 from a failed call)
+    const updateData: Record<string, unknown> = {
       pages_processed: (job.pages_processed || 0) + 1,
-      messages_cached: Math.min(actualCached || 0, inboxTotal || (actualCached || 0)),
-      total_inbox: inboxTotal,
-    }).eq('id', job.id);
+      messages_cached: inboxTotal > 0 ? Math.min(actualCached || 0, inboxTotal) : (actualCached || 0),
+    };
+    if (inboxTotal > 0) updateData.total_inbox = inboxTotal;
+    await admin.from(SYNC_QUEUE).update(updateData).eq('id', job.id);
 
     if (!nextPageToken) {
       // All Gmail pages exhausted — sync is complete
-      console.log(`[sync] ${job.account_email} DONE: cached=${actualCached}, total=${inboxTotal}, pages=${(job.pages_processed || 0) + 1}, skipped=${skippedPages}`);
+      // If cache has more entries than Gmail inbox, purge stale entries (messages that left inbox)
+      let cleanedCached = actualCached || 0;
+      if (inboxTotal > 0 && (actualCached || 0) > inboxTotal) {
+        const staleCount = (actualCached || 0) - inboxTotal;
+        console.log(`[sync] ${job.account_email} purging ${staleCount} stale cache entries (cached=${actualCached}, inbox=${inboxTotal})`);
+        // Delete oldest entries that exceed the inbox total
+        const { data: staleRows } = await admin
+          .from(TABLES.INBOX_CACHE)
+          .select('gmail_id')
+          .eq('user_id', job.user_id)
+          .eq('account_email', job.account_email)
+          .order('date', { ascending: true })
+          .limit(staleCount);
+        if (staleRows && staleRows.length > 0) {
+          const staleIds = staleRows.map((r: { gmail_id: string }) => r.gmail_id);
+          for (let i = 0; i < staleIds.length; i += 100) {
+            await admin.from(TABLES.INBOX_CACHE).delete()
+              .eq('user_id', job.user_id)
+              .eq('account_email', job.account_email)
+              .in('gmail_id', staleIds.slice(i, i + 100));
+          }
+          cleanedCached = inboxTotal;
+        }
+      }
+
+      console.log(`[sync] ${job.account_email} DONE: cached=${cleanedCached}, total=${inboxTotal}, pages=${(job.pages_processed || 0) + 1}, skipped=${skippedPages}`);
       await admin.from(SYNC_QUEUE).update({
         status: 'done', completed_at: new Date().toISOString(),
-        messages_cached: actualCached || 0,
+        messages_cached: cleanedCached,
+        ...(inboxTotal > 0 ? { total_inbox: inboxTotal } : {}),
       }).eq('id', job.id);
     } else {
       // Reset to pending with updated requested_at so this job goes to the back of the queue (round-robin)
