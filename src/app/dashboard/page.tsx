@@ -1747,7 +1747,27 @@ export default function Dashboard() {
     return () => { cancelled = true; clearTimeout(timer); syncRunningRef.current = false; };
   }, [accounts.length]);
 
-  // Unsubscribe queue processing is handled entirely server-side by the cron job
+  // Auto-triage: silently run triage every 2 minutes to pick up new emails
+  const autoTriageRef = useRef(false);
+  useEffect(() => {
+    if (!accounts.length) return;
+    const interval = setInterval(async () => {
+      if (autoTriageRef.current || triageLoading) return;
+      autoTriageRef.current = true;
+      try {
+        const savedAccount = _currentAccount;
+        const accts = (unified && accounts.length > 1) ? accounts : [{ email: _currentAccount }];
+        for (const acct of accts) {
+          setCurrentAccount(acct.email);
+          await apiPost('triage', { action: 'triage' });
+        }
+        setCurrentAccount(savedAccount);
+        setTriageVersion(v => v + 1);
+      } catch {}
+      autoTriageRef.current = false;
+    }, 2 * 60 * 1000); // every 2 minutes
+    return () => clearInterval(interval);
+  }, [accounts.length, unified]);
 
   function showToast(title: string, subtitle?: string, undoAction?: () => void) {
     const isSuccess = title.startsWith('\u2714');
