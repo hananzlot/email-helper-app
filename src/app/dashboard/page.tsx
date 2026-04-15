@@ -2089,6 +2089,7 @@ export default function Dashboard() {
       // We need basic info about the message; use what we have
       await apiPost('queue', { message_id: messageId, account_email: accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until });
     }
+    setTabCounts(prev => ({ ...prev, snoozed: (prev.snoozed || 0) + 1 }));
     setTriageVersion(v => v + 1); // reload snoozed tab
   }
 
@@ -2856,7 +2857,7 @@ export default function Dashboard() {
               {activeTab === 'reply-queue' && <ReplyQueueTab key={`triage-${account}-${unified}`} onAction={handleAction} showToast={showToast} reloadKey={triageVersion} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('reply-queue', c)} quickReplyTemplates={quickReplyTemplates} onAdvancePreview={advancePreview} />}
               {activeTab === 'follow-up' && <FollowUpTab key={`followup-${account}-${unified}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} onAction={handleAction} reportCount={(c: number) => reportTabCount('follow-up', c)} />}
               {activeTab === 'snoozed' && <SnoozedTab key={`snoozed-${account}-${unified}`} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reloadKey={triageVersion} reportCount={(c: number) => reportTabCount('snoozed', c)} />}
-              {activeTab === 'cleanup' && <CleanupTab unified={unified} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} />}
+              {activeTab === 'cleanup' && <CleanupTab unified={unified} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} reportCount={(c: number) => reportTabCount('cleanup', c)} onTierPromoted={() => { setTriageVersion(v => v + 1); }} onSnoozed={(count: number) => setTabCounts(prev => ({ ...prev, snoozed: (prev.snoozed || 0) + count }))} />}
               {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}-${sentVersion}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} onSenderTierChanged={handleTierChanged} />}
               {activeTab === 'unsubscribes' && <UnsubscribesTab />}
@@ -4622,7 +4623,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 
 // ============ CLEANUP TAB ============
 
-function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted }: { unified: boolean; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; }) {
+function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, reportCount, onTierPromoted, onSnoozed }: { unified: boolean; onAction: (action: string, ids: string[], label?: string, overrideAccount?: string) => void; showToast: (title: string, subtitle?: string) => void; onPreview: (messageId: string, accountEmail?: string) => void; onDialogPreview?: (messageId: string, accountEmail?: string) => void; reportCount?: (count: number) => void; onTierPromoted?: () => void; onSnoozed?: (count: number) => void; }) {
   const [expandedSender, setExpandedSender] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<'domain' | 'count' | 'name'>('domain');
   const [visibleGroups, setVisibleGroups] = useState(30);
@@ -4797,12 +4798,18 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
     const labels: Record<string, string> = { markRead: 'Marked read', archive: 'Archived', trash: 'Trashed', delete: 'Deleted' };
     showToast(labels[action] || action, `${msgIds.length} message${msgIds.length !== 1 ? 's' : ''}`);
     // Remove from local state (Easy-Clear only shows unread, so markRead also removes)
+    const removedCount = msgIds.length;
     const removedIds = new Set(msgIds);
     setServerGroups(prev => prev.map(g => ({
       ...g,
       count: g.messages.filter(m => !removedIds.has(m.id)).length,
       messages: g.messages.filter(m => !removedIds.has(m.id)),
     })).filter(g => g.count > 0));
+    setTotalMessages(prev => {
+      const updated = Math.max(0, prev - removedCount);
+      reportCount?.(updated);
+      return updated;
+    });
   }
 
   // Groups come pre-sorted from the server API
@@ -5061,7 +5068,13 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                           }).catch(() => {});
                         }
                         // Remove this group from Easy-Clear immediately
+                        const promotedCount = group.messages.length;
                         setServerGroups(prev => prev.filter(g => g.email.toLowerCase() !== group.email.toLowerCase()));
+                        setTotalMessages(prev => {
+                          const updated = Math.max(0, prev - promotedCount);
+                          reportCount?.(updated);
+                          return updated;
+                        });
                         showToast(`Promoted to Tier ${newTier}`, `${group.messages.length} email${group.messages.length > 1 ? 's' : ''} moved to Top Tiers`);
                         onTierPromoted?.();
                       } else {
@@ -5077,6 +5090,7 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                       apiPost('queue', { message_id: m.id, account_email: m.accountEmail || _currentAccount, status: 'snoozed', snoozed_until: until, sender: group.name, sender_email: group.email, subject: m.subject });
                     }
                     if (ids.length) actionByAccount('markRead', ids);
+                    onSnoozed?.(msgs.length);
                     showToast('Snoozed', `${ids.length} message${ids.length !== 1 ? 's' : ''} will reappear ${label}`);
                   }} />
                   <button onClick={async () => {
