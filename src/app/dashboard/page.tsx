@@ -6740,16 +6740,26 @@ function UnsubscribesTab() {
   const [entries, setEntries] = useState<{ id: string; sender_email: string; domain: string; method: string; status: string; error_message: string | null; account_email: string; attempted_at: string; completed_at: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const loadEntries = useCallback(async () => {
+    const res = await apiGet('unsubscribe');
+    if (res.success && res.data) {
+      setEntries(res.data);
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const res = await apiGet('unsubscribe');
-      if (res.success && res.data) {
-        setEntries(res.data);
-      }
+      await loadEntries();
       setLoading(false);
     })();
-  }, []);
+  }, [loadEntries]);
+
+  // Auto-refresh every 10s while the tab is open
+  useEffect(() => {
+    const interval = setInterval(loadEntries, 10_000);
+    return () => clearInterval(interval);
+  }, [loadEntries]);
 
   const statusColor = (status: string) => {
     if (status === 'success') return { bg: '#f0fdf4', color: '#16a34a', label: 'Success' };
@@ -6786,14 +6796,14 @@ function UnsubscribesTab() {
     <div className="flex flex-col gap-4">
       <div className="rounded-xl border p-4" style={{ background: '#f8fafc', borderColor: 'var(--border)' }}>
         <p className="text-xs" style={{ color: 'var(--muted)' }}>
-          Unsubscribe requests are processed in the background at a pace allowed by Gmail quotas. It may take from 30 minutes to 2 hours to complete all requests. You do not need to keep this page open — processing continues automatically.
+          Unsubscribe requests are processed automatically every 5 minutes by a background cron job. You do not need to keep this page open.
         </p>
       </div>
 
       {pending.length > 0 && (
         <div className="rounded-xl border p-4" style={{ background: '#eef2ff', borderColor: 'var(--accent)' }}>
           <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--accent)' }}>
-            {pending.length} queued — processing in background
+            {pending.length} queued — processing every 5 min
           </h3>
           <div className="flex flex-wrap gap-2">
             {pending.map(e => (
