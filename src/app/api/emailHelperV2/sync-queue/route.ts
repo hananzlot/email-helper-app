@@ -313,12 +313,12 @@ export async function PUT(request: NextRequest) {
 
     if (!nextPageToken) {
       // All Gmail pages exhausted — sync is complete
-      // If cache has more entries than Gmail inbox, purge stale entries (messages that left inbox)
+      // If cache has more entries than Gmail inbox, purge a small batch of stale entries
+      // (messages that left inbox via Gmail web). Cap at 500 per sync to avoid timeout.
       let cleanedCached = actualCached || 0;
       if (inboxTotal > 0 && (actualCached || 0) > inboxTotal) {
-        const staleCount = (actualCached || 0) - inboxTotal;
+        const staleCount = Math.min((actualCached || 0) - inboxTotal, 500);
         console.log(`[sync] ${job.account_email} purging ${staleCount} stale cache entries (cached=${actualCached}, inbox=${inboxTotal})`);
-        // Delete oldest entries that exceed the inbox total
         const { data: staleRows } = await admin
           .from(TABLES.INBOX_CACHE)
           .select('gmail_id')
@@ -328,13 +328,11 @@ export async function PUT(request: NextRequest) {
           .limit(staleCount);
         if (staleRows && staleRows.length > 0) {
           const staleIds = staleRows.map((r: { gmail_id: string }) => r.gmail_id);
-          for (let i = 0; i < staleIds.length; i += 100) {
-            await admin.from(TABLES.INBOX_CACHE).delete()
-              .eq('user_id', job.user_id)
-              .eq('account_email', job.account_email)
-              .in('gmail_id', staleIds.slice(i, i + 100));
-          }
-          cleanedCached = inboxTotal;
+          await admin.from(TABLES.INBOX_CACHE).delete()
+            .eq('user_id', job.user_id)
+            .eq('account_email', job.account_email)
+            .in('gmail_id', staleIds);
+          cleanedCached = (actualCached || 0) - staleRows.length;
         }
       }
 
