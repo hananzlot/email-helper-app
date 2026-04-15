@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
   // ============ GROUPS MODE: count by sender, fast ============
   // Fetch only sender_email column in batches (minimal payload for 76K+ rows)
   const senderCounts: Record<string, { sender: string; senderEmail: string; count: number; accountEmail: string }> = {};
+  const seenGmailIds = new Set<string>(); // Dedup across accounts and stale entries
   let from = 0;
   const batchSize = 1000;
   let totalScanned = 0;
@@ -85,7 +86,7 @@ export async function GET(request: NextRequest) {
   while (true) {
     const query = admin
       .from(TABLES.INBOX_CACHE)
-      .select('sender, sender_email, account_email')
+      .select('gmail_id, sender, sender_email, account_email')
       .eq('user_id', userId)
       .eq('is_unread', true);
     if (account) query.eq('account_email', account);
@@ -97,6 +98,10 @@ export async function GET(request: NextRequest) {
     if (!batch || batch.length === 0) break;
 
     for (const m of batch) {
+      // Dedup by gmail_id — same message cached under multiple accounts or stale entries
+      if (seenGmailIds.has(m.gmail_id)) continue;
+      seenGmailIds.add(m.gmail_id);
+
       const email = (m.sender_email || '').toLowerCase();
       if (signalSenders.has(email)) continue;
       const domain = email.split('@')[1] || '';
