@@ -4280,13 +4280,12 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     const res = await apiPut('queue', payload);
     if (res.success) {
       if (status === 'snoozed' || status === 'done') {
-        // Remove from the queue list immediately
-        setQueue(prev => {
-          const updated = prev.filter(q => q.id !== id);
-          const activeSignalCount = updated.filter((q: any) => q.status === 'active' && q.priority !== 'low' && ['A', 'B', 'C'].includes(q.tier)).length;
-          reportCount?.(activeSignalCount);
-          return updated;
-        });
+        // Remove from the queue list immediately. Compute count outside the
+        // updater so we don't trigger a setState on the parent mid-render.
+        const updated = queue.filter(q => q.id !== id);
+        setQueue(updated);
+        const activeSignalCount = updated.filter((q: any) => q.status === 'active' && q.priority !== 'low' && ['A', 'B', 'C'].includes(q.tier)).length;
+        reportCount?.(activeSignalCount);
       } else {
         setQueue(prev => prev.map(q => q.id === id ? { ...q, status, snoozed_until: snoozedUntil || q.snoozed_until } : q));
       }
@@ -4837,11 +4836,9 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
       count: g.messages.filter(m => !removedIds.has(m.id)).length,
       messages: g.messages.filter(m => !removedIds.has(m.id)),
     })).filter(g => g.count > 0));
-    setTotalMessages(prev => {
-      const updated = Math.max(0, prev - removedCount);
-      reportCount?.(updated);
-      return updated;
-    });
+    const updatedTotal = Math.max(0, totalMessages - removedCount);
+    setTotalMessages(updatedTotal);
+    reportCount?.(updatedTotal);
   }
 
   // Groups come pre-sorted from the server API
@@ -5102,11 +5099,9 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                         // Remove this group from Easy-Clear immediately
                         const promotedCount = group.messages.length;
                         setServerGroups(prev => prev.filter(g => g.email.toLowerCase() !== group.email.toLowerCase()));
-                        setTotalMessages(prev => {
-                          const updated = Math.max(0, prev - promotedCount);
-                          reportCount?.(updated);
-                          return updated;
-                        });
+                        const updatedTotal = Math.max(0, totalMessages - promotedCount);
+                        setTotalMessages(updatedTotal);
+                        reportCount?.(updatedTotal);
                         showToast(`Promoted to Tier ${newTier}`, `${group.messages.length} email${group.messages.length > 1 ? 's' : ''} moved to Top Tiers`);
                         onTierPromoted?.();
                       } else {
@@ -5243,7 +5238,6 @@ interface ConversationGroup {
   messages: GmailMessage[];
   recipients: { name: string; email: string }[];
   mostRecent: GmailMessage;
-  hasAwaiting: boolean;
   totalSent: number;
 }
 
@@ -5352,15 +5346,6 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
     }
   }
 
-  // Detect "awaiting reply" — sent more than 24h ago, no reply in thread
-  function isAwaitingReply(msg: GmailMessage): boolean {
-    const sentDate = new Date(msg.date);
-    const hoursSince = (Date.now() - sentDate.getTime()) / (1000 * 60 * 60);
-    if (hoursSince < 24) return false;
-    if (hoursSince > 48) return true;
-    return !msg.subject?.startsWith('Re:');
-  }
-
   // Build conversation groups by normalized subject
   const conversationMap: Record<string, ConversationGroup> = {};
   for (const msg of sentMessages) {
@@ -5371,14 +5356,12 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
         messages: [],
         recipients: [],
         mostRecent: msg,
-        hasAwaiting: false,
         totalSent: 0,
       };
     }
     const group = conversationMap[normSubj];
     group.messages.push(msg);
     group.totalSent++;
-    if (isAwaitingReply(msg)) group.hasAwaiting = true;
     // Track unique recipients
     const toField = (msg as any).to || '';
     const toEmail = extractEmail(toField);
@@ -5422,8 +5405,6 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
     </div>
   );
 
-  const awaitingCount = sentMessages.filter(isAwaitingReply).length;
-
   // Get aggregate sent count for a list of recipient emails
   function getSentCount(emails: string[]): number {
     let total = 0;
@@ -5437,11 +5418,6 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <p className="text-sm font-semibold">{conversations.length} conversations ({sentMessages.length} messages)</p>
-          {awaitingCount > 0 && (
-            <span className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ background: '#fef3c7', color: '#92400e' }}>
-              {awaitingCount} awaiting reply
-            </span>
-          )}
         </div>
         <div className="flex gap-2">
           <button onClick={() => setViewMode('conversations')}
@@ -5472,12 +5448,7 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
             const latestMsg = convo.mostRecent;
             return (
               <div key={convo.normalizedSubject} className="rounded-xl border overflow-hidden transition-shadow hover:shadow-sm"
-                style={{
-                  background: convo.hasAwaiting ? '#fffbeb' : 'var(--card)',
-                  borderColor: convo.hasAwaiting ? '#fbbf24' : 'var(--border)',
-                  borderLeftWidth: convo.hasAwaiting ? 4 : 1,
-                  borderLeftColor: convo.hasAwaiting ? '#f59e0b' : 'var(--border)',
-                }}>
+                style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
                 {/* Conversation header — click to expand */}
                 <div className="p-4 cursor-pointer" onClick={() => { setExpandedConvo(isExpanded ? null : convo.normalizedSubject); onPreview(latestMsg.id, latestMsg.accountEmail); }} onDoubleClick={() => onDialogPreview?.(latestMsg.id, latestMsg.accountEmail)} data-preview-id={latestMsg.id} data-preview-account={latestMsg.accountEmail || ''}>
                   <div className="flex items-start justify-between gap-3">
@@ -5487,11 +5458,6 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
                         {convo.recipients.length > 1 && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#e0f2fe', color: '#075985' }}>
                             {convo.recipients.length} recipients
-                          </span>
-                        )}
-                        {convo.hasAwaiting && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap" style={{ background: '#fef3c7', color: '#92400e' }}>
-                            Awaiting reply
                           </span>
                         )}
                         {sentCount > 0 && (
@@ -5539,9 +5505,6 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
                             <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: '#f1f5f9', color: '#64748b' }}>
                               {msg.subject?.startsWith('Fwd:') || msg.subject?.startsWith('FW:') ? 'Forwarded' : msg.subject?.startsWith('Re:') ? 'Reply' : 'New'}
                             </span>
-                            {isAwaitingReply(msg) && (
-                              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#f59e0b' }} />
-                            )}
                           </div>
                           <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet || '')}</div>
                         </div>
@@ -5563,10 +5526,9 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
         <div className="flex flex-col gap-3">
           {groups.map((group) => {
             const sentCount = senderPriorities[group.email.replace(/.*</, '').replace(/>.*/, '')] || 0;
-            const hasAwaiting = group.messages.some(isAwaitingReply);
             return (
-              <div key={group.email} className="rounded-xl border overflow-hidden" style={{ background: 'var(--card)', borderColor: hasAwaiting ? '#fbbf24' : 'var(--border)' }}>
-                <div className="flex items-center justify-between p-4" style={{ background: hasAwaiting ? '#fffbeb' : '#f8fafc' }}>
+              <div key={group.email} className="rounded-xl border overflow-hidden" style={{ background: 'var(--card)', borderColor: 'var(--border)' }}>
+                <div className="flex items-center justify-between p-4" style={{ background: '#f8fafc' }}>
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white flex-shrink-0" style={{ background: 'var(--accent)' }}>
                       {(group.name || '?')[0]?.toUpperCase()}
@@ -5582,11 +5544,6 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
                             {sentCount} emails sent
                           </span>
                         )}
-                        {hasAwaiting && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#fef3c7', color: '#92400e' }}>
-                            Awaiting reply
-                          </span>
-                        )}
                       </div>
                       <div className="text-xs" style={{ color: 'var(--muted)' }}>{group.email}</div>
                     </div>
@@ -5600,9 +5557,6 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium truncate">{msg.subject || '(no subject)'}</span>
-                          {isAwaitingReply(msg) && (
-                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#f59e0b' }} />
-                          )}
                         </div>
                         <div className="text-xs truncate" style={{ color: 'var(--muted)' }}>{decodeHtmlEntities(msg.snippet || '')}</div>
                       </div>

@@ -41,6 +41,92 @@ export const GMAIL_SCOPES = [
 // Drive scope — only requested when user triggers a backup (incremental consent)
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
+// ============ HEADER DECODING ============
+
+// Windows-1252 codepoints for bytes 0x80-0x9F (the positions that differ from Latin-1).
+// Used to map printable chars back to their original byte values when un-mojibaking.
+const WIN1252_TO_BYTE: Record<number, number> = {
+  0x20AC: 0x80, 0x201A: 0x82, 0x0192: 0x83, 0x201E: 0x84,
+  0x2026: 0x85, 0x2020: 0x86, 0x2021: 0x87, 0x02C6: 0x88,
+  0x2030: 0x89, 0x0160: 0x8A, 0x2039: 0x8B, 0x0152: 0x8C,
+  0x017D: 0x8E, 0x2018: 0x91, 0x2019: 0x92, 0x201C: 0x93,
+  0x201D: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97,
+  0x02DC: 0x98, 0x2122: 0x99, 0x0161: 0x9A, 0x203A: 0x9B,
+  0x0153: 0x9C, 0x017E: 0x9E, 0x0178: 0x9F,
+};
+
+// Un-mojibake: if a string's bytes look like UTF-8 that was misread as Win-1252/Latin-1,
+// reverse the damage. Iterates up to 3 times since some data is double-mojibaked
+// (e.g. `Ã¢Â€Â™` → one pass yields `â\x80\x99`, second pass yields the real `'` U+2019).
+// Early-exits when no mojibake indicators remain, so legitimate accented text is unaffected.
+function fixMojibake(s: string): string {
+  if (!s) return s;
+  let cur = s;
+  for (let pass = 0; pass < 3; pass++) {
+    // Indicators: UTF-8-as-Win1252 gives chars C2/C3 (Ã/Â) and, after one pass,
+    // the raw control-byte range 0x80-0x9F can reveal a second layer.
+    if (!/[ÃÂ-]/.test(cur)) break;
+    const bytes: number[] = [];
+    let bailed = false;
+    for (let i = 0; i < cur.length; i++) {
+      const c = cur.charCodeAt(i);
+      if (c < 0x100) bytes.push(c);
+      else if (c in WIN1252_TO_BYTE) bytes.push(WIN1252_TO_BYTE[c]);
+      else { bailed = true; break; } // string has non-Win1252 chars → not fixable
+    }
+    if (bailed) break;
+    try {
+      const decoded = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes));
+      if (decoded === cur) break;
+      cur = decoded;
+    } catch {
+      break; // bytes weren't valid UTF-8 — we've unwound as far as we can
+    }
+  }
+  return cur;
+}
+
+// RFC 2047 encoded-word decoder. Handles `=?charset?B?...?=` (base64) and
+// `=?charset?Q?...?=` (quoted-printable), with per-charset decoding via TextDecoder.
+function decodeRfc2047(input: string): string {
+  if (!input || !input.includes('=?')) return input;
+  // Per RFC: whitespace between adjacent encoded-words is ignored.
+  const collapsed = input.replace(/\?=\s+=\?/g, '?==?');
+  return collapsed.replace(
+    /=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g,
+    (full, charset: string, enc: string, text: string) => {
+      try {
+        let bytes: Uint8Array;
+        if (enc.toUpperCase() === 'B') {
+          bytes = Uint8Array.from(Buffer.from(text, 'base64'));
+        } else {
+          const replaced = text.replace(/_/g, ' ');
+          const out: number[] = [];
+          for (let i = 0; i < replaced.length; i++) {
+            if (replaced[i] === '=' && i + 2 < replaced.length) {
+              const hex = replaced.substring(i + 1, i + 3);
+              if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+                out.push(parseInt(hex, 16));
+                i += 2;
+                continue;
+              }
+            }
+            out.push(replaced.charCodeAt(i));
+          }
+          bytes = new Uint8Array(out);
+        }
+        return new TextDecoder(charset.toLowerCase(), { fatal: false }).decode(bytes);
+      } catch {
+        return full;
+      }
+    }
+  );
+}
+
+function decodeHeader(value: string): string {
+  return fixMojibake(decodeRfc2047(value));
+}
+
 // ============ READ OPERATIONS ============
 
 export async function getProfile(gmail: gmail_v1.Gmail) {
@@ -104,7 +190,7 @@ export async function getMessage(
     }
   }
 
-  const fromHeader = getHeader('From');
+  const fromHeader = decodeHeader(getHeader('From'));
   const senderMatch = fromHeader.match(/^(.+?)\s*<(.+?)>$/);
 
   return {
@@ -112,12 +198,12 @@ export async function getMessage(
     threadId: msg.threadId!,
     sender: senderMatch ? senderMatch[1].replace(/"/g, '').trim() : fromHeader,
     senderEmail: senderMatch ? senderMatch[2] : fromHeader,
-    subject: getHeader('Subject'),
-    snippet: msg.snippet || '',
+    subject: decodeHeader(getHeader('Subject')),
+    snippet: fixMojibake(msg.snippet || ''),
     body,
     bodyHtml,
-    to: getHeader('To'),
-    cc: getHeader('Cc'),
+    to: decodeHeader(getHeader('To')),
+    cc: decodeHeader(getHeader('Cc')),
     date: getHeader('Date'),
     labelIds: msg.labelIds || [],
     isUnread: (msg.labelIds || []).includes('UNREAD'),
