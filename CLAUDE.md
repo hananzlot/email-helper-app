@@ -8,6 +8,7 @@ Before proposing a fix, trace the full data flow end-to-end. Read every file in 
 - **Local path**: `~/Documents/email-helper-app`
 - **GitHub**: `github.com/hananzlot/email-helper-app`
 - **Deployed**: `emaihelper.netlify.app`
+- **Local dev server**: `http://localhost:3005` (port 3005 is set in `package.json` `dev` script — port 3000 is used by another app)
 - **Netlify site ID**: `5bf49f8a-1f8c-4b69-9be5-d00df037977e`
 - **Cowork mount**: Always select `~/Documents/email-helper-app` — do NOT use `~/Email Helper/email-helper-app` (that is an outdated copy)
 
@@ -19,10 +20,11 @@ Before proposing a fix, trace the full data flow end-to-end. Read every file in 
   - Dashboard: `https://supabase.com/dashboard/project/ybyhqkfyfovcuxhiejgx`
   - SQL Editor: `https://supabase.com/dashboard/project/ybyhqkfyfovcuxhiejgx/sql/new`
   - Env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-  - Env vars are stored in **Netlify environment variables** (no local `.env.local` file)
+  - Env vars are stored in **Netlify environment variables**. For local dev, a `.env.local` (gitignored) mirrors them — refresh with `netlify env:list --plain > .env.local` and override `NEXT_PUBLIC_APP_URL=http://localhost:3005`
 - **Gmail API** via `googleapis` — full CRUD, thread fetching, reply detection
   - Env vars: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-  - OAuth callback: `https://emaihelper.netlify.app/api/emailHelperV2/auth/callback`
+  - OAuth callback (prod): `https://emaihelper.netlify.app/api/emailHelperV2/auth/callback`
+  - OAuth callback (local dev): `http://localhost:3005/api/emailHelperV2/auth/callback` — must also be whitelisted in Google Cloud Console → Credentials → OAuth 2.0 Client IDs → Authorized redirect URIs
 - **Multi-account support** with unified view merging all connected Gmail accounts
 - **Encryption**: `ENCRYPTION_KEY` env var for token encryption at rest
 
