@@ -681,14 +681,18 @@ export async function updateDraft(
     to: string;
     subject: string;
     body: string;
+    cc?: string;
+    bcc?: string;
     threadId?: string;
   }
 ) {
   const headers = [
     `To: ${sanitizeHeader(options.to)}`,
+    options.cc ? `Cc: ${sanitizeHeader(options.cc)}` : null,
+    options.bcc ? `Bcc: ${sanitizeHeader(options.bcc)}` : null,
     `Subject: ${sanitizeHeader(options.subject)}`,
     'Content-Type: text/html; charset=utf-8',
-  ];
+  ].filter((h): h is string => h !== null);
 
   const raw = Buffer.from(headers.join('\r\n') + '\r\n\r\n' + options.body).toString('base64url');
 

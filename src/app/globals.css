@@ -50,6 +50,13 @@ button[style*="background: #"]:hover:not(:disabled) {
   filter: brightness(1.1);
 }
 
+/* Compose dialog: contenteditable placeholder */
+[contenteditable][data-placeholder]:empty:before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}
+
 /* Trash animation: red flash + slide left */
 @keyframes trash-out {
   0% { transform: translateX(0); opacity: 1; background: var(--card); }

@@ -42,6 +42,20 @@ function getMaxEmails(): number {
 let _currentAccount = '';
 let _onEmailSent: (() => void) | null = null;
 
+// Reply context passed when opening the compose dialog as a reply / reply-all
+type ComposeReplyContext = {
+  to: string;
+  subject: string;
+  threadId: string;
+  messageId: string;
+  cc?: string;
+  accountEmail?: string;
+  onSent?: () => void;
+};
+// Module-level opener — any nested component can open the floating compose dialog.
+// Reply / reply-all buttons call this with a replyContext; the floating Compose button calls with no args.
+let _openCompose: ((replyContext?: ComposeReplyContext) => void) | null = null;
+
 // Global rate-limit circuit breaker: when ANY request gets a 429, all requests
 // pause until the cooldown expires. This prevents the retry storm where dozens
 // of concurrent callers each independently retry and worsen the 429 flood.
@@ -214,8 +228,6 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
   const [email, setEmail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [replyOpen, setReplyOpen] = useState(false);
-  const [replyAllMode, setReplyAllMode] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [clickedBtn, setClickedBtn] = useState<string | null>(null);
 
@@ -426,23 +438,6 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
                   <div className="text-sm text-center py-8" style={{ color: 'var(--muted)' }}>No body content</div>
                 )}
               </div>
-              {/* Inline Reply Composer */}
-              {replyOpen && (
-                <div className="px-5 pb-4">
-                  <ReplyComposer
-                    to={email.senderEmail}
-                    subject={email.subject}
-                    threadId={email.threadId}
-                    messageId={email.id}
-                    showToast={showToast}
-                    accountEmail={accountEmail}
-                    replyAll={replyAllMode}
-                    cc={replyAllMode ? buildReplyAllCc(email.to, email.cc, email.senderEmail, accountEmail) : undefined}
-                    onSent={() => { setReplyOpen(false); setReplyAllMode(false); showToast('Reply sent', `To: ${email.senderEmail}`); onEmailSent?.(); }}
-                    onCancel={() => { setReplyOpen(false); setReplyAllMode(false); }}
-                  />
-                </div>
-              )}
             </>
           ) : null}
         </div>
@@ -450,14 +445,21 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
         {/* Sticky action bar */}
         {email && !loading && (
           <div className="border-t p-3 flex gap-2 flex-wrap items-center" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
-            <button onClick={() => { setReplyAllMode(false); setReplyOpen(!replyOpen); }}
+            <button onClick={() => _openCompose?.({
+                to: email.senderEmail, subject: email.subject, threadId: email.threadId, messageId: email.id,
+                accountEmail, onSent: () => onEmailSent?.(),
+              })}
               className="px-4 py-2 text-xs font-semibold rounded-lg text-white transition-transform active:scale-90" style={{ background: 'var(--accent)' }}>
-              {replyOpen && !replyAllMode ? 'Cancel Reply' : 'Reply'}
+              Reply
             </button>
-            <button onClick={() => { setReplyAllMode(true); setReplyOpen(!replyOpen || !replyAllMode); }}
+            <button onClick={() => _openCompose?.({
+                to: email.senderEmail, subject: email.subject, threadId: email.threadId, messageId: email.id,
+                cc: buildReplyAllCc(email.to, email.cc, email.senderEmail, accountEmail),
+                accountEmail, onSent: () => onEmailSent?.(),
+              })}
               className="px-3 py-2 text-xs font-semibold rounded-lg transition-transform active:scale-90 border"
-              style={{ borderColor: 'var(--accent)', color: replyOpen && replyAllMode ? '#fff' : 'var(--accent)', background: replyOpen && replyAllMode ? 'var(--accent)' : undefined }}>
-              {replyOpen && replyAllMode ? 'Cancel' : 'Reply All'}
+              style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+              Reply All
             </button>
             <ForwardButton messageId={messageId} accountEmail={accountEmail} subject={email.subject || ''} showToast={showToast} />
             <button onClick={() => flashAction('markRead', () => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 400); })}
@@ -846,15 +848,34 @@ export default function Dashboard() {
   const [searchSelectionActive, setSearchSelectionActive] = useState<GmailMessage[]>([]);
   // Sender tiers for search results (loaded from API)
   const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
+  // Sender list for compose autocomplete (email + display name)
+  const [senderList, setSenderList] = useState<{ email: string; name: string }[]>([]);
   useEffect(() => {
     apiGet('senders').then(res => {
       if (res.success && res.data) {
         const tiers: Record<string, string> = {};
-        for (const s of res.data) { if (s.tier) tiers[s.sender_email.toLowerCase()] = s.tier; }
+        const list: { email: string; name: string }[] = [];
+        for (const s of res.data) {
+          if (s.tier) tiers[s.sender_email.toLowerCase()] = s.tier;
+          list.push({ email: s.sender_email, name: s.display_name || '' });
+        }
         setSenderTiers(tiers);
+        setSenderList(list);
       }
     }).catch(() => {});
   }, []);
+  // Compose dialog state
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeMin, setComposeMin] = useState(false);
+  const [composeMax, setComposeMax] = useState(false);
+  const [composeReplyContext, setComposeReplyContext] = useState<ComposeReplyContext | null>(null);
+  // Wire up the module-level opener so any nested Reply/Reply-All button can trigger compose
+  _openCompose = (rc?: ComposeReplyContext) => {
+    setComposeReplyContext(rc || null);
+    setComposeOpen(true);
+    setComposeMin(false);
+    setComposeMax(false);
+  };
   // Auth error state — show login prompt instead of auto-redirect loop
   const [authError, setAuthError] = useState(false);
   // Tab counts — each tab reports its count for display in tab bar
@@ -3065,6 +3086,7 @@ export default function Dashboard() {
               </button>
             </div>
             <div className="p-5 flex flex-col gap-3 text-sm" style={{ color: '#334155' }}>
+              <div><strong>Compose</strong> — click the floating Compose button (bottom-right) to write a new email. Pick which connected account to send from, autocomplete recipients from your sender list, and your draft autosaves to Gmail every 10 seconds.</div>
               <div><strong>Snooze</strong> — emails you need to deal with but not right now. They&apos;ll pop back into your queue at the time you choose.</div>
               <div><strong>Quick Reply</strong> — in Top Tiers, use the dropdown to send a template response and auto-archive in one click.</div>
               <div><strong>Drag to reorder</strong> — drag Top Tiers cards to rearrange priority. Pin important emails to keep them at top.</div>
@@ -3078,6 +3100,38 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Floating Compose button — Gmail-style, bottom-right */}
+      {accounts.length > 0 && !composeOpen && (
+        <button
+          onClick={() => { setComposeOpen(true); setComposeMin(false); setComposeMax(false); }}
+          className="fixed z-40 flex items-center gap-2 rounded-2xl shadow-lg hover:shadow-xl transition-all active:scale-95 px-5 py-3 font-semibold text-sm text-white"
+          style={{ bottom: 24, right: 24, background: 'var(--accent)' }}
+          title="Compose new email"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/>
+          </svg>
+          Compose
+        </button>
+      )}
+
+      {composeOpen && (
+        <ComposeDialog
+          key={composeReplyContext?.messageId || 'new'}
+          accounts={accounts}
+          defaultFrom={!unified && account ? account : (accounts.find(a => a.is_primary)?.email || accounts[0]?.email || '')}
+          senderList={senderList}
+          replyContext={composeReplyContext}
+          minimized={composeMin}
+          maximized={composeMax}
+          onMinimize={() => { setComposeMin(true); setComposeMax(false); }}
+          onMaximize={() => { setComposeMax(m => !m); setComposeMin(false); }}
+          onRestore={() => setComposeMin(false)}
+          onClose={() => { setComposeOpen(false); setComposeMin(false); setComposeMax(false); setComposeReplyContext(null); }}
+          showToast={showToast}
+        />
       )}
 
       {toast && <UndoToast toast={toast} onDismiss={() => setToast(null)} />}
@@ -3572,102 +3626,508 @@ function HomeTab({ tabCounts, accounts, onNavigate, onRunTriage, triageLoading }
   );
 }
 
-// ============ INBOX TAB ============
+// ============ COMPOSE DIALOG (Gmail-style) ============
 
-// ============ REPLY COMPOSER ============
-
-function ReplyComposer({ to, subject, threadId, messageId, onSent, onCancel, showToast, accountEmail, replyAll, cc }: {
-  to: string; subject: string; threadId: string; messageId: string;
-  onSent: () => void; onCancel: () => void; showToast: (title: string, subtitle?: string) => void;
-  accountEmail?: string; replyAll?: boolean; cc?: string;
+function RecipientField({
+  label, value, onChange, senderList, autoFocus,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  senderList: { email: string; name: string }[];
+  autoFocus?: boolean;
 }) {
-  const [body, setBody] = useState('');
-  const [bcc, setBcc] = useState('');
-  const [showBcc, setShowBcc] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
-  async function sendReply() {
-    if (!body.trim()) return;
-    setSending(true);
-    // Switch to the correct account for sending (the account the email was received on)
-    const savedAccount = _currentAccount;
-    if (accountEmail && accountEmail !== _currentAccount) {
-      setCurrentAccount(accountEmail);
+  // Build current token (the substring after the last comma)
+  const lastSep = Math.max(value.lastIndexOf(','), value.lastIndexOf(';'));
+  const fragment = value.slice(lastSep + 1).trim().toLowerCase();
+
+  const matches = fragment.length === 0
+    ? []
+    : senderList.filter(s =>
+        s.email.toLowerCase().includes(fragment) ||
+        (s.name || '').toLowerCase().includes(fragment)
+      ).slice(0, 8);
+
+  function pick(s: { email: string; name: string }) {
+    const prefix = lastSep === -1 ? '' : value.slice(0, lastSep + 1) + ' ';
+    const formatted = s.name ? `${s.name} <${s.email}>` : s.email;
+    onChange(prefix + formatted + ', ');
+    setOpen(false);
+    setActiveIdx(0);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
     }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative flex items-center gap-2 px-4 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
+      <span className="text-xs font-medium w-12 flex-shrink-0" style={{ color: 'var(--muted)' }}>{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); setActiveIdx(0); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (!open || matches.length === 0) return;
+          if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, matches.length - 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)); }
+          else if (e.key === 'Enter' || e.key === 'Tab') {
+            e.preventDefault();
+            pick(matches[activeIdx]);
+          } else if (e.key === 'Escape') {
+            setOpen(false);
+          }
+        }}
+        autoFocus={autoFocus}
+        className="flex-1 bg-transparent text-sm outline-none"
+        style={{ color: 'var(--text)' }}
+      />
+      {open && matches.length > 0 && (
+        <div className="absolute left-14 right-2 top-full z-50 mt-0.5 rounded-lg border shadow-lg overflow-hidden bg-white" style={{ borderColor: 'var(--border)' }}>
+          {matches.map((s, i) => (
+            <button
+              key={s.email}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); pick(s); }}
+              onMouseEnter={() => setActiveIdx(i)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50"
+              style={{ background: i === activeIdx ? '#f1f5f9' : 'white' }}
+            >
+              {s.name && <span className="font-medium truncate" style={{ color: 'var(--text)' }}>{s.name}</span>}
+              <span className="truncate" style={{ color: 'var(--muted)' }}>{s.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ComposeDialog({
+  accounts, defaultFrom, senderList, replyContext, minimized, maximized,
+  onMinimize, onMaximize, onRestore, onClose, showToast,
+}: {
+  accounts: ConnectedAccount[];
+  defaultFrom: string;
+  senderList: { email: string; name: string }[];
+  replyContext?: ComposeReplyContext | null;
+  minimized: boolean;
+  maximized: boolean;
+  onMinimize: () => void;
+  onMaximize: () => void;
+  onRestore: () => void;
+  onClose: () => void;
+  showToast: (title: string, subtitle?: string) => void;
+}) {
+  const isReply = !!replyContext;
+  const initialSubject = replyContext
+    ? (replyContext.subject.startsWith('Re:') ? replyContext.subject : `Re: ${replyContext.subject}`)
+    : '';
+  const [from, setFrom] = useState(replyContext?.accountEmail || defaultFrom);
+  const [to, setTo] = useState(replyContext?.to || '');
+  const [cc, setCc] = useState(replyContext?.cc || '');
+  const [bcc, setBcc] = useState('');
+  const [showCc, setShowCc] = useState(!!(replyContext?.cc));
+  const [showBcc, setShowBcc] = useState(false);
+  const [subject, setSubject] = useState(initialSubject);
+  const [bodyHtml, setBodyHtml] = useState('');
+  const [sending, setSending] = useState(false);
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [lastSaved, setLastSaved] = useState<number | null>(null);
+
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const savingRef = useRef(false);
+  // Snapshot of last persisted content — autosave skips if unchanged
+  const lastPersistedRef = useRef<string>('');
+
+  // Initialize the contenteditable HTML once on mount; do NOT re-write it on every state change
+  // (that would move the caret to the start while typing).
+  useEffect(() => {
+    if (bodyRef.current && bodyRef.current.innerHTML === '') {
+      bodyRef.current.innerHTML = bodyHtml;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function exec(cmd: string, value?: string) {
+    bodyRef.current?.focus();
+    document.execCommand(cmd, false, value);
+    setBodyHtml(bodyRef.current?.innerHTML || '');
+  }
+
+  function insertLink() {
+    const url = window.prompt('Link URL');
+    if (!url) return;
+    exec('createLink', url);
+  }
+
+  function snapshot() {
+    return JSON.stringify({ from, to, cc, bcc, subject, bodyHtml });
+  }
+
+  async function saveDraft(silent = false) {
+    if (savingRef.current) return;
+    if (!from) return;
+    // Skip if there's nothing meaningful to save
+    const hasContent = to.trim() || cc.trim() || bcc.trim() || subject.trim() || (bodyHtml.replace(/<[^>]+>/g, '').trim().length > 0);
+    if (!hasContent) return;
+    const snap = snapshot();
+    if (snap === lastPersistedRef.current) return;
+    savingRef.current = true;
+    if (!silent) setSaveState('saving');
+    const savedAccount = _currentAccount;
+    if (from !== _currentAccount) setCurrentAccount(from);
     try {
-      // Fetch original message to include as quoted text
-      let quotedHtml = '';
-      try {
-        const origRes = await gmailGet('message', { id: messageId, format: 'full' });
-        if (origRes.success) {
-          const origBody = origRes.data.bodyHtml || origRes.data.body || '';
-          const origDate = origRes.data.date ? new Date(origRes.data.date).toLocaleString() : '';
-          const origFrom = origRes.data.sender || to;
-          quotedHtml = `<br><br><div style="border-left:2px solid #ccc;padding-left:12px;margin-top:12px;color:#666"><p style="margin:0 0 8px 0;font-size:12px">On ${origDate}, ${origFrom} wrote:</p>${origBody}</div>`;
-        }
-      } catch {}
-      const sendPayload: Record<string, unknown> = {
-        to,
-        subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
-        body: body.replace(/\n/g, '<br>') + quotedHtml,
-        threadId,
-        inReplyTo: messageId,
+      const payload = {
+        to: to.trim(),
+        subject: subject.trim(),
+        body: bodyHtml,
+        cc: cc.trim() || undefined,
+        bcc: bcc.trim() || undefined,
       };
-      if (replyAll && cc) sendPayload.cc = cc;
-      if (bcc.trim()) sendPayload.bcc = bcc.trim();
-      const res = await gmailPost('send', sendPayload);
+      const res = draftId
+        ? await gmailPost('updateDraft', { draftId, ...payload })
+        : await gmailPost('createDraft', payload);
       if (res.success) {
-        showToast('Reply sent', `To: ${to}${replyAll ? ' + all' : ''}${accountEmail ? ` (via ${accountEmail})` : ''}`);
-        onSent();
-        _onEmailSent?.();
+        const newId = res.data?.id || res.data?.draftId || draftId;
+        if (newId) setDraftId(newId);
+        lastPersistedRef.current = snap;
+        setSaveState('saved');
+        setLastSaved(Date.now());
       } else {
-        showToast('Send failed', res.error);
+        setSaveState('error');
       }
-    } catch (err) {
-      showToast('Send failed', String(err));
+    } catch {
+      setSaveState('error');
     } finally {
-      // Restore account
-      if (accountEmail && accountEmail !== savedAccount) {
-        setCurrentAccount(savedAccount);
-      }
-      setSending(false);
+      if (from !== savedAccount) setCurrentAccount(savedAccount);
+      savingRef.current = false;
     }
   }
 
-  return (
-    <div className="mt-3 p-3 rounded-lg border" style={{ background: '#f8fafc', borderColor: replyAll ? '#7c3aed' : 'var(--accent)' }}>
-      <div className="text-xs mb-2" style={{ color: 'var(--muted)' }}>
-        {replyAll ? '↩ Reply All' : 'Replying'} to <strong>{to}</strong>
-        {replyAll && cc && <span className="block mt-1">CC: {cc}</span>}
-        {!showBcc && <button onClick={() => setShowBcc(true)} className="ml-2 underline text-xs" style={{ color: 'var(--accent)' }}>+ BCC</button>}
+  // Auto-save every 10 seconds while content has changed
+  useEffect(() => {
+    const interval = setInterval(() => { saveDraft(true); }, 10_000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, cc, bcc, subject, bodyHtml, draftId]);
+
+  async function send() {
+    if (!to.trim()) { showToast('Add a recipient', 'The To field is required'); return; }
+    if (!from) { showToast('Choose a From account'); return; }
+    setSending(true);
+    const savedAccount = _currentAccount;
+    if (from !== _currentAccount) setCurrentAccount(from);
+    try {
+      // For replies: fetch the original message and append a quoted block to the body
+      let finalBody = bodyHtml || '';
+      if (replyContext) {
+        try {
+          const origRes = await gmailGet('message', { id: replyContext.messageId, format: 'full' });
+          if (origRes.success) {
+            const origBody = origRes.data.bodyHtml || origRes.data.body || '';
+            const origDate = origRes.data.date ? new Date(origRes.data.date).toLocaleString() : '';
+            const origFrom = origRes.data.sender || replyContext.to;
+            finalBody += `<br><br><div style="border-left:2px solid #ccc;padding-left:12px;margin-top:12px;color:#666"><p style="margin:0 0 8px 0;font-size:12px">On ${origDate}, ${origFrom} wrote:</p>${origBody}</div>`;
+          }
+        } catch {}
+      }
+      const payload: Record<string, unknown> = {
+        to: to.trim(),
+        subject: subject.trim() || '(no subject)',
+        body: finalBody,
+        cc: cc.trim() || undefined,
+        bcc: bcc.trim() || undefined,
+      };
+      if (replyContext) {
+        payload.threadId = replyContext.threadId;
+        payload.inReplyTo = replyContext.messageId;
+      }
+      const res = await gmailPost('send', payload);
+      if (res.success) {
+        // Clean up draft we may have autosaved
+        if (draftId) {
+          try { await gmailPost('deleteDraft', { draftId }); } catch {}
+        }
+        showToast(isReply ? 'Reply sent' : 'Email sent', `To: ${to.trim()} (via ${from})`);
+        _onEmailSent?.();
+        replyContext?.onSent?.();
+        onClose();
+      } else {
+        showToast('Send failed', res.error);
+        setSending(false);
+      }
+    } catch (err) {
+      showToast('Send failed', String(err));
+      setSending(false);
+    } finally {
+      if (from !== savedAccount) setCurrentAccount(savedAccount);
+    }
+  }
+
+  async function discard() {
+    if (!confirm('Discard this draft?')) return;
+    if (draftId) {
+      const savedAccount = _currentAccount;
+      if (from !== _currentAccount) setCurrentAccount(from);
+      try { await gmailPost('deleteDraft', { draftId }); } catch {}
+      if (from !== savedAccount) setCurrentAccount(savedAccount);
+    }
+    showToast('Draft discarded');
+    onClose();
+  }
+
+  async function closeAndSave() {
+    // Save once on close (silent), then close. Preserves Gmail's "kept as draft" behavior.
+    await saveDraft(true);
+    onClose();
+  }
+
+  const saveLabel =
+    saveState === 'saving' ? 'Saving…' :
+    saveState === 'error' ? 'Save failed' :
+    saveState === 'saved' && lastSaved ? `Saved ${Math.max(1, Math.floor((Date.now() - lastSaved) / 1000))}s ago` :
+    'Draft';
+
+  // Minimized: tiny pill at the bottom-right
+  if (minimized) {
+    return (
+      <div
+        className="fixed z-50 flex items-center justify-between gap-2 px-4 py-2 rounded-t-lg shadow-2xl cursor-pointer select-none"
+        style={{ bottom: 0, right: 24, background: '#1f2937', color: 'white', minWidth: 280 }}
+        onClick={onRestore}
+      >
+        <span className="text-sm font-medium truncate">{subject || 'New Message'}</span>
+        <div className="flex items-center gap-1">
+          <button onClick={(e) => { e.stopPropagation(); onRestore(); }} title="Expand"
+            className="w-6 h-6 rounded hover:bg-white/10 flex items-center justify-center">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="18 15 12 9 6 15"/></svg>
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); closeAndSave(); }} title="Close (saves draft)"
+            className="w-6 h-6 rounded hover:bg-white/10 flex items-center justify-center">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
       </div>
-      {showBcc && (
+    );
+  }
+
+  const dialogPos = maximized
+    ? { top: 24, right: 24, bottom: 24, left: 24, width: 'auto' as const, height: 'auto' as const }
+    : { bottom: 0, right: 24, width: 540, height: 560 };
+
+  return (
+    <div
+      className="fixed z-50 flex flex-col rounded-t-lg shadow-2xl bg-white border"
+      style={{ ...dialogPos, borderColor: 'var(--border)' }}
+    >
+      {/* Title bar */}
+      <div className="flex items-center justify-between px-4 py-2 rounded-t-lg" style={{ background: '#1f2937', color: 'white' }}>
+        <span className="text-sm font-medium truncate">{subject || 'New Message'}</span>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button onClick={onMinimize} title="Minimize"
+            className="w-6 h-6 rounded hover:bg-white/10 flex items-center justify-center">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <button onClick={onMaximize} title={maximized ? 'Restore' : 'Maximize'}
+            className="w-6 h-6 rounded hover:bg-white/10 flex items-center justify-center">
+            {maximized ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M14 10l7-7"/><path d="M3 21l7-7"/></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+            )}
+          </button>
+          <button onClick={closeAndSave} title="Close (saves draft)"
+            className="w-6 h-6 rounded hover:bg-white/10 flex items-center justify-center">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+
+      {/* From */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
+        <span className="text-xs font-medium w-12 flex-shrink-0" style={{ color: 'var(--muted)' }}>From</span>
+        {accounts.length > 1 ? (
+          <select
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="flex-1 bg-transparent text-sm outline-none cursor-pointer"
+            style={{ color: 'var(--text)' }}
+          >
+            {accounts.map(a => (
+              <option key={a.email} value={a.email}>{a.email}{a.is_primary ? ' ★' : ''}</option>
+            ))}
+          </select>
+        ) : (
+          <span className="text-sm" style={{ color: 'var(--text)' }}>{from}</span>
+        )}
+      </div>
+
+      {/* To with optional Cc/Bcc toggle */}
+      <div className="relative flex items-center gap-2 px-4 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
+        <span className="text-xs font-medium w-12 flex-shrink-0" style={{ color: 'var(--muted)' }}>To</span>
+        <div className="flex-1">
+          <RecipientFieldInline value={to} onChange={setTo} senderList={senderList} autoFocus />
+        </div>
+        <div className="flex gap-2 text-xs">
+          {!showCc && <button onClick={() => setShowCc(true)} className="hover:underline" style={{ color: 'var(--muted)' }}>Cc</button>}
+          {!showBcc && <button onClick={() => setShowBcc(true)} className="hover:underline" style={{ color: 'var(--muted)' }}>Bcc</button>}
+        </div>
+      </div>
+
+      {showCc && <RecipientField label="Cc" value={cc} onChange={setCc} senderList={senderList} />}
+      {showBcc && <RecipientField label="Bcc" value={bcc} onChange={setBcc} senderList={senderList} />}
+
+      {/* Subject */}
+      <div className="px-4 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
         <input
           type="text"
-          value={bcc}
-          onChange={(e) => setBcc(e.target.value)}
-          placeholder="BCC: email@example.com, ..."
-          className="w-full p-2 mb-2 rounded-lg border text-xs"
-          style={{ borderColor: 'var(--border)' }}
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          placeholder="Subject"
+          className="w-full bg-transparent text-sm outline-none"
+          style={{ color: 'var(--text)' }}
         />
-      )}
-      <textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        placeholder="Type your reply..."
-        rows={4}
-        className="w-full p-3 rounded-lg border text-sm resize-y"
-        style={{ borderColor: 'var(--border)' }}
-        autoFocus
-      />
-      <div className="flex gap-2 mt-2">
-        <button onClick={sendReply} disabled={sending || !body.trim()}
-          className="px-4 py-2 text-xs font-semibold rounded-lg text-white"
-          style={{ background: sending ? 'var(--muted)' : 'var(--accent)' }}>
-          {sending ? 'Sending...' : 'Send Reply'}
-        </button>
-        <button onClick={onCancel} className="px-4 py-2 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Cancel</button>
       </div>
+
+      {/* Rich text body */}
+      <div
+        ref={bodyRef}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={(e) => setBodyHtml((e.currentTarget as HTMLDivElement).innerHTML)}
+        className="flex-1 px-4 py-3 text-sm overflow-y-auto outline-none"
+        style={{ color: 'var(--text)', minHeight: 120 }}
+        data-placeholder="Compose your email…"
+      />
+
+      {/* Footer toolbar */}
+      <div className="flex items-center gap-2 px-3 py-2 border-t" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
+        <button
+          onClick={send}
+          disabled={sending || !to.trim()}
+          className="px-5 py-1.5 text-sm font-semibold rounded-lg text-white"
+          style={{ background: sending || !to.trim() ? 'var(--muted)' : 'var(--accent)' }}
+        >
+          {sending ? 'Sending…' : 'Send'}
+        </button>
+
+        {/* Formatting */}
+        <div className="flex items-center gap-0.5 ml-2">
+          <button onClick={() => exec('bold')} title="Bold"
+            className="w-7 h-7 rounded hover:bg-gray-200 text-sm font-bold" style={{ color: 'var(--text)' }}>B</button>
+          <button onClick={() => exec('italic')} title="Italic"
+            className="w-7 h-7 rounded hover:bg-gray-200 text-sm italic" style={{ color: 'var(--text)' }}>I</button>
+          <button onClick={() => exec('underline')} title="Underline"
+            className="w-7 h-7 rounded hover:bg-gray-200 text-sm underline" style={{ color: 'var(--text)' }}>U</button>
+          <button onClick={() => exec('insertUnorderedList')} title="Bulleted list"
+            className="w-7 h-7 rounded hover:bg-gray-200" style={{ color: 'var(--text)' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mx-auto"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+          </button>
+          <button onClick={() => exec('insertOrderedList')} title="Numbered list"
+            className="w-7 h-7 rounded hover:bg-gray-200 text-xs font-medium" style={{ color: 'var(--text)' }}>1.</button>
+          <button onClick={insertLink} title="Insert link"
+            className="w-7 h-7 rounded hover:bg-gray-200" style={{ color: 'var(--text)' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mx-auto"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </button>
+          <button onClick={() => exec('removeFormat')} title="Clear formatting"
+            className="w-7 h-7 rounded hover:bg-gray-200 text-xs" style={{ color: 'var(--text)' }}>Tx</button>
+        </div>
+
+        <div className="flex-1" />
+
+        <span className="text-[10px]" style={{ color: 'var(--muted)' }}>{saveLabel}</span>
+        <button onClick={discard} title="Discard draft"
+          className="w-7 h-7 rounded hover:bg-gray-200 flex items-center justify-center" style={{ color: 'var(--muted)' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Inline recipient field used inside the To row (no label, since the row already has one)
+function RecipientFieldInline({
+  value, onChange, senderList, autoFocus,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  senderList: { email: string; name: string }[];
+  autoFocus?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const lastSep = Math.max(value.lastIndexOf(','), value.lastIndexOf(';'));
+  const fragment = value.slice(lastSep + 1).trim().toLowerCase();
+  const matches = fragment.length === 0 ? [] : senderList.filter(s =>
+    s.email.toLowerCase().includes(fragment) || (s.name || '').toLowerCase().includes(fragment)
+  ).slice(0, 8);
+
+  function pick(s: { email: string; name: string }) {
+    const prefix = lastSep === -1 ? '' : value.slice(0, lastSep + 1) + ' ';
+    const formatted = s.name ? `${s.name} <${s.email}>` : s.email;
+    onChange(prefix + formatted + ', ');
+    setOpen(false);
+    setActiveIdx(0);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative w-full">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); setActiveIdx(0); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (!open || matches.length === 0) return;
+          if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, matches.length - 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)); }
+          else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(matches[activeIdx]); }
+          else if (e.key === 'Escape') setOpen(false);
+        }}
+        autoFocus={autoFocus}
+        className="w-full bg-transparent text-sm outline-none"
+        style={{ color: 'var(--text)' }}
+      />
+      {open && matches.length > 0 && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border shadow-lg overflow-hidden bg-white" style={{ borderColor: 'var(--border)' }}>
+          {matches.map((s, i) => (
+            <button
+              key={s.email}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); pick(s); }}
+              onMouseEnter={() => setActiveIdx(i)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-left text-xs"
+              style={{ background: i === activeIdx ? '#f1f5f9' : 'white' }}
+            >
+              {s.name && <span className="font-medium truncate" style={{ color: 'var(--text)' }}>{s.name}</span>}
+              <span className="truncate" style={{ color: 'var(--muted)' }}>{s.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -3714,8 +4174,6 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   const [email, setEmail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [replyOpen, setReplyOpen] = useState(false);
-  const [replyAllMode, setReplyAllMode] = useState(false);
   const [isUnread, setIsUnread] = useState(true);
 
   const iframeRef = useCallback((node: HTMLIFrameElement | null) => {
@@ -3742,9 +4200,6 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   }, [email]);
 
   useEffect(() => {
-    setReplyOpen(false);
-    setReplyAllMode(false);
-
     // Check in-memory cache first (instant, no server call)
     const cacheKey = `${messageId}:${accountEmail || ''}`;
     const cached = emailContentCache.get(cacheKey);
@@ -3813,15 +4268,20 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
 
       {/* Action bar */}
       <div className="px-4 py-2 border-b flex gap-1.5 flex-wrap" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
-        <button onClick={() => { setReplyOpen(!replyOpen || replyAllMode); setReplyAllMode(false); }}
+        <button onClick={() => _openCompose?.({
+            to: email.senderEmail, subject: email.subject, threadId: email.threadId, messageId: email.id, accountEmail,
+          })}
           className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white"
-          style={{ background: replyOpen && !replyAllMode ? '#6366f1' : 'var(--accent)' }}>
-          {replyOpen && !replyAllMode ? 'Cancel' : 'Reply'}
+          style={{ background: 'var(--accent)' }}>
+          Reply
         </button>
-        <button onClick={() => { setReplyAllMode(true); setReplyOpen(!replyOpen || !replyAllMode); }}
+        <button onClick={() => _openCompose?.({
+            to: email.senderEmail, subject: email.subject, threadId: email.threadId, messageId: email.id,
+            cc: buildReplyAllCc(email.to, email.cc, email.senderEmail, accountEmail), accountEmail,
+          })}
           className="px-3 py-1.5 text-xs font-semibold rounded-lg border"
-          style={{ borderColor: 'var(--accent)', color: replyOpen && replyAllMode ? '#fff' : 'var(--accent)', background: replyOpen && replyAllMode ? '#7c3aed' : undefined }}>
-          {replyOpen && replyAllMode ? 'Cancel' : 'Reply All'}
+          style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+          Reply All
         </button>
         <ForwardButton messageId={messageId} accountEmail={accountEmail} subject={email?.subject || ''} showToast={showToast} />
         <MarkReadButton isUnread={isUnread} messageId={messageId} accountEmail={accountEmail} onAction={(action, ids, label, acct) => {
@@ -3849,24 +4309,6 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
         </button>
       </div>
 
-      {/* Reply composer */}
-      {replyOpen && (
-        <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
-          <ReplyComposer
-            to={email.senderEmail}
-            subject={email.subject}
-            threadId={email.threadId}
-            messageId={email.id}
-            showToast={showToast}
-            accountEmail={accountEmail}
-            replyAll={replyAllMode}
-            cc={replyAllMode ? buildReplyAllCc(email.to, email.cc, email.senderEmail, accountEmail) : undefined}
-            onSent={() => { setReplyOpen(false); setReplyAllMode(false); showToast(`Reply${replyAllMode ? ' all' : ''} sent`); }}
-            onCancel={() => { setReplyOpen(false); setReplyAllMode(false); }}
-          />
-        </div>
-      )}
-
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
         <iframe
@@ -3891,8 +4333,6 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
   onSenderTierChanged?: (msg: any, newTier: string) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [replyAllMode, setReplyAllMode] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{ ids: string[]; count: number } | null>(null);
   const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
 
@@ -3976,11 +4416,20 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                     showToast(`Set to Tier ${newTier}`, msg.sender);
                   }}
                 />
-                <button onClick={() => { setReplyingTo(replyingTo === msg.id ? null : msg.id); setReplyAllMode(null); }}
+                <button onClick={() => _openCompose?.({
+                    to: msg.senderEmail, subject: msg.subject, threadId: msg.threadId, messageId: msg.id,
+                    accountEmail: (msg as unknown as Record<string, unknown>).accountEmail as string,
+                    onSent: () => onRefresh(),
+                  })}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
-                <button onClick={() => { setReplyingTo(msg.id); setReplyAllMode(replyAllMode === msg.id ? null : msg.id); }}
+                <button onClick={() => _openCompose?.({
+                    to: msg.senderEmail, subject: msg.subject, threadId: msg.threadId, messageId: msg.id,
+                    cc: buildReplyAllCc(msg.to || '', (msg as any).cc || '', msg.senderEmail, (msg as any).accountEmail),
+                    accountEmail: (msg as unknown as Record<string, unknown>).accountEmail as string,
+                    onSent: () => onRefresh(),
+                  })}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg border"
-                  style={{ borderColor: 'var(--accent)', color: replyAllMode === msg.id ? '#fff' : 'var(--accent)', background: replyAllMode === msg.id ? '#7c3aed' : undefined }}>
+                  style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
                   Reply All</button>
                 <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
                 <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
@@ -4006,23 +4455,6 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                 </button>
               </div>
-              {/* Inline Reply Composer */}
-              {replyingTo === msg.id && (
-                <div className="px-4 pb-4">
-                  <ReplyComposer
-                    to={msg.senderEmail}
-                    subject={msg.subject}
-                    threadId={msg.threadId}
-                    messageId={msg.id}
-                    showToast={showToast}
-                    accountEmail={(msg as unknown as Record<string, unknown>).accountEmail as string}
-                    replyAll={replyAllMode === msg.id}
-                    cc={replyAllMode === msg.id ? buildReplyAllCc(msg.to || '', (msg as any).cc || '', msg.senderEmail, (msg as any).accountEmail) : undefined}
-                    onSent={() => { setReplyingTo(null); setReplyAllMode(null); onRefresh(); }}
-                    onCancel={() => { setReplyingTo(null); setReplyAllMode(null); }}
-                  />
-                </div>
-              )}
             </div>
           ))}
         </div>
@@ -4241,8 +4673,6 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
 }) {
   const [queue, setQueue] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [replyAllTo, setReplyAllTo] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<string | null>(null);
   // Drag-and-drop reorder state
@@ -4559,10 +4989,19 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                     </div>
                   </div>
                   <div className="flex gap-2 mt-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                    <button onClick={() => { setReplyingTo(replyingTo === item.id && !replyAllTo ? null : item.id); setReplyAllTo(null); }}
-                      className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: replyingTo === item.id && !replyAllTo ? '#6366f1' : 'var(--accent)' }}>Reply</button>
-                    <button onClick={() => { setReplyAllTo(replyAllTo === item.id ? null : item.id); setReplyingTo(replyAllTo === item.id ? null : item.id); }}
-                      className="px-3 py-1.5 text-xs font-semibold rounded-lg border" style={{ borderColor: 'var(--accent)', color: replyAllTo === item.id ? '#fff' : 'var(--accent)', background: replyAllTo === item.id ? '#7c3aed' : undefined }}>Reply All</button>
+                    <button onClick={() => _openCompose?.({
+                        to: item.sender_email, subject: item.subject, threadId: item.thread_id, messageId: item.message_id,
+                        accountEmail: item.account_email,
+                        onSent: () => { onAction('markRead', [item.message_id], undefined, item.account_email); showToast('Reply sent & marked as read'); },
+                      })}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
+                    <button onClick={() => _openCompose?.({
+                        to: item.sender_email, subject: item.subject, threadId: item.thread_id, messageId: item.message_id,
+                        cc: buildReplyAllCc(item.to || '', item.cc || '', item.sender_email, item.account_email),
+                        accountEmail: item.account_email,
+                        onSent: () => { onAction('markRead', [item.message_id], undefined, item.account_email); showToast('Reply sent & marked as read'); },
+                      })}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg border" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>Reply All</button>
                     {!isChild && quickReplyTemplates.length > 0 && (
                       <QuickReplyDropdown templates={quickReplyTemplates}
                         senderEmail={item.sender_email} senderName={item.sender}
@@ -4601,19 +5040,6 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                     </button>
                   </div>
-                  {replyingTo === item.id && (
-                    <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-                      <ReplyComposer
-                        to={item.sender_email} subject={item.subject}
-                        threadId={item.thread_id} messageId={item.message_id}
-                        showToast={showToast} accountEmail={item.account_email}
-                        replyAll={replyAllTo === item.id}
-                        cc={replyAllTo === item.id ? buildReplyAllCc(item.to || '', item.cc || '', item.sender_email, item.account_email) : undefined}
-                        onSent={() => { setReplyingTo(null); setReplyAllTo(null); onAction('markRead', [item.message_id], undefined, item.account_email); showToast('Reply sent & marked as read'); }}
-                        onCancel={() => { setReplyingTo(null); setReplyAllTo(null); }}
-                      />
-                    </div>
-                  )}
                 </div>
               );
 
@@ -6687,8 +7113,6 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
   onRemove: (id: string) => void;
   onSenderTierChanged?: (msg: GmailMessage, newTier: string) => void;
 }) {
-  const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [replyAllTo, setReplyAllTo] = useState<string | null>(null);
   const [senderTiers, setSenderTiers] = useState<Record<string, string>>({});
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
@@ -6788,10 +7212,19 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                 </div>
               </div>
               <div className="flex gap-2 mt-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                <button onClick={() => { setReplyingTo(replyingTo === msg.id && !replyAllTo ? null : msg.id); setReplyAllTo(null); }}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: replyingTo === msg.id && !replyAllTo ? '#6366f1' : 'var(--accent)' }}>Reply</button>
-                <button onClick={() => { setReplyAllTo(replyAllTo === msg.id ? null : msg.id); setReplyingTo(replyAllTo === msg.id ? null : msg.id); }}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border" style={{ borderColor: 'var(--accent)', color: replyAllTo === msg.id ? '#fff' : 'var(--accent)', background: replyAllTo === msg.id ? '#7c3aed' : undefined }}>Reply All</button>
+                <button onClick={() => _openCompose?.({
+                    to: msg.senderEmail, subject: msg.subject, threadId: msg.threadId, messageId: msg.id,
+                    accountEmail: msg.accountEmail,
+                    onSent: () => { onAction('markRead', [msg.id], undefined, msg.accountEmail); showToast('Reply sent & marked as read'); },
+                  })}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
+                <button onClick={() => _openCompose?.({
+                    to: msg.senderEmail, subject: msg.subject, threadId: msg.threadId, messageId: msg.id,
+                    cc: buildReplyAllCc(msg.to || '', msg.cc || '', msg.senderEmail, msg.accountEmail),
+                    accountEmail: msg.accountEmail,
+                    onSent: () => { onAction('markRead', [msg.id], undefined, msg.accountEmail); showToast('Reply sent & marked as read'); },
+                  })}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>Reply All</button>
                 {quickReplyTemplates.length > 0 && (
                   <QuickReplyDropdown templates={quickReplyTemplates}
                     senderEmail={msg.senderEmail} senderName={msg.sender}
@@ -6835,19 +7268,6 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                 </button>
               </div>
-              {replyingTo === msg.id && (
-                <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-                  <ReplyComposer
-                    to={msg.senderEmail} subject={msg.subject}
-                    threadId={msg.threadId} messageId={msg.id}
-                    showToast={showToast} accountEmail={msg.accountEmail}
-                    replyAll={replyAllTo === msg.id}
-                    cc={replyAllTo === msg.id ? buildReplyAllCc(msg.to || '', msg.cc || '', msg.senderEmail, msg.accountEmail) : undefined}
-                    onSent={() => { setReplyingTo(null); setReplyAllTo(null); onAction('markRead', [msg.id], undefined, msg.accountEmail); showToast('Reply sent & marked as read'); }}
-                    onCancel={() => { setReplyingTo(null); setReplyAllTo(null); }}
-                  />
-                </div>
-              )}
             </div>
           );
         })}
