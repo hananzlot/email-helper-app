@@ -15,7 +15,7 @@ export default function PrivacyPolicy() {
 
         <Section title="1. Introduction">
           Clearbox (&quot;we&quot;, &quot;us&quot;, &quot;our&quot;) operates the email management application
-          available at <a href="https://emaihelper.netlify.app" style={linkStyle}>emaihelper.netlify.app</a>.
+          available at <a href="https://clearbox.pro" style={linkStyle}>clearbox.pro</a>.
           This Privacy Policy explains how we collect, use, and protect your information when you use our service.
           Clearbox is currently in early/beta stage.
         </Section>

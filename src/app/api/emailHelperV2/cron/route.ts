@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
         if (!pending) break; // Queue empty
 
         // Call the unsubscribe PUT endpoint to process one entry
-        const origin = process.env.NEXT_PUBLIC_APP_URL || 'https://emaihelper.netlify.app';
+        const origin = process.env.NEXT_PUBLIC_APP_URL || 'https://clearbox.pro';
         const putRes = await fetch(`${origin}/api/emailHelperV2/unsubscribe`, {
           method: 'PUT',
           headers: { 'Authorization': `Bearer ${cronSecret}` },

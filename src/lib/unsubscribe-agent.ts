@@ -57,7 +57,7 @@ export async function aiUnsubscribe(
     browser = await puppeteer.connect({ browserWSEndpoint: BROWSERLESS_URL });
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
-    await page.setUserAgent('Clearbox-EmailHelper/1.0 (+https://emaihelper.netlify.app)');
+    await page.setUserAgent('Clearbox-EmailHelper/1.0 (+https://clearbox.pro)');
 
     // Navigate to unsubscribe URL
     await page.goto(unsubscribeUrl, { waitUntil: 'networkidle2', timeout: 15000 });

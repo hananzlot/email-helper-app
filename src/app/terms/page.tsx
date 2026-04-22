@@ -15,7 +15,7 @@ export default function TermsOfService() {
 
         <Section title="1. Acceptance of Terms">
           By accessing or using Clearbox (&quot;the Service&quot;), available at{' '}
-          <a href="https://emaihelper.netlify.app" style={linkStyle}>emaihelper.netlify.app</a>,
+          <a href="https://clearbox.pro" style={linkStyle}>clearbox.pro</a>,
           you agree to be bound by these Terms of Service. If you do not agree, do not use the Service.
           Clearbox is currently in early/beta stage and features may change without notice.
         </Section>

@@ -5,7 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const UNSUB_TABLE = "emailHelperV2_unsubscribe_log";
-const APP_URL = Deno.env.get("APP_URL") || "https://emaihelper.netlify.app";
+const APP_URL = Deno.env.get("APP_URL") || "https://clearbox.pro";
 const CRON_SECRET = Deno.env.get("CRON_SECRET") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
