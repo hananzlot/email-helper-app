@@ -146,7 +146,7 @@ export default function SecurityPage() {
           <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Responsible Disclosure</h2>
           <p style={{ fontSize: 13.5, lineHeight: 1.6, color: '#475569', margin: 0 }}>
             If you discover a security vulnerability, please report it to us privately so we can address it before public disclosure.
-            Contact us at <strong>security@clearbox.app</strong>. We aim to acknowledge reports within 24 hours and resolve critical issues within 72 hours.
+            Contact us at <a href="mailto:chananzlot@gmail.com" style={{ color: '#4f46e5', textDecoration: 'underline', fontWeight: 600 }}>chananzlot@gmail.com</a>. We aim to acknowledge reports within 24 hours and resolve critical issues within 72 hours.
           </p>
         </div>
 

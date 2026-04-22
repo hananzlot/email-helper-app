@@ -10,7 +10,7 @@ export default function PrivacyPolicy() {
           Privacy Policy
         </h1>
         <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 32 }}>
-          Last updated: April 2026
+          Last updated: April 22, 2026
         </p>
 
         <Section title="1. Introduction">
@@ -100,19 +100,75 @@ export default function PrivacyPolicy() {
           <ul style={listStyle}>
             <li>Disconnect any connected Gmail account at any time, which deletes all associated data</li>
             <li>Access your data through the Clearbox dashboard</li>
-            <li>Request complete deletion of your account and all stored data by contacting us</li>
+            <li>Request complete deletion of your account and all stored data by emailing <a href="mailto:chananzlot@gmail.com" style={linkStyle}>chananzlot@gmail.com</a></li>
           </ul>
         </Section>
 
-        <Section title="9. Google API Services User Data Policy">
+        <Section title="9. Gmail Scopes and What Each One Is Used For">
           <p style={paraStyle}>
-            Clearbox&apos;s use and transfer of information received from Google APIs adheres to
-            the <a href="https://developers.google.com/terms/api-services-user-data-policy" style={linkStyle} target="_blank" rel="noopener noreferrer">
+            Clearbox requests the minimum Gmail OAuth scopes required to deliver its features.
+            Each scope is mapped to a specific functionality below:
+          </p>
+          <ul style={listStyle}>
+            <li>
+              <strong>https://www.googleapis.com/auth/gmail.modify</strong> — Used to archive,
+              label, mark as read/unread, move to trash, send replies, and create drafts on your
+              behalf. This scope is required because all of Clearbox&apos;s triage, queue, snooze,
+              and cleanup actions involve modifying your inbox.
+            </li>
+            <li>
+              <strong>https://www.googleapis.com/auth/gmail.readonly</strong> — Used to read
+              message metadata (sender, subject, date, snippet) and full message bodies for
+              triage, follow-up detection, sender prioritization, and the in-app preview.
+            </li>
+            <li>
+              <strong>https://www.googleapis.com/auth/drive.file</strong> — Requested only when
+              you explicitly trigger a Gmail backup. Limited to files Clearbox itself creates;
+              we cannot read or modify any other files in your Drive.
+            </li>
+            <li>
+              <strong>openid, email, profile</strong> — Standard sign-in scopes used to identify
+              your account and display your name and avatar in the app.
+            </li>
+          </ul>
+        </Section>
+
+        <Section title="10. Google API Services User Data Policy &amp; Limited Use">
+          <p style={paraStyle}>
+            Clearbox&apos;s use and transfer of information received from Google APIs to any other
+            app adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" style={linkStyle} target="_blank" rel="noopener noreferrer">
             Google API Services User Data Policy</a>, including the Limited Use requirements.
+          </p>
+          <p style={paraStyle}>Specifically, Clearbox affirms that it:</p>
+          <ul style={listStyle}>
+            <li>Only uses access to read, write, modify, or control Gmail message bodies, metadata, headers, and settings to provide a user-facing email management feature inside Clearbox.</li>
+            <li>Does <strong>not</strong> transfer or sell Google user data to third parties for advertising, marketing, market research, or any unrelated purpose.</li>
+            <li>Does <strong>not</strong> use Google user data to serve advertisements, including retargeted, personalized, or interest-based advertising.</li>
+            <li>Does <strong>not</strong> allow humans to read Google user data unless the user provides affirmative consent for specific messages, it is necessary for security purposes (e.g. investigating abuse), to comply with applicable law, or for Clearbox&apos;s internal operations where the data has been aggregated and anonymized.</li>
+            <li>Does <strong>not</strong> use Google user data to train, fine-tune, or improve generalized or non-personalized AI/ML models. AI features (e.g. AI-assisted unsubscribe) only process the specific page content needed for the requested action and do not feed back into model training.</li>
+          </ul>
+        </Section>
+
+        <Section title="11. Revoking Access">
+          <p style={paraStyle}>
+            You can revoke Clearbox&apos;s access to your Google account at any time:
+          </p>
+          <ul style={listStyle}>
+            <li>From inside Clearbox: open the Settings (⚙) menu → Accounts → click <em>Disconnect</em> next to the account. This revokes the OAuth token at Google and deletes all associated data from our database.</li>
+            <li>From your Google account: visit <a href="https://myaccount.google.com/permissions" style={linkStyle} target="_blank" rel="noopener noreferrer">myaccount.google.com/permissions</a>, find &quot;Clearbox,&quot; and click <em>Remove access</em>.</li>
+          </ul>
+        </Section>
+
+        <Section title="12. Account &amp; Data Deletion">
+          <p style={paraStyle}>
+            To request complete deletion of your account and every record we hold about you,
+            email <a href="mailto:chananzlot@gmail.com" style={linkStyle}>chananzlot@gmail.com</a> from
+            the Gmail address you use to sign in. We will permanently delete your data within 30 days
+            and confirm by email when complete.
           </p>
         </Section>
 
-        <Section title="10. Changes to This Policy">
+        <Section title="13. Changes to This Policy">
           <p style={paraStyle}>
             We may update this Privacy Policy from time to time. Changes will be posted on this page
             with an updated revision date. Continued use of Clearbox after changes constitutes acceptance
@@ -120,10 +176,11 @@ export default function PrivacyPolicy() {
           </p>
         </Section>
 
-        <Section title="11. Contact">
+        <Section title="14. Contact">
           <p style={paraStyle}>
-            If you have questions about this Privacy Policy, please reach out through the Clearbox application
-            or contact us at the email provided in the app settings.
+            For any privacy-related question, request, or concern, contact us at{' '}
+            <a href="mailto:chananzlot@gmail.com" style={linkStyle}>chananzlot@gmail.com</a>.
+            We aim to respond within 5 business days.
           </p>
         </Section>
       </div>

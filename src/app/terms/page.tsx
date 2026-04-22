@@ -10,7 +10,7 @@ export default function TermsOfService() {
           Terms of Service
         </h1>
         <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 32 }}>
-          Last updated: April 2026
+          Last updated: April 22, 2026
         </p>
 
         <Section title="1. Acceptance of Terms">
@@ -130,8 +130,8 @@ export default function TermsOfService() {
 
         <Section title="12. Contact">
           <p style={paraStyle}>
-            If you have questions about these Terms of Service, please reach out through the Clearbox
-            application or contact us at the email provided in the app settings.
+            For any question about these Terms of Service, contact us at{' '}
+            <a href="mailto:chananzlot@gmail.com" style={linkStyle}>chananzlot@gmail.com</a>.
           </p>
         </Section>
       </div>
