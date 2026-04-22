@@ -2881,7 +2881,7 @@ export default function Dashboard() {
               {activeTab === 'sent' && <SentMailTab key={`sent-${account}-${unified}-${sentVersion}`} accounts={accounts} unified={unified} onPreview={openPreview} onDialogPreview={openDialogPreview} showToast={showToast} />}
               {activeTab === 'search-reviews' && <SearchReviewsTab messages={searchSelectionActive} onAction={handleAction} showToast={showToast} onPreview={openPreview} onDialogPreview={openDialogPreview} quickReplyTemplates={quickReplyTemplates} onClose={() => { setSearchSelectionActive([]); setActiveTab('reply-queue'); }} onRemove={(id: string) => setSearchSelectionActive(prev => prev.filter(m => m.id !== id))} onSenderTierChanged={handleTierChanged} />}
               {activeTab === 'unsubscribes' && <UnsubscribesTab />}
-              {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${triageVersion}`} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
+              {activeTab === 'priorities' && <PrioritiesTab key={`priorities-${account}-${unified}`} reloadKey={triageVersion} onScanSent={scanSentMail} scanning={triageLoading} showToast={showToast} />}
               {activeTab === 'accounts' && <AccountsTab currentAccount={account} accounts={accounts} onSwitch={switchAccount} onRefresh={loadAccounts} showToast={showToast} onRunTriage={runTriage} onScanSent={scanSentMail} triageLoading={triageLoading} bgTaskLabel={bgTaskLabel} />}
             </>
           );
@@ -4257,10 +4257,11 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     catch { return []; }
   });
 
+  const hasLoadedQueueRef = useRef(false);
   useEffect(() => { loadQueue(); }, [reloadKey]);
 
   async function loadQueue() {
-    setLoading(true);
+    if (!hasLoadedQueueRef.current) setLoading(true);
     const res = await apiGet('queue');
     if (res.success) {
       setQueue(res.data);
@@ -4269,6 +4270,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
       const activeSignalCount = items.filter((q: any) => q.status === 'active' && q.priority !== 'low' && ['A', 'B', 'C'].includes(q.tier)).length;
       reportCount?.(activeSignalCount);
     }
+    hasLoadedQueueRef.current = true;
     setLoading(false);
   }
 
@@ -5254,55 +5256,99 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
 }) {
   const [sentMessages, setSentMessages] = useState<GmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [viewMode, setViewMode] = useState<'conversations' | 'recipients'>('conversations');
   const [senderPriorities, setSenderPriorities] = useState<Record<string, number>>({});
   const [expandedConvo, setExpandedConvo] = useState<string | null>(null);
+  // Per-account pagination tokens. null means "no more pages for this account".
+  const [nextPageTokens, setNextPageTokens] = useState<Record<string, string | null>>({});
+
+  const PAGE_SIZE = 50;
 
   useEffect(() => { loadSentMail(); }, []);
+
+  // Fetch one page of sent mail for a specific account. Returns messages + nextPageToken.
+  // Builds URL with explicit account param so parallel calls don't race on _currentAccount.
+  async function fetchSentPage(accountEmail: string, pageToken?: string) {
+    const params = new URLSearchParams({ action: 'search', q: 'in:sent', max: String(PAGE_SIZE), account: accountEmail });
+    if (pageToken) params.set('pageToken', pageToken);
+    try {
+      await waitForRateLimit();
+      const res = await fetch(`/api/emailHelperV2/gmail?${params}`);
+      handleRateLimitResponse(res);
+      const json = await res.json();
+      const messages: GmailMessage[] = [];
+      if (json.success && json.data?.messages) {
+        for (const msg of json.data.messages) messages.push({ ...msg, accountEmail });
+      }
+      return { messages, nextPageToken: (json.success && json.data?.nextPageToken) || null };
+    } catch (e) {
+      console.error(`Failed to load sent for ${accountEmail}:`, e);
+      return { messages: [] as GmailMessage[], nextPageToken: null as string | null };
+    }
+  }
 
   async function loadSentMail() {
     setLoading(true);
     try {
-      // Load sender reply counts for badges
-      const sendersRes = await apiGet('senders');
-      if (sendersRes.success && sendersRes.data) {
-        const counts: Record<string, number> = {};
-        for (const s of sendersRes.data) counts[s.sender_email.toLowerCase()] = s.reply_count || 0;
-        setSenderPriorities(counts);
-      }
+      // Load sender reply counts for badges (runs in parallel with the sent-mail fetch)
+      const sendersPromise = apiGet('senders').then(r => {
+        if (r.success && r.data) {
+          const counts: Record<string, number> = {};
+          for (const s of r.data) counts[s.sender_email.toLowerCase()] = s.reply_count || 0;
+          setSenderPriorities(counts);
+        }
+      }).catch(() => {});
 
-      // Fetch sent mail from all accounts if unified, otherwise current
+      const acctList = (unified && accounts.length > 1) ? accounts.map(a => a.email) : [_currentAccount];
+      // Fetch first page from each account in parallel (Gmail returns sent sorted desc by default).
+      const results = await Promise.all(acctList.map(email => fetchSentPage(email)));
+
       const allSent: GmailMessage[] = [];
-      if (unified && accounts.length > 1) {
-        const savedAccount = _currentAccount;
-        for (const acct of accounts) {
-          setCurrentAccount(acct.email);
-          try {
-            const res = await gmailGet('search', { q: 'in:sent', max: '50' });
-            if (res.success && res.data?.messages) {
-              for (const msg of res.data.messages) {
-                allSent.push({ ...msg, accountEmail: acct.email });
-              }
-            }
-          } catch (e) { console.error(`Failed to load sent for ${acct.email}:`, e); }
-        }
-        setCurrentAccount(savedAccount);
-      } else {
-        const res = await gmailGet('search', { q: 'in:sent', max: '100' });
-        if (res.success && res.data?.messages) {
-          for (const msg of res.data.messages) {
-            allSent.push({ ...msg, accountEmail: _currentAccount });
-          }
-        }
-      }
+      const tokens: Record<string, string | null> = {};
+      results.forEach((r, i) => {
+        allSent.push(...r.messages);
+        tokens[acctList[i]] = r.nextPageToken;
+      });
 
-      // Sort by date descending
+      // Sort merged results by date descending (per-account results are already desc).
       allSent.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setSentMessages(allSent);
+      setNextPageTokens(tokens);
+      await sendersPromise;
     } catch (err) {
       console.error('Failed to load sent mail:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  const hasMore = Object.values(nextPageTokens).some(t => !!t);
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const entries = Object.entries(nextPageTokens).filter(([, t]) => !!t) as [string, string][];
+      const results = await Promise.all(entries.map(([email, token]) => fetchSentPage(email, token)));
+      const additions: GmailMessage[] = [];
+      const tokenUpdates: Record<string, string | null> = {};
+      results.forEach((r, i) => {
+        additions.push(...r.messages);
+        tokenUpdates[entries[i][0]] = r.nextPageToken;
+      });
+      setSentMessages(prev => {
+        const seen = new Set(prev.map(m => `${m.accountEmail}:${m.id}`));
+        const merged = [...prev];
+        for (const m of additions) {
+          if (!seen.has(`${m.accountEmail}:${m.id}`)) merged.push(m);
+        }
+        merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        return merged;
+      });
+      setNextPageTokens(prev => ({ ...prev, ...tokenUpdates }));
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -5576,6 +5622,16 @@ function SentMailTab({ accounts, unified, onPreview, onDialogPreview, showToast 
           })}
         </div>
       )}
+
+      {hasMore && (
+        <div className="flex justify-center mt-4">
+          <button onClick={loadMore} disabled={loadingMore}
+            className="px-4 py-2 text-sm rounded-full border font-medium disabled:opacity-50"
+            style={{ borderColor: 'var(--border)', color: 'var(--muted)', background: 'var(--card)' }}>
+            {loadingMore ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -5593,10 +5649,11 @@ function SnoozedTab({ onAction, showToast, onPreview, onDialogPreview, reloadKey
   const [snoozedItems, setSnoozedItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const hasLoadedSnoozedRef = useRef(false);
   useEffect(() => { loadSnoozed(); }, [reloadKey]);
 
   async function loadSnoozed() {
-    setLoading(true);
+    if (!hasLoadedSnoozedRef.current) setLoading(true);
     const res = await apiGet('queue');
     if (res.success) {
       const snoozed = (res.data || []).filter((q: any) => q.status === 'snoozed');
@@ -5609,6 +5666,7 @@ function SnoozedTab({ onAction, showToast, onPreview, onDialogPreview, reloadKey
       setSnoozedItems(snoozed);
       reportCount?.(snoozed.length);
     }
+    hasLoadedSnoozedRef.current = true;
     setLoading(false);
   }
 
@@ -6122,9 +6180,10 @@ function findSenderDuplicates(senders: any[], mergedEmails?: Set<string>): Dupli
   return clusters;
 }
 
-function PrioritiesTab({ onScanSent, scanning, showToast }: {
+function PrioritiesTab({ onScanSent, scanning, showToast, reloadKey }: {
   onScanSent: () => void; scanning: boolean;
   showToast: (title: string, subtitle?: string) => void;
+  reloadKey?: number;
 }) {
   const [senders, setSenders] = useState<any[]>([]);
   const [rules, setRules] = useState<any[]>([]);
@@ -6164,7 +6223,8 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   // Multi-select state
   const [selectedSenders, setSelectedSenders] = useState<Set<string>>(new Set());
 
-  useEffect(() => { loadData(); }, []);
+  const hasLoadedPrioritiesRef = useRef(false);
+  useEffect(() => { loadData(); }, [reloadKey]);
 
   async function loadSenderEmails(senderEmail: string) {
     if (expandedSender === senderEmail) {
@@ -6186,10 +6246,11 @@ function PrioritiesTab({ onScanSent, scanning, showToast }: {
   }
 
   async function loadData() {
-    setLoading(true);
+    if (!hasLoadedPrioritiesRef.current) setLoading(true);
     const [s, r] = await Promise.all([apiGet('senders'), apiGet('rules')]);
     if (s.success) setSenders(s.data);
     if (r.success) setRules(r.data);
+    hasLoadedPrioritiesRef.current = true;
     setLoading(false);
   }
 
