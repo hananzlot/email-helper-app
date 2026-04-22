@@ -42,18 +42,21 @@ function getMaxEmails(): number {
 let _currentAccount = '';
 let _onEmailSent: (() => void) | null = null;
 
-// Reply context passed when opening the compose dialog as a reply / reply-all
+// Context passed when opening the compose dialog as a reply, reply-all, or forward.
+// All fields except `mode` are optional so the floating Compose button can call with `{}` or undefined.
 type ComposeReplyContext = {
-  to: string;
-  subject: string;
-  threadId: string;
-  messageId: string;
-  cc?: string;
-  accountEmail?: string;
-  onSent?: () => void;
+  mode?: 'reply' | 'forward';      // omit for a brand-new compose
+  to?: string;                     // pre-fill To
+  subject?: string;                // raw subject — dialog adds Re:/Fwd: prefix based on mode
+  threadId?: string;               // reply only
+  messageId?: string;              // for fetching the original to quote (reply) or include (forward)
+  cc?: string;                     // for reply-all
+  accountEmail?: string;           // pre-select From
+  bodyPrefill?: string;            // pre-fill body HTML (used by quick reply templates)
+  onSent?: () => void;             // optional callback after successful send (e.g. archive, mark-read, refresh)
 };
 // Module-level opener — any nested component can open the floating compose dialog.
-// Reply / reply-all buttons call this with a replyContext; the floating Compose button calls with no args.
+// Reply / reply-all / forward / quick-reply buttons call this with a context; the floating Compose button calls with no args.
 let _openCompose: ((replyContext?: ComposeReplyContext) => void) | null = null;
 
 // Global rate-limit circuit breaker: when ANY request gets a 429, all requests
@@ -627,70 +630,23 @@ function StarButton({ messageId, accountEmail, onAction, size = 'sm' }: {
   );
 }
 
-function ForwardButton({ messageId, accountEmail, subject, showToast, size = 'sm', onEmailSent }: {
+function ForwardButton({ messageId, accountEmail, subject, size = 'sm', onEmailSent }: {
   messageId: string; accountEmail?: string; subject: string;
-  showToast: (title: string, subtitle?: string) => void;
+  showToast?: (title: string, subtitle?: string) => void;
   size?: 'sm' | 'xs';
   onEmailSent?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [to, setTo] = useState('');
-  const [body, setBody] = useState('');
-  const [sending, setSending] = useState(false);
-
-  async function sendForward() {
-    if (!to.trim()) return;
-    setSending(true);
-    const savedAccount = _currentAccount;
-    if (accountEmail && accountEmail !== _currentAccount) setCurrentAccount(accountEmail);
-    try {
-      // Fetch original message body for forwarding
-      const msgRes = await gmailGet('message', { id: messageId, format: 'full' });
-      const origBody = msgRes.success ? (msgRes.data.bodyHtml || msgRes.data.body || '') : '';
-      const fwdBody = `${body ? body.replace(/\n/g, '<br>') + '<br><br>' : ''}<hr style="border:none;border-top:1px solid #ccc;margin:16px 0"><strong>---------- Forwarded message ----------</strong><br>${origBody}`;
-      const res = await gmailPost('send', {
-        to: to.trim(),
-        subject: subject.startsWith('Fwd:') ? subject : `Fwd: ${subject}`,
-        body: fwdBody,
-      });
-      if (res.success) {
-        showToast('Forwarded', `To: ${to.trim()}`);
-        setOpen(false); setTo(''); setBody('');
-        onEmailSent?.();
-        _onEmailSent?.();
-      } else {
-        showToast('Forward failed', res.error);
-      }
-    } catch (err) { showToast('Forward failed', String(err)); }
-    finally {
-      if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
-      setSending(false);
-    }
-  }
-
-  if (open) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={() => setOpen(false)}>
-        <div className="w-full max-w-md mx-4 p-4 rounded-xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-          <div className="text-sm font-semibold mb-3" style={{ color: 'var(--text)' }}>Forward: {subject}</div>
-          <input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder="To: email@example.com"
-            className="w-full p-2.5 mb-2 rounded-lg border text-sm" style={{ borderColor: 'var(--border)' }} autoFocus />
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Add a message (optional)"
-            rows={3} className="w-full p-2.5 rounded-lg border text-sm resize-y" style={{ borderColor: 'var(--border)' }} />
-          <div className="flex gap-2 mt-3">
-            <button onClick={sendForward} disabled={sending || !to.trim()}
-              className="px-4 py-2 text-xs font-semibold rounded-lg text-white" style={{ background: sending ? 'var(--muted)' : 'var(--accent)' }}>
-              {sending ? 'Sending...' : 'Forward'}
-            </button>
-            <button onClick={() => setOpen(false)} className="px-4 py-2 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>Cancel</button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <button onClick={(e) => { e.stopPropagation(); setOpen(true); }}
+    <button onClick={(e) => {
+        e.stopPropagation();
+        _openCompose?.({
+          mode: 'forward',
+          subject,
+          messageId,
+          accountEmail,
+          onSent: onEmailSent,
+        });
+      }}
       className={`${size === 'xs' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1.5 text-xs'} font-medium rounded-lg border`}
       style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
       Forward
@@ -3729,18 +3685,31 @@ function ComposeDialog({
   onClose: () => void;
   showToast: (title: string, subtitle?: string) => void;
 }) {
-  const isReply = !!replyContext;
-  const initialSubject = replyContext
-    ? (replyContext.subject.startsWith('Re:') ? replyContext.subject : `Re: ${replyContext.subject}`)
-    : '';
+  const mode = replyContext?.mode;
+  const isReply = mode === 'reply';
+  const isForward = mode === 'forward';
+  const includeOriginal = (isReply || isForward) && !!replyContext?.messageId;
+  const QUOTED_PLACEHOLDER_ID = 'compose-quoted-original';
+  const rawSubject = replyContext?.subject || '';
+  const initialSubject = isForward
+    ? (rawSubject.startsWith('Fwd:') || rawSubject.startsWith('FW:') ? rawSubject : `Fwd: ${rawSubject}`)
+    : isReply
+      ? (rawSubject.startsWith('Re:') ? rawSubject : `Re: ${rawSubject}`)
+      : '';
+  // Initial body: leave a typing area at the top, then a placeholder for the original (replaced when fetch resolves).
+  const prefillTop = replyContext?.bodyPrefill || '<p><br></p>';
+  const initialBodyHtml = includeOriginal
+    ? `${prefillTop}<div id="${QUOTED_PLACEHOLDER_ID}" style="color:#94a3b8;font-style:italic;font-size:12px;margin-top:12px">Loading previous message…</div>`
+    : (replyContext?.bodyPrefill || '');
   const [from, setFrom] = useState(replyContext?.accountEmail || defaultFrom);
-  const [to, setTo] = useState(replyContext?.to || '');
+  // Forward starts with empty To (user picks recipients); reply pre-fills with the sender
+  const [to, setTo] = useState(isForward ? '' : (replyContext?.to || ''));
   const [cc, setCc] = useState(replyContext?.cc || '');
   const [bcc, setBcc] = useState('');
   const [showCc, setShowCc] = useState(!!(replyContext?.cc));
   const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState(initialSubject);
-  const [bodyHtml, setBodyHtml] = useState('');
+  const [bodyHtml, setBodyHtml] = useState(initialBodyHtml);
   const [sending, setSending] = useState(false);
   const [draftId, setDraftId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -3754,9 +3723,60 @@ function ComposeDialog({
   // Initialize the contenteditable HTML once on mount; do NOT re-write it on every state change
   // (that would move the caret to the start while typing).
   useEffect(() => {
-    if (bodyRef.current && bodyRef.current.innerHTML === '') {
+    if (bodyRef.current && bodyRef.current.innerHTML === '' && bodyHtml) {
       bodyRef.current.innerHTML = bodyHtml;
     }
+    // For reply / forward: focus the editor and place caret at the very start so the user types
+    // above the quoted/forwarded block.
+    if (bodyRef.current && (isReply || isForward)) {
+      bodyRef.current.focus();
+      const firstChild = bodyRef.current.firstChild;
+      if (firstChild) {
+        const range = document.createRange();
+        range.setStart(firstChild, 0);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fetch the original message (reply or forward) and swap the placeholder with the real content.
+  // Done in-place via DOM so the user's caret position and any typing they've already done is preserved.
+  useEffect(() => {
+    if (!includeOriginal || !replyContext?.messageId) return;
+    let cancelled = false;
+    const accountForFetch = replyContext.accountEmail;
+    const savedAccount = _currentAccount;
+    if (accountForFetch && accountForFetch !== _currentAccount) setCurrentAccount(accountForFetch);
+    gmailGet('message', { id: replyContext.messageId, format: 'full' })
+      .then((res) => {
+        if (accountForFetch && accountForFetch !== savedAccount) setCurrentAccount(savedAccount);
+        if (cancelled || !res.success) return;
+        const origBody = res.data.bodyHtml || res.data.body || '';
+        const origDate = res.data.date ? new Date(res.data.date).toLocaleString() : '';
+        const origFrom = res.data.sender || replyContext.to || '';
+        const block = isForward
+          ? `<hr style="border:none;border-top:1px solid #ccc;margin:16px 0"><strong>---------- Forwarded message ----------</strong><br>${origBody}`
+          : `<div style="border-left:2px solid #ccc;padding-left:12px;margin-top:12px;color:#666"><p style="margin:0 0 8px 0;font-size:12px">On ${origDate}, ${origFrom} wrote:</p>${origBody}</div>`;
+        const placeholder = bodyRef.current?.querySelector(`#${QUOTED_PLACEHOLDER_ID}`) as HTMLDivElement | null;
+        if (placeholder) {
+          placeholder.outerHTML = block;
+        }
+        // Sync state with the new DOM so autosave persists the quoted content
+        if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML);
+      })
+      .catch(() => {
+        if (accountForFetch && accountForFetch !== savedAccount) setCurrentAccount(savedAccount);
+        if (cancelled) return;
+        // On failure, just remove the placeholder so the user isn't left staring at "Loading…"
+        const placeholder = bodyRef.current?.querySelector(`#${QUOTED_PLACEHOLDER_ID}`);
+        placeholder?.remove();
+        if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML);
+      });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -3830,18 +3850,11 @@ function ComposeDialog({
     const savedAccount = _currentAccount;
     if (from !== _currentAccount) setCurrentAccount(from);
     try {
-      // For replies: fetch the original message and append a quoted block to the body
+      // For reply / forward the original is already inline in bodyHtml (fetched on dialog mount,
+      // editable by the user). Strip any unresolved loading placeholder before sending.
       let finalBody = bodyHtml || '';
-      if (replyContext) {
-        try {
-          const origRes = await gmailGet('message', { id: replyContext.messageId, format: 'full' });
-          if (origRes.success) {
-            const origBody = origRes.data.bodyHtml || origRes.data.body || '';
-            const origDate = origRes.data.date ? new Date(origRes.data.date).toLocaleString() : '';
-            const origFrom = origRes.data.sender || replyContext.to;
-            finalBody += `<br><br><div style="border-left:2px solid #ccc;padding-left:12px;margin-top:12px;color:#666"><p style="margin:0 0 8px 0;font-size:12px">On ${origDate}, ${origFrom} wrote:</p>${origBody}</div>`;
-          }
-        } catch {}
+      if (finalBody.includes(QUOTED_PLACEHOLDER_ID)) {
+        finalBody = finalBody.replace(new RegExp(`<div[^>]*id="${QUOTED_PLACEHOLDER_ID}"[^>]*>.*?</div>`, 's'), '');
       }
       const payload: Record<string, unknown> = {
         to: to.trim(),
@@ -3850,7 +3863,8 @@ function ComposeDialog({
         cc: cc.trim() || undefined,
         bcc: bcc.trim() || undefined,
       };
-      if (replyContext) {
+      // Only replies thread to the original — forwards start a new thread
+      if (isReply && replyContext?.threadId) {
         payload.threadId = replyContext.threadId;
         payload.inReplyTo = replyContext.messageId;
       }
@@ -3860,7 +3874,8 @@ function ComposeDialog({
         if (draftId) {
           try { await gmailPost('deleteDraft', { draftId }); } catch {}
         }
-        showToast(isReply ? 'Reply sent' : 'Email sent', `To: ${to.trim()} (via ${from})`);
+        const successTitle = isForward ? 'Forwarded' : isReply ? 'Reply sent' : 'Email sent';
+        showToast(successTitle, `To: ${to.trim()} (via ${from})`);
         _onEmailSent?.();
         replyContext?.onSent?.();
         onClose();
@@ -4525,43 +4540,11 @@ function SnoozeDropdown({ onSnooze }: { onSnooze: (hours: number, label: string)
 
 // ============ QUICK REPLY DROPDOWN ============
 
-function QuickReplyDropdown({ templates, onSend, senderEmail, senderName, cc, subject }: {
+function QuickReplyDropdown({ templates, onPick }: {
   templates: { id: string; label: string; body: string }[];
-  onSend: (body: string, label: string, replyAll?: boolean) => void;
-  senderEmail?: string;
-  senderName?: string;
-  cc?: string;
-  subject?: string;
+  onPick: (template: { id: string; label: string; body: string }) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [sending, setSending] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ body: string; label: string; editedBody: string } | null>(null);
-  const [replyMode, setReplyMode] = useState<'sender' | 'all' | null>(null);
-
-  // Check if this is a multi-recipient email
-  const hasMultipleRecipients = !!(cc && cc.trim());
-
-  function handleTemplateClick(t: { id: string; label: string; body: string }) {
-    if (hasMultipleRecipients) {
-      // Show reply mode choice first
-      setPreview({ body: t.body, label: t.label, editedBody: t.body });
-      setReplyMode(null); // Force user to choose
-    } else {
-      // Single recipient — go straight to preview
-      setPreview({ body: t.body, label: t.label, editedBody: t.body });
-      setReplyMode('sender');
-    }
-  }
-
-  async function confirmSend() {
-    if (!preview || !replyMode) return;
-    setSending(preview.label);
-    await onSend(preview.editedBody, preview.label, replyMode === 'all');
-    setSending(null);
-    setPreview(null);
-    setReplyMode(null);
-    setOpen(false);
-  }
 
   return (
     <div className="relative">
@@ -4572,86 +4555,17 @@ function QuickReplyDropdown({ templates, onSend, senderEmail, senderName, cc, su
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => { setOpen(false); setPreview(null); setReplyMode(null); }} />
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute left-0 top-full mt-1 z-50 rounded-lg border shadow-lg py-1 min-w-[320px]"
             style={{ background: 'white', borderColor: 'var(--border)' }}>
-
-            {/* Step 1: Template selection */}
-            {!preview && (
-              <>
-                <div className="px-3 py-1.5 text-[10px] font-semibold uppercase" style={{ color: 'var(--muted)' }}>Choose a quick reply</div>
-                {templates.map((t) => (
-                  <button key={t.id} onClick={() => handleTemplateClick(t)}
-                    className="w-full text-left px-3 py-2.5 text-xs hover:bg-blue-50 transition-colors flex flex-col gap-0.5">
-                    <span className="font-semibold">{t.label}</span>
-                    <span className="text-[10px] truncate" style={{ color: 'var(--muted)' }}>{t.body}</span>
-                  </button>
-                ))}
-              </>
-            )}
-
-            {/* Step 2: Preview & confirm */}
-            {preview && (
-              <div className="p-3">
-                <div className="text-[10px] font-semibold uppercase mb-2" style={{ color: 'var(--muted)' }}>Preview — {preview.label}</div>
-
-                {/* Recipients */}
-                <div className="text-xs mb-2 p-2 rounded" style={{ background: '#f8fafc' }}>
-                  <div><span className="font-semibold" style={{ color: 'var(--muted)' }}>To:</span> {senderName || senderEmail || 'Sender'}</div>
-                  {subject && <div><span className="font-semibold" style={{ color: 'var(--muted)' }}>Subject:</span> Re: {subject}</div>}
-                  {hasMultipleRecipients && replyMode === 'all' && (
-                    <div><span className="font-semibold" style={{ color: 'var(--muted)' }}>CC:</span> {cc}</div>
-                  )}
-                </div>
-
-                {/* Editable body */}
-                <textarea
-                  value={preview.editedBody}
-                  onChange={(e) => setPreview({ ...preview, editedBody: e.target.value })}
-                  className="w-full text-xs p-2 rounded border resize-none focus:outline-none focus:ring-1"
-                  style={{ borderColor: 'var(--border)', minHeight: '80px' }}
-                  rows={4}
-                />
-
-                {/* Reply mode choice for multi-recipient */}
-                {hasMultipleRecipients && (
-                  <div className="flex gap-2 mt-2">
-                    <button onClick={() => setReplyMode('sender')}
-                      className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border transition-all"
-                      style={{
-                        borderColor: replyMode === 'sender' ? 'var(--accent)' : 'var(--border)',
-                        background: replyMode === 'sender' ? '#eff6ff' : 'white',
-                        color: replyMode === 'sender' ? 'var(--accent)' : 'var(--muted)',
-                      }}>
-                      Reply to Sender
-                    </button>
-                    <button onClick={() => setReplyMode('all')}
-                      className="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border transition-all"
-                      style={{
-                        borderColor: replyMode === 'all' ? '#7c3aed' : 'var(--border)',
-                        background: replyMode === 'all' ? '#f5f3ff' : 'white',
-                        color: replyMode === 'all' ? '#7c3aed' : 'var(--muted)',
-                      }}>
-                      Reply All
-                    </button>
-                  </div>
-                )}
-
-                {/* Action buttons */}
-                <div className="flex gap-2 mt-3">
-                  <button onClick={() => { setPreview(null); setReplyMode(null); }}
-                    className="px-3 py-1.5 text-xs font-medium rounded-lg border" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
-                    Back
-                  </button>
-                  <button onClick={confirmSend}
-                    disabled={!replyMode || !!sending}
-                    className="flex-1 px-3 py-1.5 text-xs font-semibold rounded-lg text-white transition-all"
-                    style={{ background: !replyMode ? '#94a3b8' : replyMode === 'all' ? '#7c3aed' : 'var(--accent)', opacity: sending ? 0.5 : 1 }}>
-                    {sending ? 'Sending...' : replyMode === 'all' ? 'Send to All & Archive' : 'Send & Archive'}
-                  </button>
-                </div>
-              </div>
-            )}
+            <div className="px-3 py-1.5 text-[10px] font-semibold uppercase" style={{ color: 'var(--muted)' }}>Pick a template — opens in compose</div>
+            {templates.map((t) => (
+              <button key={t.id} onClick={() => { onPick(t); setOpen(false); }}
+                className="w-full text-left px-3 py-2.5 text-xs hover:bg-blue-50 transition-colors flex flex-col gap-0.5">
+                <span className="font-semibold">{t.label}</span>
+                <span className="text-[10px] truncate" style={{ color: 'var(--muted)' }}>{t.body}</span>
+              </button>
+            ))}
           </div>
         </>
       )}
@@ -5004,28 +4918,19 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                       className="px-3 py-1.5 text-xs font-semibold rounded-lg border" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>Reply All</button>
                     {!isChild && quickReplyTemplates.length > 0 && (
                       <QuickReplyDropdown templates={quickReplyTemplates}
-                        senderEmail={item.sender_email} senderName={item.sender}
-                        cc={item.cc || item.to || ''} subject={item.subject}
-                        onSend={async (body, label, replyAll) => {
-                        try {
-                          const savedAccount = _currentAccount;
-                          if (item.account_email && item.account_email !== _currentAccount) setCurrentAccount(item.account_email);
-                          const payload: Record<string, unknown> = {
-                            to: item.sender_email, subject: item.subject, body,
-                            threadId: item.thread_id, inReplyTo: item.message_id,
-                          };
-                          if (replyAll) {
-                            const ccStr = buildReplyAllCc(item.to || '', item.cc || '', item.sender_email, item.account_email);
-                            if (ccStr) payload.cc = ccStr;
-                          }
-                          const res = await gmailPost('reply', payload);
-                          if (item.account_email) setCurrentAccount(savedAccount);
-                          if (res.success) {
-                            showToast(`Quick reply sent${replyAll ? ' to all' : ''}: ${label}`, item.sender);
+                        onPick={(t) => _openCompose?.({
+                          mode: 'reply',
+                          to: item.sender_email,
+                          subject: item.subject,
+                          threadId: item.thread_id,
+                          messageId: item.message_id,
+                          accountEmail: item.account_email,
+                          bodyPrefill: t.body.replace(/\n/g, '<br>'),
+                          onSent: () => {
                             queueAction('archive', item.message_id, item.id, item.account_email);
-                          } else { showToast('Failed to send', res.error); }
-                        } catch (e) { showToast('Error', String(e)); }
-                      }} />
+                            showToast(`Quick reply sent: ${t.label}`, item.sender);
+                          },
+                        })} />
                     )}
                     <MarkReadButton isUnread={true} messageId={item.message_id} accountEmail={item.account_email} onAction={(action, ids, label, acct) => { queueAction(action, item.message_id, item.id, acct || item.account_email); }} />
                     <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(item.id, hours, label)} />
@@ -7227,21 +7132,20 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg border" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>Reply All</button>
                 {quickReplyTemplates.length > 0 && (
                   <QuickReplyDropdown templates={quickReplyTemplates}
-                    senderEmail={msg.senderEmail} senderName={msg.sender}
-                    cc={msg.cc || msg.to || ''} subject={msg.subject}
-                    onSend={async (body, label, replyAll) => {
-                      const savedAccount = _currentAccount;
-                      if (msg.accountEmail && msg.accountEmail !== _currentAccount) setCurrentAccount(msg.accountEmail);
-                      const payload: Record<string, unknown> = { to: msg.senderEmail, subject: msg.subject, body, threadId: msg.threadId, inReplyTo: msg.id };
-                      if (replyAll) {
-                        const ccStr = buildReplyAllCc(msg.to || '', msg.cc || '', msg.senderEmail, msg.accountEmail);
-                        if (ccStr) payload.cc = ccStr;
-                      }
-                      const res = await gmailPost('reply', payload);
-                      if (msg.accountEmail) setCurrentAccount(savedAccount);
-                      if (res.success) { showToast(`Quick reply sent${replyAll ? ' to all' : ''}`, msg.sender); onAction('archive', [msg.id], undefined, msg.accountEmail); onRemove(msg.id); }
-                      else showToast('Failed', res.error);
-                    }} />
+                    onPick={(t) => _openCompose?.({
+                      mode: 'reply',
+                      to: msg.senderEmail,
+                      subject: msg.subject,
+                      threadId: msg.threadId,
+                      messageId: msg.id,
+                      accountEmail: msg.accountEmail,
+                      bodyPrefill: t.body.replace(/\n/g, '<br>'),
+                      onSent: () => {
+                        onAction('archive', [msg.id], undefined, msg.accountEmail);
+                        onRemove(msg.id);
+                        showToast(`Quick reply sent: ${t.label}`, msg.sender);
+                      },
+                    })} />
                 )}
                 <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
                 <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
