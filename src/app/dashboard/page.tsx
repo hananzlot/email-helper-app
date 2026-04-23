@@ -748,6 +748,16 @@ interface ConnectedAccount {
 }
 
 export default function Dashboard() {
+  // Mobile redirect: send phones to /m unless the user has opted into desktop view.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let optOut = false;
+    try { optOut = localStorage.getItem('clearbox_use_desktop') === '1'; } catch {}
+    if (!optOut && window.innerWidth < 768) {
+      window.location.replace('/m');
+    }
+  }, []);
+
   const [activeTab, setActiveTab] = useState<Tab>('home');
   // Returning users land on Top Tiers tab (skip if pending backup)
   useEffect(() => {
