@@ -28,7 +28,8 @@ const EVENTS = [
 async function getAccessToken() {
   // Path 1: Bring-your-own access token (e.g. from OAuth Playground).
   // Use this when org policy blocks service-account JSON keys.
-  if (process.env.RISC_ACCESS_TOKEN) return process.env.RISC_ACCESS_TOKEN.trim();
+  // Strip all whitespace — terminal line-wrap can inject newlines mid-token.
+  if (process.env.RISC_ACCESS_TOKEN) return process.env.RISC_ACCESS_TOKEN.replace(/\s+/g, '');
 
   // Path 2: Service account JSON key.
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
