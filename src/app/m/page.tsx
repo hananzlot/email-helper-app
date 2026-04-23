@@ -613,7 +613,7 @@ export default function MobilePage() {
 
   const [sent, setSent] = useState<GmailMessage[]>([]);
   const [sentLoading, setSentLoading] = useState(true);
-  const [sentToken, setSentToken] = useState<string | null>(null);
+  const [sentTokens, setSentTokens] = useState<Record<string, string | null>>({});
   const [sentLoadingMore, setSentLoadingMore] = useState(false);
 
   const [openThread, setOpenThread] = useState<{ id: string; account: string; subject: string } | null>(null);
@@ -660,30 +660,75 @@ export default function MobilePage() {
     }
   }, []);
 
-  const loadSent = useCallback(async (account: string, append: boolean, pageToken?: string) => {
-    if (!account) return;
-    if (append) setSentLoadingMore(true); else setSentLoading(true);
+  const fetchSentPage = useCallback(async (email: string, pageToken?: string) => {
+    let path = `gmail?action=inbox&q=${encodeURIComponent('in:sent')}&max=50`;
+    if (pageToken) path += `&pageToken=${encodeURIComponent(pageToken)}`;
     try {
-      let path = `gmail?action=inbox&q=${encodeURIComponent('in:sent')}&max=50`;
-      if (pageToken) path += `&pageToken=${encodeURIComponent(pageToken)}`;
-      const data = await api<{ messages: GmailMessage[]; nextPageToken?: string | null }>(path, { account });
-      const tagged = (data.messages || []).map(m => ({ ...m, accountEmail: account }));
-      setSent(prev => append ? [...prev, ...tagged] : tagged);
-      setSentToken(data.nextPageToken || null);
+      const data = await api<{ messages: GmailMessage[]; nextPageToken?: string | null }>(path, { account: email });
+      const tagged = (data.messages || []).map(m => ({ ...m, accountEmail: email }));
+      return { email, messages: tagged, nextPageToken: data.nextPageToken || null };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load sent';
       if (msg.toLowerCase().includes('not authenticated')) setAuthError(msg);
-      else showToast(msg);
-    } finally {
-      if (append) setSentLoadingMore(false); else setSentLoading(false);
+      return { email, messages: [] as GmailMessage[], nextPageToken: null as string | null };
     }
-  }, [showToast]);
+  }, []);
+
+  const loadSentMail = useCallback(async () => {
+    if (accounts.length === 0) return;
+    setSentLoading(true);
+    try {
+      const results = await Promise.all(accounts.map(a => fetchSentPage(a.email)));
+      const allSent: GmailMessage[] = [];
+      const tokens: Record<string, string | null> = {};
+      for (const r of results) {
+        allSent.push(...r.messages);
+        tokens[r.email] = r.nextPageToken;
+      }
+      allSent.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setSent(allSent);
+      setSentTokens(tokens);
+    } finally {
+      setSentLoading(false);
+    }
+  }, [accounts, fetchSentPage]);
+
+  const loadMoreSent = useCallback(async () => {
+    if (sentLoadingMore) return;
+    const entries = Object.entries(sentTokens).filter(([, t]) => !!t) as [string, string][];
+    if (entries.length === 0) return;
+    setSentLoadingMore(true);
+    try {
+      const results = await Promise.all(entries.map(([email, token]) => fetchSentPage(email, token)));
+      const additions: GmailMessage[] = [];
+      const tokenUpdates: Record<string, string | null> = {};
+      for (const r of results) {
+        additions.push(...r.messages);
+        tokenUpdates[r.email] = r.nextPageToken;
+      }
+      setSent(prev => {
+        const seen = new Set(prev.map(m => `${m.accountEmail}:${m.id}`));
+        const merged = [...prev];
+        for (const m of additions) {
+          const key = `${m.accountEmail}:${m.id}`;
+          if (!seen.has(key)) { merged.push(m); seen.add(key); }
+        }
+        merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        return merged;
+      });
+      setSentTokens(prev => ({ ...prev, ...tokenUpdates }));
+    } finally {
+      setSentLoadingMore(false);
+    }
+  }, [sentTokens, sentLoadingMore, fetchSentPage]);
+
+  const hasMoreSent = useMemo(() => Object.values(sentTokens).some(t => !!t), [sentTokens]);
 
   useEffect(() => {
-    if (!accountsLoaded || !activeAccount) return;
+    if (!accountsLoaded || accounts.length === 0) return;
     loadImportant();
-    loadSent(activeAccount, false);
-  }, [accountsLoaded, activeAccount, loadImportant, loadSent]);
+    loadSentMail();
+  }, [accountsLoaded, accounts, loadImportant, loadSentMail]);
 
   const importantRows: RowMessage[] = useMemo(() =>
     important.map(it => ({
@@ -720,6 +765,14 @@ export default function MobilePage() {
     }),
     [sent, activeAccount]
   );
+
+  const refreshSent = async () => {
+    if (hasMoreSent && sent.length > 0) {
+      await loadMoreSent();
+    } else {
+      await loadSentMail();
+    }
+  };
 
   const performGmailAction = async (
     action: 'archive' | 'delete' | 'markRead' | 'markUnread',
@@ -822,11 +875,6 @@ export default function MobilePage() {
   };
 
   const refreshImportant = async () => { await loadImportant(); };
-  const refreshSent = async () => {
-    if (!activeAccount) return;
-    if (sentToken) await loadSent(activeAccount, true, sentToken);
-    else await loadSent(activeAccount, false);
-  };
 
   const setPrimary = async (email: string) => {
     try {
@@ -878,15 +926,6 @@ export default function MobilePage() {
       <style>{styles}</style>
       <header className="m-header">
         <div className="m-title">Clearbox</div>
-        {tab === 'sent' && accounts.length > 1 && (
-          <select
-            className="m-account-pick"
-            value={activeAccount}
-            onChange={(e) => setActiveAccount(e.target.value)}
-          >
-            {accounts.map(a => <option key={a.email} value={a.email}>{a.email}</option>)}
-          </select>
-        )}
         <button className="m-desktop-link" onClick={useDesktop}>Desktop</button>
       </header>
 
@@ -912,7 +951,7 @@ export default function MobilePage() {
         )}
 
         {tab === 'sent' && (
-          <PullToRefresh onRefresh={refreshSent} label={sentToken ? 'Loading more…' : 'Refreshing'}>
+          <PullToRefresh onRefresh={refreshSent} label={hasMoreSent ? 'Loading more…' : 'Refreshing'}>
             {sentLoading ? (
               <div className="state">Loading…</div>
             ) : sentRows.length === 0 ? (
@@ -929,7 +968,7 @@ export default function MobilePage() {
                   />
                 ))}
                 <div className="state small">
-                  {sentLoadingMore ? 'Loading more…' : sentToken ? 'Pull down to load more' : 'End of list'}
+                  {sentLoadingMore ? 'Loading more…' : hasMoreSent ? 'Pull down to load more' : 'End of list'}
                 </div>
               </>
             )}
@@ -1001,7 +1040,7 @@ export default function MobilePage() {
           onSent={() => {
             setCompose(null);
             showToast('Sent');
-            if (tab === 'sent') setTimeout(() => loadSent(activeAccount, false), 1500);
+            if (tab === 'sent') setTimeout(() => { loadSentMail(); }, 1500);
           }}
         />
       )}
@@ -1036,10 +1075,6 @@ const styles = `
   position: relative; z-index: 10;
 }
 .m-title { font-weight: 700; font-size: 18px; flex: 1; }
-.m-account-pick {
-  font-size: 13px; max-width: 160px; padding: 6px 8px;
-  border: 1px solid var(--border); border-radius: 6px; background: white;
-}
 .m-desktop-link {
   font-size: 12px; padding: 6px 10px; background: transparent;
   border: 1px solid var(--border); border-radius: 6px; color: var(--muted);
