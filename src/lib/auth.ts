@@ -1,3 +1,4 @@
+import { CodeChallengeMethod } from 'google-auth-library';
 import { createSupabaseServerClient, createSupabaseAdmin } from './supabase-server';
 import { getOAuth2Client, GMAIL_SCOPES } from './gmail';
 import { TABLES } from './tables';
@@ -11,7 +12,13 @@ import { encrypt, decrypt } from './crypto';
  * After Google redirects back, we exchange the code, store the Gmail tokens
  * in our gmail_accounts table, and sign the user into Supabase.
  */
-export function getGoogleAuthUrl(state?: string, redirectUri?: string, scopes?: string[], loginHint?: string) {
+export function getGoogleAuthUrl(
+  state?: string,
+  redirectUri?: string,
+  scopes?: string[],
+  loginHint?: string,
+  codeChallenge?: string,
+) {
   const oauth2Client = getOAuth2Client(redirectUri);
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
@@ -20,6 +27,7 @@ export function getGoogleAuthUrl(state?: string, redirectUri?: string, scopes?: 
     state: state || 'login',
     include_granted_scopes: true,
     ...(loginHint ? { login_hint: loginHint } : {}),
+    ...(codeChallenge ? { code_challenge: codeChallenge, code_challenge_method: CodeChallengeMethod.S256 } : {}),
   });
 }
 
@@ -27,9 +35,11 @@ export function getGoogleAuthUrl(state?: string, redirectUri?: string, scopes?: 
  * Exchange the authorization code from Google for tokens.
  * Returns the tokens + user info from Google.
  */
-export async function exchangeCodeForTokens(code: string, redirectUri?: string) {
+export async function exchangeCodeForTokens(code: string, redirectUri?: string, codeVerifier?: string) {
   const oauth2Client = getOAuth2Client(redirectUri);
-  const { tokens } = await oauth2Client.getToken(code);
+  const { tokens } = await oauth2Client.getToken(
+    codeVerifier ? { code, codeVerifier } : { code }
+  );
   oauth2Client.setCredentials(tokens);
 
   // Get user info from Google
@@ -47,6 +57,7 @@ export async function exchangeCodeForTokens(code: string, redirectUri?: string) 
       email: userInfo.email!,
       name: userInfo.name || userInfo.email!,
       picture: userInfo.picture,
+      sub: userInfo.id || null,  // Google's stable user ID — needed for RISC subject matching
     },
     gmailProfile: {
       email: gmailProfile.emailAddress!,
@@ -139,7 +150,8 @@ export async function storeGmailTokens(
   email: string,
   accessToken: string,
   refreshToken: string | null,
-  expiresAt: Date | null
+  expiresAt: Date | null,
+  googleSub?: string | null
 ) {
   const admin = createSupabaseAdmin();
 
@@ -173,6 +185,7 @@ export async function storeGmailTokens(
         token_expires_at: expiresAt?.toISOString(),
         status: 'connected',
         updated_at: new Date().toISOString(),
+        ...(googleSub ? { google_sub: googleSub } : {}),
       },
       { onConflict: 'user_id,email' }
     )

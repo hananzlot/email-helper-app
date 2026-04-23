@@ -20,4 +20,5 @@ export const TABLES = {
   SESSIONS: 'emailHelperV2_sessions',
   BACKUP_JOBS: 'emailHelperV2_backup_jobs',
   FEEDBACK: 'emailHelperV2_feedback',
+  RISC_PROCESSED_JTIS: 'emailHelperV2_risc_processed_jtis',
 } as const;

@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
   const admin = createSupabaseAdmin();
   const { data: storedState, error: stateError } = await admin
     .from('emailHelperV2_oauth_states')
-    .select('flow, user_id, expires_at')
+    .select('flow, user_id, expires_at, code_verifier')
     .eq('nonce_hash', nonceHash)
     .single();
 
@@ -74,8 +74,14 @@ export async function GET(request: NextRequest) {
   try {
     const redirectUri = `${origin}/api/emailHelperV2/auth/callback`;
 
-    // Exchange Google auth code for tokens + user info
-    const { tokens, userInfo, gmailProfile } = await exchangeCodeForTokens(code, redirectUri);
+    // Exchange Google auth code for tokens + user info.
+    // codeVerifier completes the PKCE round-trip — without it, an intercepted
+    // authorization code is useless to an attacker.
+    const { tokens, userInfo, gmailProfile } = await exchangeCodeForTokens(
+      code,
+      redirectUri,
+      storedState.code_verifier ?? undefined,
+    );
 
     let userId: string;
 
@@ -110,14 +116,15 @@ export async function GET(request: NextRequest) {
       userId = user.id;
     }
 
-    // Store Gmail tokens
+    // Store Gmail tokens (and the Google sub for RISC subject matching)
     const expiresAt = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
     await storeGmailTokens(
       userId,
       gmailProfile.email,
       tokens.access_token!,
       tokens.refresh_token || null,
-      expiresAt
+      expiresAt,
+      userInfo.sub,
     );
 
     // For primary login, set up the session

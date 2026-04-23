@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { randomBytes, createHmac } from 'crypto';
+import { randomBytes, createHmac, createHash } from 'crypto';
 import { getGoogleAuthUrl } from '@/lib/auth';
 import { GMAIL_SCOPES, DRIVE_SCOPE } from '@/lib/gmail';
 import { validateSession } from '@/lib/session';
@@ -33,12 +33,19 @@ export async function GET(request: NextRequest) {
   // Generate a random nonce to prevent CSRF / state forgery
   const nonce = randomBytes(16).toString('hex');
 
-  // Store nonce hash server-side (survives cross-site redirects unlike cookies)
+  // PKCE: random 32-byte verifier (yields a 43-char base64url string, within RFC 7636's 43-128 range).
+  // The challenge sent to Google is SHA256(verifier); the verifier itself never leaves the server
+  // until we present it during the code exchange in the callback.
+  const codeVerifier = randomBytes(32).toString('base64url');
+  const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+
+  // Store nonce hash + PKCE verifier server-side (survives cross-site redirects unlike cookies)
   const admin = createSupabaseAdmin();
   await admin.from('emailHelperV2_oauth_states').upsert({
     nonce_hash: hashNonce(nonce),
     flow,
     user_id: userId,
+    code_verifier: codeVerifier,
     expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(), // 10 min
   }, { onConflict: 'nonce_hash' });
 
@@ -53,6 +60,6 @@ export async function GET(request: NextRequest) {
   // Drive backup flow requests additional Drive scope + login_hint to target correct account
   const scopes = flow === 'drive_backup' ? [...GMAIL_SCOPES, DRIVE_SCOPE] : undefined;
   const loginHint = flow === 'drive_backup' ? searchParams.get('hint') || undefined : undefined;
-  const authUrl = getGoogleAuthUrl(state, redirectUri, scopes, loginHint);
+  const authUrl = getGoogleAuthUrl(state, redirectUri, scopes, loginHint, codeChallenge);
   return NextResponse.redirect(authUrl);
 }
