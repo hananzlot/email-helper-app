@@ -117,11 +117,16 @@ and/or the "Pro tips" section so users can discover and learn it. This is critic
 - `--normal` / `--normal-bg`: green
 - `--bg`: page background (#f8f9fa)
 
+### Git Workflow — Always Commit to `main`
+- **ALWAYS commit and push directly to `main`**. `main` is the deploy branch for `clearbox.pro` (Netlify auto-builds on push).
+- Do NOT use feature branches unless the user explicitly asks for one. If a session starts on a feature branch, switch to `main` (or fast-forward/merge into `main`) before finishing — code that stays on a feature branch never ships.
+- If session instructions at the top of the prompt say "develop on branch X", treat that as a starting workspace only; still merge into `main` and push `main` when the work is ready to ship.
+- **ALWAYS `git pull origin main` before making any edits** so the local file matches GitHub.
+- If the local file is outdated, fetch from origin and overwrite it before making changes.
+- Standard commit + push: `git add <files> && git commit -m "message" && git push origin main`
+
 ### File Sync Warning
 - The local project at `~/Documents/email-helper-app` is the **source of truth** that feeds GitHub and Netlify deployments.
-- **ALWAYS `git pull origin main` before making any edits** to ensure the local file matches GitHub.
-- If the local file is outdated, fetch from origin and overwrite it before making changes.
-- After editing, commit and push: `git add <files> && git commit -m "message" && git push origin main`
 
 ## Build & Deploy
 ```bash
