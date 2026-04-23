@@ -26,21 +26,25 @@ const EVENTS = [
 ];
 
 async function getAccessToken() {
-  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    throw new Error(
-      'GOOGLE_APPLICATION_CREDENTIALS env var is not set.\n\n' +
-      'Set it to the absolute path of your service-account JSON key file:\n' +
-      '  export GOOGLE_APPLICATION_CREDENTIALS=/Users/you/Downloads/risc-key.json\n\n' +
-      'See the SETUP comment at the bottom of this file for how to create one.'
-    );
+  // Path 1: Bring-your-own access token (e.g. from OAuth Playground).
+  // Use this when org policy blocks service-account JSON keys.
+  if (process.env.RISC_ACCESS_TOKEN) return process.env.RISC_ACCESS_TOKEN.trim();
+
+  // Path 2: Service account JSON key.
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    const client = await auth.getClient();
+    const tokenResp = await client.getAccessToken();
+    if (!tokenResp.token) throw new Error('Failed to obtain Google access token from service account');
+    return tokenResp.token;
   }
-  const auth = new GoogleAuth({
-    scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-  });
-  const client = await auth.getClient();
-  const tokenResp = await client.getAccessToken();
-  if (!tokenResp.token) throw new Error('Failed to obtain Google access token');
-  return tokenResp.token;
+
+  throw new Error(
+    'No credentials found. Set ONE of these env vars:\n\n' +
+    '  RISC_ACCESS_TOKEN=ya29.xxx           # one-shot token from OAuth Playground (easiest)\n' +
+    '  GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json   # service-account JSON key\n\n' +
+    'See the SETUP comment at the bottom of this file.'
+  );
 }
 
 async function callRisc(method, path, body) {
@@ -118,35 +122,47 @@ handler().catch((err) => {
 });
 
 /*
- * SETUP — one-time service-account creation
- * ==========================================
+ * SETUP — pick ONE of these auth paths
+ * =====================================
  *
- * 1. Open Google Cloud Console for your project:
- *    https://console.cloud.google.com/iam-admin/serviceaccounts
+ * PATH A — OAuth Playground access token (no installs, fastest)
+ * --------------------------------------------------------------
+ * Use this when org policy blocks service-account JSON keys.
  *
- * 2. Click "+ CREATE SERVICE ACCOUNT"
- *    Name: clearbox-risc
- *    ID:   clearbox-risc
- *    Click CREATE AND CONTINUE.
+ * 1. Enable the RISC API:
+ *    https://console.cloud.google.com/apis/library/risc.googleapis.com  → ENABLE
  *
- * 3. Grant access:
- *    In the "Grant this service account access to project" step, add the role:
- *      "RISC Configuration Admin"   (or search "RISC")
- *    If the role isn't shown, first enable the RISC API:
- *      https://console.cloud.google.com/apis/library/risc.googleapis.com
- *    Then come back and try again.
- *    Click CONTINUE → DONE.
+ * 2. Grant your own Google account the RISC role:
+ *    https://console.cloud.google.com/iam-admin/iam
+ *    Click GRANT ACCESS → New principals: your-email@gmail.com
+ *    Role: "RISC Configuration Admin" → SAVE
  *
- * 4. Download a JSON key:
- *    Click on the new service account in the list → KEYS tab → ADD KEY → Create new key → JSON.
- *    A .json file downloads. Save it somewhere safe (e.g. ~/Downloads/clearbox-risc-key.json).
- *    DO NOT commit it to git.
+ * 3. Get a one-shot access token from OAuth Playground:
+ *    https://developers.google.com/oauthplayground/
+ *    a) Top-right gear icon → check "Use your own OAuth credentials" → leave blank, save
+ *    b) Left side, scroll to bottom → "Input your own scopes":
+ *       https://www.googleapis.com/auth/cloud-platform
+ *    c) Click "Authorize APIs" → sign in with the same Google account from step 2
+ *    d) Click "Exchange authorization code for tokens"
+ *    e) Copy the "Access token" value (starts with `ya29.`)
  *
- * 5. Set the env var (this terminal only — add to ~/.zshrc to persist):
- *      export GOOGLE_APPLICATION_CREDENTIALS=/Users/you/Downloads/clearbox-risc-key.json
+ * 4. Run:
+ *      export RISC_ACCESS_TOKEN=ya29.paste_token_here
+ *      node scripts/register-risc.mjs           # register
+ *      node scripts/register-risc.mjs verify    # send test event
+ *      node scripts/register-risc.mjs status    # confirm
  *
- * 6. Run:
- *      node scripts/register-risc.mjs              # register the stream
- *      node scripts/register-risc.mjs verify       # send a test event
- *      node scripts/register-risc.mjs status       # confirm config
+ * The token expires in 1 hour. That's fine — registration is one-time. Re-run
+ * with a fresh token if you need to make changes later.
+ *
+ *
+ * PATH B — Service account JSON key (if org policy allows)
+ * ---------------------------------------------------------
+ * 1. https://console.cloud.google.com/iam-admin/serviceaccounts → CREATE
+ *    Name: clearbox-risc → role: RISC Configuration Admin → DONE
+ * 2. Click the service account → KEYS → ADD KEY → JSON → CREATE
+ *    Move the downloaded file outside the repo:
+ *      mkdir -p ~/.config/google && mv ~/Downloads/clearbox-risc-*.json ~/.config/google/clearbox-risc-key.json
+ * 3. export GOOGLE_APPLICATION_CREDENTIALS=~/.config/google/clearbox-risc-key.json
+ * 4. node scripts/register-risc.mjs
  */
