@@ -69,6 +69,11 @@ type RowMessage = {
   date: string;
   isUnread: boolean;
   tier: string | null;
+  // All message_ids that belong to this row — usually 1, but when we group a
+  // thread's queue items together this holds every queued message in the thread
+  // so archive/delete apply to the whole thread at once.
+  messageIds: string[];
+  threadCount: number;
 };
 
 async function api<T = unknown>(
@@ -354,6 +359,7 @@ function MessageRow({ row, onTap, onArchive, onDelete }: {
           <div className="mrow-subj">
             {row.tier && <span className="mrow-tier" style={{ background: tierBadge(row.tier) }}>{row.tier}</span>}
             {row.subject || '(no subject)'}
+            {row.threadCount > 1 && <span className="mrow-count">{row.threadCount}</span>}
           </div>
           <div className="mrow-preview">{row.preview}</div>
         </div>
@@ -730,21 +736,43 @@ export default function MobilePage() {
     loadSentMail();
   }, [accountsLoaded, accounts, loadImportant, loadSentMail]);
 
-  const importantRows: RowMessage[] = useMemo(() =>
-    important.map(it => ({
-      id: it.message_id,
-      threadId: it.thread_id || it.message_id,
-      account: it.account_email,
-      sender: it.sender,
-      senderEmail: it.sender_email,
-      subject: it.subject,
-      preview: it.summary || '',
-      date: formatDate(it.received),
-      isUnread: true,
-      tier: it.tier,
-    })),
-    [important]
-  );
+  // Group queue items into one row per thread. The latest message (by received
+  // date) represents the thread; rows sort newest-first by that date.
+  const importantRows: RowMessage[] = useMemo(() => {
+    const byThread = new Map<string, { latest: QueueItem; all: QueueItem[] }>();
+    for (const it of important) {
+      const key = `${it.account_email}|${it.thread_id || it.message_id}`;
+      const existing = byThread.get(key);
+      if (!existing) {
+        byThread.set(key, { latest: it, all: [it] });
+      } else {
+        existing.all.push(it);
+        const prev = Date.parse(existing.latest.received) || 0;
+        const cur = Date.parse(it.received) || 0;
+        if (cur > prev) existing.latest = it;
+      }
+    }
+    const rows: (RowMessage & { _ts: number })[] = [];
+    for (const { latest, all } of byThread.values()) {
+      rows.push({
+        id: latest.message_id,
+        threadId: latest.thread_id || latest.message_id,
+        account: latest.account_email,
+        sender: latest.sender,
+        senderEmail: latest.sender_email,
+        subject: latest.subject,
+        preview: latest.summary || '',
+        date: formatDate(latest.received),
+        isUnread: true,
+        tier: latest.tier,
+        messageIds: all.map(q => q.message_id),
+        threadCount: all.length,
+        _ts: Date.parse(latest.received) || 0,
+      });
+    }
+    rows.sort((a, b) => b._ts - a._ts);
+    return rows.map(({ _ts, ...r }) => r);
+  }, [important]);
 
   const sentRows: RowMessage[] = useMemo(() =>
     sent.map(m => {
@@ -761,6 +789,8 @@ export default function MobilePage() {
         date: formatDate(m.date),
         isUnread: m.isUnread,
         tier: null,
+        messageIds: [m.id],
+        threadCount: 1,
       };
     }),
     [sent, activeAccount]
@@ -784,12 +814,15 @@ export default function MobilePage() {
 
   const onArchive = async (row: RowMessage) => {
     const prev = important;
-    if (tab === 'important') setImportant(p => p.filter(i => i.message_id !== row.id));
-    if (tab === 'sent') setSent(p => p.filter(m => m.id !== row.id));
+    const ids = row.messageIds.length ? row.messageIds : [row.id];
+    if (tab === 'important') setImportant(p => p.filter(i => !ids.includes(i.message_id)));
+    if (tab === 'sent') setSent(p => p.filter(m => !ids.includes(m.id)));
     try {
-      await performGmailAction('archive', [row.id], row.account);
+      await performGmailAction('archive', ids, row.account);
       if (tab === 'important') {
-        await api('queue', { method: 'PUT', body: { message_id: row.id, status: 'done' } }).catch(() => {});
+        await Promise.all(ids.map(mid =>
+          api('queue', { method: 'PUT', body: { message_id: mid, status: 'done' } }).catch(() => {})
+        ));
       }
       showToast('Archived');
     } catch (e) {
@@ -800,12 +833,15 @@ export default function MobilePage() {
 
   const onDelete = async (row: RowMessage) => {
     const prev = important;
-    if (tab === 'important') setImportant(p => p.filter(i => i.message_id !== row.id));
-    if (tab === 'sent') setSent(p => p.filter(m => m.id !== row.id));
+    const ids = row.messageIds.length ? row.messageIds : [row.id];
+    if (tab === 'important') setImportant(p => p.filter(i => !ids.includes(i.message_id)));
+    if (tab === 'sent') setSent(p => p.filter(m => !ids.includes(m.id)));
     try {
-      await performGmailAction('delete', [row.id], row.account);
+      await performGmailAction('delete', ids, row.account);
       if (tab === 'important') {
-        await api('queue', { method: 'PUT', body: { message_id: row.id, status: 'done' } }).catch(() => {});
+        await Promise.all(ids.map(mid =>
+          api('queue', { method: 'PUT', body: { message_id: mid, status: 'done' } }).catch(() => {})
+        ));
       }
       showToast('Deleted');
     } catch (e) {
@@ -1144,6 +1180,14 @@ const styles = `
   display: inline-block; padding: 0 5px;
   border-radius: 3px; color: white; font-size: 10px; font-weight: 700;
   margin-right: 6px; vertical-align: 1px;
+}
+
+.mrow-count {
+  display: inline-block; margin-left: 6px;
+  padding: 0 6px; min-width: 18px;
+  border-radius: 9px; background: #e2e8f0; color: #475569;
+  font-size: 11px; font-weight: 600; text-align: center;
+  vertical-align: 1px;
 }
 
 .state { padding: 24px; text-align: center; color: var(--muted); }

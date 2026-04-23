@@ -2392,6 +2392,18 @@ export default function Dashboard() {
                   <strong>{profile.emailAddress}</strong>
                 </div>
               ) : null}
+              {/* Mobile view — clears the desktop opt-out so auto-redirect resumes next time */}
+              <button
+                onClick={() => {
+                  try { localStorage.removeItem('clearbox_use_desktop'); } catch {}
+                  window.location.assign('/m');
+                }}
+                className="flex items-center gap-1.5 px-3 h-9 rounded-lg text-xs font-semibold text-white transition-all hover:shadow-md"
+                title="Switch to mobile view"
+                style={{ background: 'var(--accent)' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                <span className="hidden sm:inline">Mobile view</span>
+              </button>
               {/* Layout toggle — hidden on mobile */}
             {!isMobile && <button
               onClick={() => setLayoutMode(layoutMode === 'cards' ? 'split' : 'cards')}
