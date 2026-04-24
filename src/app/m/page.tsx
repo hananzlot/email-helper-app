@@ -380,13 +380,16 @@ function ThreadView({
   account: string;
   initialSubject: string;
   onClose: () => void;
-  onAction: (kind: 'archive' | 'delete' | 'markUnread', messageIds: string[]) => Promise<void>;
+  onAction: (kind: 'archive' | 'delete' | 'markRead' | 'markUnread', messageIds: string[]) => Promise<void>;
   onCompose: (mode: 'reply' | 'replyAll' | 'forward', orig: GmailMessage) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState<GmailMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Track read state locally so the toolbar toggle reflects user actions
+  // immediately, without re-fetching the thread.
+  const [unreadOverride, setUnreadOverride] = useState<Map<string, boolean>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
@@ -424,13 +427,24 @@ function ThreadView({
   const last = messages[messages.length - 1];
   const subject = messages[0]?.subject || initialSubject;
 
-  const doAction = async (kind: 'archive' | 'delete' | 'markUnread') => {
+  // Toggle reflects what the button will do next: if any message is unread,
+  // the next action is "Mark read"; otherwise "Mark unread".
+  const isUnread = (m: GmailMessage) => unreadOverride.get(m.id) ?? m.isUnread;
+  const hasUnread = messages.some(isUnread);
+
+  const doAction = async (kind: 'archive' | 'delete' | 'markRead' | 'markUnread') => {
     if (!messages.length || busy) return;
     setBusy(true);
     try {
       const ids = messages.map(m => m.id);
       await onAction(kind, ids);
-      onClose();
+      if (kind === 'markRead' || kind === 'markUnread') {
+        const next = new Map(unreadOverride);
+        for (const id of ids) next.set(id, kind === 'markUnread');
+        setUnreadOverride(next);
+      } else {
+        onClose();
+      }
     } finally {
       setBusy(false);
     }
@@ -442,9 +456,21 @@ function ThreadView({
         <button className="iconbtn" onClick={onClose} aria-label="Back">‹</button>
         <div className="overlay-title">{subject || '(no subject)'}</div>
         <div className="overlay-bar-spacer" />
-        <button className="iconbtn" onClick={() => doAction('markUnread')} disabled={busy} aria-label="Mark unread">⊙</button>
-        <button className="iconbtn" onClick={() => doAction('archive')} disabled={busy} aria-label="Archive">↧</button>
-        <button className="iconbtn danger" onClick={() => doAction('delete')} disabled={busy} aria-label="Delete">✕</button>
+        {hasUnread ? (
+          <button className="iconbtn" onClick={() => doAction('markRead')} disabled={busy} title="Mark as read" aria-label="Mark as read">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8l9 6 9-6"/><rect x="3" y="6" width="18" height="14" rx="2"/></svg>
+          </button>
+        ) : (
+          <button className="iconbtn" onClick={() => doAction('markUnread')} disabled={busy} title="Mark as unread" aria-label="Mark as unread">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 6l-10 7L2 6"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>
+          </button>
+        )}
+        <button className="iconbtn" onClick={() => doAction('archive')} disabled={busy} title="Archive" aria-label="Archive">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+        </button>
+        <button className="iconbtn danger" onClick={() => doAction('delete')} disabled={busy} title="Delete" aria-label="Delete">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        </button>
       </div>
       <div className="overlay-body">
         {loading && <div className="state">Loading thread…</div>}
@@ -489,18 +515,110 @@ function ThreadMessage({ msg, expanded: initialExpanded }: { msg: GmailMessage; 
   );
 }
 
+type Suggestion = { name: string; email: string };
+
+type SenderRow = {
+  sender_email: string;
+  display_name: string | null;
+  reply_count: number | null;
+};
+
+function RecipientInput({
+  value,
+  onChange,
+  suggestions,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  suggestions: Suggestion[];
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const tokens = value.split(',');
+  const lastToken = (tokens[tokens.length - 1] || '').trim().toLowerCase();
+
+  const matches = useMemo(() => {
+    if (!suggestions.length) return [];
+    // No filter typed yet → show top contacts (sorted by reply_count is the
+    // suggestions-prop responsibility) so the dropdown is useful from the
+    // moment the user focuses an empty field.
+    const pool = lastToken
+      ? suggestions.filter(s =>
+          s.email.toLowerCase().includes(lastToken) ||
+          (s.name || '').toLowerCase().includes(lastToken))
+      : suggestions;
+    // Hide entries already added in earlier tokens so we don't suggest dups.
+    const usedEmails = new Set(
+      tokens.slice(0, -1)
+        .map(t => parseAddress(t).email.toLowerCase())
+        .filter(Boolean),
+    );
+    return pool.filter(s => !usedEmails.has(s.email.toLowerCase())).slice(0, 6);
+  }, [lastToken, suggestions, tokens]);
+
+  const pick = (s: Suggestion) => {
+    const before = tokens.slice(0, -1).map(t => t.trim()).filter(Boolean);
+    const formatted = s.name && s.name !== s.email ? `${s.name} <${s.email}>` : s.email;
+    const next = (before.length ? before.join(', ') + ', ' : '') + formatted + ', ';
+    onChange(next);
+    setOpen(false);
+  };
+
+  return (
+    <div className="recipient-wrap">
+      <input
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => {
+          // Defer close so a tap on a suggestion can register before the
+          // dropdown unmounts. mousedown/touchstart handlers also block this
+          // by calling preventDefault, but the timer is a safety net.
+          blurTimer.current = setTimeout(() => setOpen(false), 180);
+        }}
+      />
+      {open && matches.length > 0 && (
+        <div className="recipient-suggestions">
+          {matches.map(s => (
+            <button
+              key={s.email}
+              type="button"
+              className="recipient-suggestion"
+              onMouseDown={(e) => { e.preventDefault(); pick(s); }}
+              onTouchStart={(e) => { e.preventDefault(); pick(s); }}
+            >
+              {s.name && s.name !== s.email && <span className="rs-name">{s.name}</span>}
+              <span className="rs-email">{s.email}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ComposeSheet({
   state,
   onChange,
   onClose,
   onSent,
   accounts,
+  suggestions,
 }: {
   state: ComposeState;
   onChange: (s: ComposeState) => void;
   onClose: () => void;
   onSent: () => void;
   accounts: ConnectedAccount[];
+  suggestions: Suggestion[];
 }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -560,14 +678,11 @@ function ComposeSheet({
         )}
         <div className="compose-row">
           <label>To</label>
-          <input
-            type="email"
+          <RecipientInput
             value={state.to}
-            onChange={(e) => onChange({ ...state, to: e.target.value })}
+            onChange={(v) => onChange({ ...state, to: v })}
+            suggestions={suggestions}
             placeholder="recipient@example.com"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
           />
           <div className="compose-toggles">
             {!state.showCc && <button onClick={() => onChange({ ...state, showCc: true })}>Cc</button>}
@@ -577,13 +692,21 @@ function ComposeSheet({
         {state.showCc && (
           <div className="compose-row">
             <label>Cc</label>
-            <input value={state.cc} onChange={(e) => onChange({ ...state, cc: e.target.value })} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+            <RecipientInput
+              value={state.cc}
+              onChange={(v) => onChange({ ...state, cc: v })}
+              suggestions={suggestions}
+            />
           </div>
         )}
         {state.showBcc && (
           <div className="compose-row">
             <label>Bcc</label>
-            <input value={state.bcc} onChange={(e) => onChange({ ...state, bcc: e.target.value })} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+            <RecipientInput
+              value={state.bcc}
+              onChange={(v) => onChange({ ...state, bcc: v })}
+              suggestions={suggestions}
+            />
           </div>
         )}
         <div className="compose-row">
@@ -624,6 +747,9 @@ export default function MobilePage() {
 
   const [openThread, setOpenThread] = useState<{ id: string; account: string; subject: string } | null>(null);
   const [compose, setCompose] = useState<ComposeState | null>(null);
+  // Recipient suggestions sourced from sender_priorities (people who've emailed us)
+  // plus our own connected accounts. Loaded once after auth.
+  const [senders, setSenders] = useState<SenderRow[]>([]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -649,6 +775,44 @@ export default function MobilePage() {
   }, []);
 
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
+
+  const loadSenders = useCallback(async () => {
+    try {
+      const data = await api<SenderRow[]>('senders');
+      setSenders(data || []);
+    } catch {
+      // Non-fatal: compose still works, just without autocomplete
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!accountsLoaded || authError) return;
+    loadSenders();
+  }, [accountsLoaded, authError, loadSenders]);
+
+  // Sort senders by reply_count desc so most-contacted appear first when
+  // the recipient field is focused with no filter typed. Connected accounts
+  // are added on top so the user can easily address themselves.
+  const recipientSuggestions: Suggestion[] = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Suggestion[] = [];
+    for (const a of accounts) {
+      const key = a.email.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ name: a.email, email: a.email });
+    }
+    const sorted = [...senders].sort((a, b) => (b.reply_count || 0) - (a.reply_count || 0));
+    for (const s of sorted) {
+      const email = (s.sender_email || '').trim();
+      if (!email) continue;
+      const key = email.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ name: (s.display_name || '').trim() || email, email });
+    }
+    return out;
+  }, [senders, accounts]);
 
   const loadImportant = useCallback(async () => {
     setImportantLoading(true);
@@ -851,7 +1015,7 @@ export default function MobilePage() {
   };
 
   const handleThreadAction = async (
-    kind: 'archive' | 'delete' | 'markUnread',
+    kind: 'archive' | 'delete' | 'markRead' | 'markUnread',
     messageIds: string[]
   ) => {
     if (!openThread) return;
@@ -864,10 +1028,18 @@ export default function MobilePage() {
           await api('queue', { method: 'PUT', body: { message_id: messageIds[0], status: 'done' } }).catch(() => {});
         }
       }
+      if (kind === 'markRead') {
+        setSent(p => p.map(m => messageIds.includes(m.id) ? { ...m, isUnread: false } : m));
+      }
       if (kind === 'markUnread') {
         setSent(p => p.map(m => messageIds.includes(m.id) ? { ...m, isUnread: true } : m));
       }
-      showToast(kind === 'archive' ? 'Archived' : kind === 'delete' ? 'Deleted' : 'Marked unread');
+      showToast(
+        kind === 'archive' ? 'Archived'
+        : kind === 'delete' ? 'Deleted'
+        : kind === 'markRead' ? 'Marked read'
+        : 'Marked unread'
+      );
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Action failed');
     }
@@ -1072,6 +1244,7 @@ export default function MobilePage() {
           state={compose}
           onChange={setCompose}
           accounts={accounts}
+          suggestions={recipientSuggestions}
           onClose={() => setCompose(null)}
           onSent={() => {
             setCompose(null);
@@ -1307,6 +1480,25 @@ const styles = `
   font-size: 15px; background: transparent; color: var(--text);
   font-family: inherit;
 }
+
+.recipient-wrap { flex: 1; position: relative; }
+.recipient-wrap input { width: 100%; }
+.recipient-suggestions {
+  position: absolute; left: -14px; right: -14px; top: calc(100% + 8px);
+  background: white; border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  z-index: 60; max-height: 240px; overflow-y: auto;
+}
+.recipient-suggestion {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; padding: 10px 14px;
+  background: white; border: none; text-align: left;
+  border-bottom: 1px solid var(--border); cursor: pointer;
+}
+.recipient-suggestion:last-child { border-bottom: none; }
+.recipient-suggestion:active { background: #eef2ff; }
+.recipient-suggestion .rs-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.recipient-suggestion .rs-email { font-size: 12px; color: var(--muted); }
 .compose-toggles { display: flex; gap: 4px; }
 .compose-toggles button {
   border: 1px solid var(--border); background: transparent;
