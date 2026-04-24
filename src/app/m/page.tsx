@@ -375,6 +375,7 @@ function ThreadView({
   onClose,
   onAction,
   onCompose,
+  onMessagesRead,
 }: {
   threadId: string;
   account: string;
@@ -382,6 +383,11 @@ function ThreadView({
   onClose: () => void;
   onAction: (kind: 'archive' | 'delete' | 'markRead' | 'markUnread', messageIds: string[]) => Promise<void>;
   onCompose: (mode: 'reply' | 'replyAll' | 'forward', orig: GmailMessage) => void;
+  // Fires whenever messages transition from unread → read (either from
+  // auto-markRead on thread open, or the explicit Mark-as-read button).
+  // The parent uses this to drop matching queue items from the Important list
+  // so read threads don't linger there.
+  onMessagesRead?: (messageIds: string[]) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState<GmailMessage[]>([]);
@@ -421,8 +427,10 @@ function ThreadView({
     if (!messages.length) return;
     const unreadIds = messages.filter(m => m.isUnread).map(m => m.id);
     if (!unreadIds.length) return;
-    api('gmail', { account, method: 'POST', body: { action: 'markRead', messageIds: unreadIds } }).catch(() => {});
-  }, [messages, account]);
+    api('gmail', { account, method: 'POST', body: { action: 'markRead', messageIds: unreadIds } })
+      .then(() => onMessagesRead?.(unreadIds))
+      .catch(() => {});
+  }, [messages, account, onMessagesRead]);
 
   const last = messages[messages.length - 1];
   const subject = messages[0]?.subject || initialSubject;
@@ -442,6 +450,7 @@ function ThreadView({
         const next = new Map(unreadOverride);
         for (const id of ids) next.set(id, kind === 'markUnread');
         setUnreadOverride(next);
+        if (kind === 'markRead') onMessagesRead?.(ids);
       } else {
         onClose();
       }
@@ -1080,6 +1089,19 @@ export default function MobilePage() {
     }
   };
 
+  // Drop any Important-tab queue items whose Gmail message is now read, and
+  // mark their queue rows done server-side so they don't reappear on reload.
+  // Called from the thread view's auto-markRead effect and its Mark-read button.
+  const markImportantDone = useCallback((messageIds: string[]) => {
+    const ids = new Set(messageIds);
+    const toRemove = important.filter(q => ids.has(q.message_id));
+    if (toRemove.length === 0) return;
+    setImportant(p => p.filter(q => !ids.has(q.message_id)));
+    for (const q of toRemove) {
+      api('queue', { method: 'PUT', body: { message_id: q.message_id, status: 'done' } }).catch(() => {});
+    }
+  }, [important]);
+
   const handleThreadAction = async (
     kind: 'archive' | 'delete' | 'markRead' | 'markUnread',
     messageIds: string[]
@@ -1302,6 +1324,7 @@ export default function MobilePage() {
           onClose={() => setOpenThread(null)}
           onAction={handleThreadAction}
           onCompose={(mode, orig) => openCompose(mode, orig)}
+          onMessagesRead={markImportantDone}
         />
       )}
 
