@@ -3736,6 +3736,66 @@ function ComposeDialog({
   const [draftId, setDraftId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastSaved, setLastSaved] = useState<number | null>(null);
+  const [aiBusy, setAiBusy] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  // Snapshot of bodyHtml from before the latest AI rewrite so the user can undo.
+  const [aiUndoHtml, setAiUndoHtml] = useState<string | null>(null);
+
+  async function aiRewrite(style: string) {
+    if (aiBusy) return;
+    setAiOpen(false);
+    const el = bodyRef.current;
+    if (!el) return;
+    // For replies/forwards we only rewrite the user's typed portion — everything
+    // before the quoted-original block. Without this guard the model would rewrite
+    // the entire thread history.
+    const quoted = el.querySelector(`#${QUOTED_PLACEHOLDER_ID}`) as HTMLElement | null;
+    let userText = '';
+    if (quoted) {
+      const range = document.createRange();
+      range.setStart(el, 0);
+      range.setEndBefore(quoted);
+      userText = range.toString();
+    } else {
+      userText = el.innerText || '';
+    }
+    if (!userText.trim()) {
+      showToast('Nothing to rewrite', 'Write something first');
+      return;
+    }
+    setAiBusy(style);
+    const previousHtml = el.innerHTML;
+    try {
+      const res = await fetch('/api/emailHelperV2/ai-rewrite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ body: userText, style }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'AI rewrite failed');
+      const escape = (s: string) => s
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const rewrittenHtml = escape(json.data.rewritten).replace(/\r?\n/g, '<br>');
+      const newHtml = quoted
+        ? `<div>${rewrittenHtml}</div>${quoted.outerHTML}`
+        : rewrittenHtml;
+      el.innerHTML = newHtml;
+      setBodyHtml(newHtml);
+      setAiUndoHtml(previousHtml);
+    } catch (e) {
+      showToast('AI rewrite failed', e instanceof Error ? e.message : '');
+    } finally {
+      setAiBusy(null);
+    }
+  }
+
+  function aiUndo() {
+    if (aiUndoHtml === null || !bodyRef.current) return;
+    bodyRef.current.innerHTML = aiUndoHtml;
+    setBodyHtml(aiUndoHtml);
+    setAiUndoHtml(null);
+  }
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const savingRef = useRef(false);
@@ -4059,6 +4119,48 @@ function ComposeDialog({
         >
           {sending ? 'Sending…' : 'Send'}
         </button>
+
+        {/* AI rewrite */}
+        <div className="relative ml-1">
+          <button
+            onClick={() => setAiOpen(o => !o)}
+            disabled={!!aiBusy}
+            title="Rewrite with AI"
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg border flex items-center gap-1.5"
+            style={{ background: aiBusy ? '#e0e7ff' : '#eef2ff', borderColor: '#c7d2fe', color: '#3730a3' }}
+          >
+            <span>✨</span>
+            <span>{aiBusy ? `${aiBusy}…` : 'AI'}</span>
+          </button>
+          {aiUndoHtml !== null && !aiBusy && (
+            <button onClick={aiUndo} className="ml-1 px-2 py-1.5 text-xs font-semibold" style={{ color: 'var(--accent)' }}>
+              Undo
+            </button>
+          )}
+          {aiOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setAiOpen(false)} />
+              <div className="absolute bottom-full mb-2 left-0 z-50 w-44 rounded-lg border shadow-xl overflow-hidden" style={{ background: 'white', borderColor: 'var(--border)' }}>
+                {[
+                  { id: 'improve', label: 'Improve writing' },
+                  { id: 'formal', label: 'Make formal' },
+                  { id: 'casual', label: 'Make casual' },
+                  { id: 'shorter', label: 'Shorter' },
+                  { id: 'longer', label: 'Longer' },
+                ].map(opt => (
+                  <button
+                    key={opt.id}
+                    onClick={() => aiRewrite(opt.id)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                    style={{ color: 'var(--text)' }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
 
         {/* Formatting */}
         <div className="flex items-center gap-0.5 ml-2">

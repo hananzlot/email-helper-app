@@ -622,6 +622,44 @@ function ComposeSheet({
 }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiBusy, setAiBusy] = useState<string | null>(null);
+  const [undoBody, setUndoBody] = useState<string | null>(null);
+
+  const aiRewrite = async (style: string) => {
+    if (aiBusy) return;
+    if (!state.body.trim()) {
+      setError('Write something first, then ask AI to rewrite it');
+      setAiOpen(false);
+      return;
+    }
+    setError(null);
+    setAiBusy(style);
+    setAiOpen(false);
+    const previous = state.body;
+    try {
+      const res = await fetch('/api/emailHelperV2/ai-rewrite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ body: state.body, style }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'AI rewrite failed');
+      onChange({ ...state, body: json.data.rewritten });
+      setUndoBody(previous);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'AI rewrite failed');
+    } finally {
+      setAiBusy(null);
+    }
+  };
+
+  const undoRewrite = () => {
+    if (undoBody === null) return;
+    onChange({ ...state, body: undoBody });
+    setUndoBody(null);
+  };
 
   const send = async () => {
     if (sending) return;
@@ -713,11 +751,39 @@ function ComposeSheet({
           <label>Subject</label>
           <input value={state.subject} onChange={(e) => onChange({ ...state, subject: e.target.value })} />
         </div>
+        <div className="compose-toolbar">
+          <div className="ai-wrap">
+            <button
+              type="button"
+              className="ai-btn"
+              onClick={() => setAiOpen(o => !o)}
+              disabled={!!aiBusy}
+            >
+              {aiBusy ? `AI: ${aiBusy}…` : '✨ AI rewrite'}
+            </button>
+            {undoBody !== null && !aiBusy && (
+              <button type="button" className="ai-undo" onClick={undoRewrite}>Undo</button>
+            )}
+            {aiOpen && (
+              <>
+                <div className="ai-scrim" onClick={() => setAiOpen(false)} />
+                <div className="ai-menu">
+                  <button onMouseDown={(e) => { e.preventDefault(); aiRewrite('improve'); }}>Improve</button>
+                  <button onMouseDown={(e) => { e.preventDefault(); aiRewrite('formal'); }}>Make formal</button>
+                  <button onMouseDown={(e) => { e.preventDefault(); aiRewrite('casual'); }}>Make casual</button>
+                  <button onMouseDown={(e) => { e.preventDefault(); aiRewrite('shorter'); }}>Shorter</button>
+                  <button onMouseDown={(e) => { e.preventDefault(); aiRewrite('longer'); }}>Longer</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
         <textarea
           className="compose-body-text"
           value={state.body}
           onChange={(e) => onChange({ ...state, body: e.target.value })}
           placeholder="Write your message…"
+          disabled={!!aiBusy}
         />
         {state.quotedHtml && (
           <div className="compose-quoted" dangerouslySetInnerHTML={{ __html: state.quotedHtml }} />
@@ -1505,6 +1571,39 @@ const styles = `
   padding: 4px 8px; font-size: 12px; border-radius: 4px;
   color: var(--muted);
 }
+.compose-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.ai-wrap { position: relative; display: flex; align-items: center; gap: 8px; }
+.ai-btn {
+  border: 1px solid #c7d2fe; background: #eef2ff; color: #3730a3;
+  font-size: 13px; font-weight: 600;
+  padding: 6px 12px; border-radius: 999px;
+}
+.ai-btn:active { background: #e0e7ff; }
+.ai-btn:disabled { opacity: 0.6; }
+.ai-undo {
+  border: none; background: transparent; color: var(--accent);
+  font-size: 13px; font-weight: 600; padding: 4px 6px;
+}
+.ai-scrim { position: fixed; inset: 0; z-index: 70; }
+.ai-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 71;
+  background: white; border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 10px 24px rgba(0,0,0,0.14);
+  min-width: 180px; overflow: hidden;
+}
+.ai-menu button {
+  display: block; width: 100%; text-align: left;
+  background: white; border: none;
+  padding: 10px 14px; font-size: 14px; color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.ai-menu button:last-child { border-bottom: none; }
+.ai-menu button:active { background: #eef2ff; }
+
 .compose-body-text {
   width: 100%; min-height: 220px;
   border: none; outline: none;
