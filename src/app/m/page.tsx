@@ -303,12 +303,22 @@ function SwipeableRow({
   const moved = useRef(false);
   const decided = useRef<'h' | 'v' | null>(null);
   const rowRef = useRef<HTMLDivElement | null>(null);
+  // When the touch starts on an interactive child (a button, or anything
+  // with data-no-row-tap), suppress the row-level tap so the child's own
+  // click handler runs unimpeded. Horizontal swipes still work.
+  const skipTap = useRef(false);
+
+  const touchStartedOnInteractive = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return false;
+    return !!target.closest('button, a, input, [data-no-row-tap]');
+  };
 
   const onTouchStart = (e: React.TouchEvent) => {
     startX.current = e.touches[0].clientX;
     startY.current = e.touches[0].clientY;
     moved.current = false;
     decided.current = null;
+    skipTap.current = touchStartedOnInteractive(e.target);
   };
   const onTouchMove = (e: React.TouchEvent) => {
     if (startX.current === null || startY.current === null) return;
@@ -340,7 +350,7 @@ function SwipeableRow({
         return;
       }
       setDx(0);
-    } else if (!moved.current) {
+    } else if (!moved.current && !skipTap.current) {
       onTap();
     }
     decided.current = null;
@@ -364,7 +374,14 @@ function SwipeableRow({
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
-        onClick={() => { if (!moved.current && Math.abs(dx) < 4) onTap(); }}
+        onClick={(e) => {
+          if (moved.current || Math.abs(dx) >= 4) return;
+          // Desktop-only fallback: touch devices fire onTap from onTouchEnd.
+          // Skip if the click originated on an interactive child so buttons
+          // inside the row handle their own clicks.
+          if (touchStartedOnInteractive(e.target)) return;
+          onTap();
+        }}
       >
         {children}
       </div>
@@ -397,22 +414,15 @@ function MessageRow({ row, onTap, onArchive, onDelete, onChangeTier }: {
           </div>
           <div className="mrow-subj">
             {row.tier && onChangeTier ? (
-              <span
-                className="mrow-tier-wrap"
-                // The enclosing SwipeableRow fires onTap() inside its own
-                // onTouchEnd (before click events run), so stopPropagation on
-                // onClick is too late to prevent the thread from opening.
-                // We stop the touch + click events at this wrapper instead.
-                onTouchStart={(e) => e.stopPropagation()}
-                onTouchMove={(e) => e.stopPropagation()}
-                onTouchEnd={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-              >
+              // data-no-row-tap tells SwipeableRow to ignore taps that start
+              // inside this wrapper, so the button gets its click event
+              // and the thread doesn't open underneath.
+              <span className="mrow-tier-wrap" data-no-row-tap>
                 <button
                   type="button"
                   className="mrow-tier mrow-tier-btn"
                   style={{ background: tierBadge(row.tier) }}
-                  onClick={(e) => { e.stopPropagation(); setTierOpen(o => !o); }}
+                  onClick={() => setTierOpen(o => !o)}
                   aria-label={`Change tier (currently ${row.tier})`}
                 >
                   {row.tier}<span className="mrow-tier-caret">▾</span>
@@ -421,17 +431,16 @@ function MessageRow({ row, onTap, onArchive, onDelete, onChangeTier }: {
                   <>
                     <span
                       className="mrow-tier-scrim"
-                      onClick={(e) => { e.stopPropagation(); setTierOpen(false); }}
-                      onTouchEnd={(e) => { e.stopPropagation(); setTierOpen(false); }}
+                      data-no-row-tap
+                      onClick={() => setTierOpen(false)}
                     />
-                    <span className="mrow-tier-menu">
+                    <span className="mrow-tier-menu" data-no-row-tap>
                       {(['A','B','C','D'] as const).map(t => (
                         <button
                           key={t}
                           type="button"
                           className={`mrow-tier-opt ${t === row.tier ? 'active' : ''}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={() => {
                             setTierOpen(false);
                             if (t !== row.tier) onChangeTier(row.senderEmail, name, t);
                           }}
