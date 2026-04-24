@@ -362,7 +362,17 @@ function MessageRow({ row, onTap, onArchive, onDelete, onChangeTier }: {
           </div>
           <div className="mrow-subj">
             {row.tier && onChangeTier ? (
-              <span className="mrow-tier-wrap">
+              <span
+                className="mrow-tier-wrap"
+                // The enclosing SwipeableRow fires onTap() inside its own
+                // onTouchEnd (before click events run), so stopPropagation on
+                // onClick is too late to prevent the thread from opening.
+                // We stop the touch + click events at this wrapper instead.
+                onTouchStart={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
+                onTouchEnd={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              >
                 <button
                   type="button"
                   className="mrow-tier mrow-tier-btn"
@@ -374,8 +384,12 @@ function MessageRow({ row, onTap, onArchive, onDelete, onChangeTier }: {
                 </button>
                 {tierOpen && (
                   <>
-                    <span className="mrow-tier-scrim" onClick={(e) => { e.stopPropagation(); setTierOpen(false); }} />
-                    <span className="mrow-tier-menu" onClick={(e) => e.stopPropagation()}>
+                    <span
+                      className="mrow-tier-scrim"
+                      onClick={(e) => { e.stopPropagation(); setTierOpen(false); }}
+                      onTouchEnd={(e) => { e.stopPropagation(); setTierOpen(false); }}
+                    />
+                    <span className="mrow-tier-menu">
                       {(['A','B','C','D'] as const).map(t => (
                         <button
                           key={t}
@@ -423,10 +437,11 @@ function ThreadView({
   onClose: () => void;
   onAction: (kind: 'archive' | 'delete' | 'markRead' | 'markUnread', messageIds: string[]) => Promise<void>;
   onCompose: (mode: 'reply' | 'replyAll' | 'forward', orig: GmailMessage) => void;
-  // Fires whenever messages transition from unread → read (either from
-  // auto-markRead on thread open, or the explicit Mark-as-read button).
-  // The parent uses this to drop matching queue items from the Important list
-  // so read threads don't linger there.
+  // Fires whenever the user explicitly marks messages as read via the
+  // Mark-as-read button in the thread toolbar. The parent uses this to drop
+  // matching queue items from the Important list so the thread doesn't
+  // linger there once the user has handled it. Opening a thread does NOT
+  // auto-mark it read — that's only ever a user action.
   onMessagesRead?: (messageIds: string[]) => void;
 }) {
   const [loading, setLoading] = useState(true);
@@ -462,15 +477,6 @@ function ThreadView({
     })();
     return () => { cancelled = true; };
   }, [threadId, account]);
-
-  useEffect(() => {
-    if (!messages.length) return;
-    const unreadIds = messages.filter(m => m.isUnread).map(m => m.id);
-    if (!unreadIds.length) return;
-    api('gmail', { account, method: 'POST', body: { action: 'markRead', messageIds: unreadIds } })
-      .then(() => onMessagesRead?.(unreadIds))
-      .catch(() => {});
-  }, [messages, account, onMessagesRead]);
 
   const last = messages[messages.length - 1];
   const subject = messages[0]?.subject || initialSubject;
