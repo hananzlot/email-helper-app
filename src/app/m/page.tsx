@@ -337,16 +337,20 @@ function SwipeableRow({
   );
 }
 
-function MessageRow({ row, onTap, onArchive, onDelete }: {
+function MessageRow({ row, onTap, onArchive, onDelete, onChangeTier }: {
   row: RowMessage;
   onTap: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  // When present, the tier badge becomes a tappable picker. Only wired on the
+  // Important tab — Sent rows have no tier so this never surfaces there.
+  onChangeTier?: (senderEmail: string, senderName: string, newTier: 'A' | 'B' | 'C' | 'D') => void;
 }) {
   const name = fallbackName(row.sender, row.senderEmail);
   const emailLocal = (row.senderEmail || '').split('@')[0];
   const initial = senderInitial(emailLocal || name);
   const color = avatarColor(row.senderEmail || name);
+  const [tierOpen, setTierOpen] = useState(false);
   return (
     <SwipeableRow onTap={onTap} onArchive={onArchive} onDelete={onDelete}>
       <div className={`mrow ${row.isUnread ? 'unread' : ''}`}>
@@ -357,7 +361,43 @@ function MessageRow({ row, onTap, onArchive, onDelete }: {
             <span className="mrow-date">{row.date}</span>
           </div>
           <div className="mrow-subj">
-            {row.tier && <span className="mrow-tier" style={{ background: tierBadge(row.tier) }}>{row.tier}</span>}
+            {row.tier && onChangeTier ? (
+              <span className="mrow-tier-wrap">
+                <button
+                  type="button"
+                  className="mrow-tier mrow-tier-btn"
+                  style={{ background: tierBadge(row.tier) }}
+                  onClick={(e) => { e.stopPropagation(); setTierOpen(o => !o); }}
+                  aria-label={`Change tier (currently ${row.tier})`}
+                >
+                  {row.tier}<span className="mrow-tier-caret">▾</span>
+                </button>
+                {tierOpen && (
+                  <>
+                    <span className="mrow-tier-scrim" onClick={(e) => { e.stopPropagation(); setTierOpen(false); }} />
+                    <span className="mrow-tier-menu" onClick={(e) => e.stopPropagation()}>
+                      {(['A','B','C','D'] as const).map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          className={`mrow-tier-opt ${t === row.tier ? 'active' : ''}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTierOpen(false);
+                            if (t !== row.tier) onChangeTier(row.senderEmail, name, t);
+                          }}
+                        >
+                          <span className="mrow-tier-chip" style={{ background: tierBadge(t) }}>{t}</span>
+                          <span>{t === 'A' ? 'Top priority' : t === 'B' ? 'Important' : t === 'C' ? 'Normal' : 'Low / Cleanup'}</span>
+                        </button>
+                      ))}
+                    </span>
+                  </>
+                )}
+              </span>
+            ) : row.tier ? (
+              <span className="mrow-tier" style={{ background: tierBadge(row.tier) }}>{row.tier}</span>
+            ) : null}
             {row.subject || '(no subject)'}
             {row.threadCount > 1 && <span className="mrow-count">{row.threadCount}</span>}
           </div>
@@ -1089,6 +1129,40 @@ export default function MobilePage() {
     }
   };
 
+  // Change a sender's global tier. Updates server-side via PUT /senders and
+  // reflects the change on every queue row from that sender. If the new tier is
+  // 'D' (low / cleanup) the rows leave the Important list, since Important
+  // only shows A/B/C per the tier rules.
+  const changeSenderTier = useCallback(async (
+    senderEmail: string,
+    senderName: string,
+    newTier: 'A' | 'B' | 'C' | 'D',
+  ) => {
+    const normalized = (senderEmail || '').toLowerCase();
+    if (!normalized) return;
+    try {
+      const res = await fetch('/api/emailHelperV2/senders', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ sender_email: normalized, tier: newTier, display_name: senderName || senderEmail }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed to change tier');
+      if (newTier === 'D') {
+        setImportant(p => p.filter(q => (q.sender_email || '').toLowerCase() !== normalized));
+        showToast('Moved to Cleanup');
+      } else {
+        setImportant(p => p.map(q =>
+          (q.sender_email || '').toLowerCase() === normalized ? { ...q, tier: newTier } : q
+        ));
+        showToast(`Tier set to ${newTier}`);
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Failed to change tier');
+    }
+  }, [showToast]);
+
   // Drop any Important-tab queue items whose Gmail message is now read, and
   // mark their queue rows done server-side so they don't reappear on reload.
   // Called from the thread view's auto-markRead effect and its Mark-read button.
@@ -1240,6 +1314,7 @@ export default function MobilePage() {
                   onTap={() => setOpenThread({ id: row.threadId, account: row.account, subject: row.subject })}
                   onArchive={() => onArchive(row)}
                   onDelete={() => onDelete(row)}
+                  onChangeTier={changeSenderTier}
                 />
               ))
             )}
@@ -1442,6 +1517,35 @@ const styles = `
   display: inline-block; padding: 0 5px;
   border-radius: 3px; color: white; font-size: 10px; font-weight: 700;
   margin-right: 6px; vertical-align: 1px;
+}
+
+.mrow-tier-wrap { position: relative; display: inline-block; margin-right: 6px; }
+.mrow-tier-btn {
+  border: none; padding: 1px 6px 1px 7px;
+  display: inline-flex; align-items: center; gap: 2px;
+  cursor: pointer; font-family: inherit;
+}
+.mrow-tier-caret { font-size: 8px; opacity: 0.85; margin-left: 1px; }
+.mrow-tier-scrim { position: fixed; inset: 0; z-index: 60; background: transparent; }
+.mrow-tier-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 61;
+  background: white; border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 10px 24px rgba(0,0,0,0.14);
+  min-width: 180px; overflow: hidden;
+  display: block; padding: 4px 0;
+}
+.mrow-tier-opt {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 8px 12px;
+  background: white; border: none; text-align: left;
+  font-size: 13px; color: var(--text); cursor: pointer;
+}
+.mrow-tier-opt.active { background: #f1f5f9; font-weight: 600; }
+.mrow-tier-opt:active { background: #e2e8f0; }
+.mrow-tier-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 4px;
+  color: white; font-size: 11px; font-weight: 700;
 }
 
 .mrow-count {
