@@ -3,7 +3,42 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { GmailMessage } from '@/types';
 
-type Tab = 'important' | 'sent' | 'accounts';
+type Tab = 'important' | 'recent' | 'sent' | 'accounts';
+
+// Locally-persisted snapshot of an Important-tab item the user manually
+// marked as read. Lets the user find and restore something they didn't mean
+// to clear. Kept in localStorage (not Supabase) to avoid adding another
+// store of email metadata at rest.
+type RecentReadItem = {
+  message_id: string;
+  thread_id: string | null;
+  account_email: string;
+  sender: string;
+  sender_email: string;
+  subject: string;
+  summary: string;
+  tier: string | null;
+  received: string;      // original received timestamp (ISO)
+  marked_read_at: string;// when the user marked it read (ISO)
+};
+
+const RECENT_READ_KEY = 'clearbox_recent_read';
+const RECENT_READ_MAX = 50;
+
+function loadRecentRead(): RecentReadItem[] {
+  try {
+    const raw = localStorage.getItem(RECENT_READ_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(x => x && typeof x.message_id === 'string') : [];
+  } catch { return []; }
+}
+
+function saveRecentRead(items: RecentReadItem[]) {
+  try {
+    localStorage.setItem(RECENT_READ_KEY, JSON.stringify(items.slice(0, RECENT_READ_MAX)));
+  } catch { /* storage full or disabled — non-fatal */ }
+}
 
 type ConnectedAccount = {
   email: string;
@@ -871,6 +906,10 @@ export default function MobilePage() {
   // Recipient suggestions sourced from sender_priorities (people who've emailed us)
   // plus our own connected accounts. Loaded once after auth.
   const [senders, setSenders] = useState<SenderRow[]>([]);
+  const [recentRead, setRecentRead] = useState<RecentReadItem[]>([]);
+
+  // Hydrate recent-read from localStorage on first mount (client-only).
+  useEffect(() => { setRecentRead(loadRecentRead()); }, []);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -1171,7 +1210,8 @@ export default function MobilePage() {
 
   // Drop any Important-tab queue items whose Gmail message is now read, and
   // mark their queue rows done server-side so they don't reappear on reload.
-  // Called from the thread view's auto-markRead effect and its Mark-read button.
+  // Also records a snapshot of each removed item in the Recent-read list
+  // (local-only) so the user can get back to something they cleared by mistake.
   const markImportantDone = useCallback((messageIds: string[]) => {
     const ids = new Set(messageIds);
     const toRemove = important.filter(q => ids.has(q.message_id));
@@ -1180,7 +1220,76 @@ export default function MobilePage() {
     for (const q of toRemove) {
       api('queue', { method: 'PUT', body: { message_id: q.message_id, status: 'done' } }).catch(() => {});
     }
+    const now = new Date().toISOString();
+    const snapshots: RecentReadItem[] = toRemove.map(q => ({
+      message_id: q.message_id,
+      thread_id: q.thread_id,
+      account_email: q.account_email,
+      sender: q.sender,
+      sender_email: q.sender_email,
+      subject: q.subject,
+      summary: q.summary,
+      tier: q.tier,
+      received: q.received,
+      marked_read_at: now,
+    }));
+    setRecentRead(prev => {
+      const byId = new Set(snapshots.map(s => s.message_id));
+      const next = [...snapshots, ...prev.filter(r => !byId.has(r.message_id))].slice(0, RECENT_READ_MAX);
+      saveRecentRead(next);
+      return next;
+    });
   }, [important]);
+
+  // Restore a Recently-read item back to Important: mark the message unread
+  // in Gmail, re-activate the queue row, and remove the snapshot.
+  const restoreRecent = useCallback(async (item: RecentReadItem) => {
+    try {
+      await api('gmail', {
+        account: item.account_email,
+        method: 'POST',
+        body: { action: 'markUnread', messageIds: [item.message_id] },
+      });
+      await api('queue', {
+        method: 'PUT',
+        body: { message_id: item.message_id, status: 'active' },
+      });
+      setRecentRead(prev => {
+        const next = prev.filter(r => r.message_id !== item.message_id);
+        saveRecentRead(next);
+        return next;
+      });
+      setImportant(prev => prev.some(q => q.message_id === item.message_id) ? prev : [
+        {
+          id: item.message_id,
+          message_id: item.message_id,
+          thread_id: item.thread_id,
+          account_email: item.account_email,
+          sender: item.sender,
+          sender_email: item.sender_email,
+          subject: item.subject,
+          summary: item.summary,
+          status: 'active',
+          priority: 'normal',
+          priority_score: item.tier === 'A' ? 9 : item.tier === 'B' ? 7 : 5,
+          tier: item.tier,
+          reply_count: 0,
+          snoozed_until: null,
+          received: item.received,
+          gmail_url: null,
+        },
+        ...prev,
+      ]);
+      showToast('Restored to Important');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Restore failed');
+    }
+  }, [showToast]);
+
+  const clearRecentRead = useCallback(() => {
+    setRecentRead([]);
+    saveRecentRead([]);
+  }, []);
 
   const handleThreadAction = async (
     kind: 'archive' | 'delete' | 'markRead' | 'markUnread',
@@ -1327,6 +1436,67 @@ export default function MobilePage() {
           </PullToRefresh>
         )}
 
+        {tab === 'recent' && (
+          <>
+            <div className="recent-hdr">
+              <div className="recent-title">
+                Recently marked read
+                <span className="recent-count">{recentRead.length}</span>
+              </div>
+              {recentRead.length > 0 && (
+                <button className="recent-clear" onClick={clearRecentRead}>Clear all</button>
+              )}
+            </div>
+            {recentRead.length === 0 ? (
+              <div className="state">
+                Nothing here yet. When you mark a message in Important as read, it&rsquo;ll appear here so you can get back to it.
+              </div>
+            ) : (
+              recentRead.map(item => (
+                <div key={`${item.account_email}|${item.message_id}`} className="recent-row-wrap">
+                  <MessageRow
+                    row={{
+                      id: item.message_id,
+                      threadId: item.thread_id || item.message_id,
+                      account: item.account_email,
+                      sender: item.sender,
+                      senderEmail: item.sender_email,
+                      subject: item.subject,
+                      preview: item.summary || '',
+                      date: formatDate(item.marked_read_at),
+                      isUnread: false,
+                      tier: item.tier,
+                      messageIds: [item.message_id],
+                      threadCount: 1,
+                    }}
+                    onTap={() => setOpenThread({
+                      id: item.thread_id || item.message_id,
+                      account: item.account_email,
+                      subject: item.subject,
+                    })}
+                    onArchive={() => {
+                      performGmailAction('archive', [item.message_id], item.account_email).catch(() => {});
+                      setRecentRead(prev => { const n = prev.filter(r => r.message_id !== item.message_id); saveRecentRead(n); return n; });
+                      showToast('Archived');
+                    }}
+                    onDelete={() => {
+                      performGmailAction('delete', [item.message_id], item.account_email).catch(() => {});
+                      setRecentRead(prev => { const n = prev.filter(r => r.message_id !== item.message_id); saveRecentRead(n); return n; });
+                      showToast('Deleted');
+                    }}
+                  />
+                  <button
+                    className="recent-restore"
+                    onClick={() => restoreRecent(item)}
+                    aria-label="Restore to Important"
+                  >Restore</button>
+                </div>
+              ))
+            )}
+            <div className="state small">Keeps the last {RECENT_READ_MAX} on this device.</div>
+          </>
+        )}
+
         {tab === 'sent' && (
           <PullToRefresh onRefresh={refreshSent} label={hasMoreSent ? 'Loading more…' : 'Refreshing'}>
             {sentLoading ? (
@@ -1386,6 +1556,10 @@ export default function MobilePage() {
         <button className={tab === 'important' ? 'on' : ''} onClick={() => setTab('important')}>
           <div className="t-ico">★</div>
           <div>Important</div>
+        </button>
+        <button className={tab === 'recent' ? 'on' : ''} onClick={() => setTab('recent')}>
+          <div className="t-ico">⟲</div>
+          <div>Recent</div>
         </button>
         <button className={tab === 'sent' ? 'on' : ''} onClick={() => setTab('sent')}>
           <div className="t-ico">↗</div>
@@ -1564,6 +1738,32 @@ const styles = `
 
 .state { padding: 24px; text-align: center; color: var(--muted); }
 .state.small { padding: 12px; font-size: 12px; }
+
+.recent-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px 8px; gap: 8px;
+}
+.recent-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.recent-count {
+  display: inline-block; margin-left: 8px;
+  padding: 1px 8px; border-radius: 999px;
+  background: #eef2ff; color: #3730a3;
+  font-size: 11px; font-weight: 700;
+}
+.recent-clear {
+  border: 1px solid var(--border); background: transparent;
+  color: var(--muted); font-size: 12px;
+  padding: 4px 10px; border-radius: 999px;
+}
+.recent-row-wrap { position: relative; }
+.recent-restore {
+  position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  border: 1px solid var(--accent); background: white; color: var(--accent);
+  font-size: 12px; font-weight: 600;
+  padding: 5px 10px; border-radius: 999px;
+  z-index: 2;
+}
+.recent-restore:active { background: #eef2ff; }
 .state.error { color: var(--danger); }
 
 .fab {
