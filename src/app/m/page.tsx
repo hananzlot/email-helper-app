@@ -289,11 +289,15 @@ function PullToRefresh({
 function SwipeableRow({
   onArchive,
   onDelete,
+  onMarkRead,
   onTap,
   children,
 }: {
   onArchive: () => void;
   onDelete: () => void;
+  // Right-swipe action. When omitted, rightward swipes don't trigger anything
+  // and the row resists pulling right (keeps the visual asymmetric).
+  onMarkRead?: () => void;
   onTap: () => void;
   children: React.ReactNode;
 }) {
@@ -331,7 +335,8 @@ function SwipeableRow({
     }
     if (decided.current === 'h') {
       moved.current = true;
-      setDx(Math.max(-220, Math.min(60, dxNow)));
+      const maxRight = onMarkRead ? 220 : 60;
+      setDx(Math.max(-220, Math.min(maxRight, dxNow)));
     }
   };
   const onTouchEnd = () => {
@@ -339,14 +344,20 @@ function SwipeableRow({
     startX.current = null;
     startY.current = null;
     if (decided.current === 'h') {
+      // Long left = archive, short left = delete (swap of the prior order).
       if (finalDx <= -160) {
         setDx(-9999);
-        setTimeout(onDelete, 180);
+        setTimeout(onArchive, 180);
         return;
       }
       if (finalDx <= -70) {
         setDx(-9999);
-        setTimeout(onArchive, 180);
+        setTimeout(onDelete, 180);
+        return;
+      }
+      if (onMarkRead && finalDx >= 70) {
+        setDx(9999);
+        setTimeout(onMarkRead, 180);
         return;
       }
       setDx(0);
@@ -356,14 +367,30 @@ function SwipeableRow({
     decided.current = null;
   };
 
-  const showDelete = dx <= -160;
+  // Pick which action the user is currently committing to so the under-row
+  // panel reads as a real preview, not a static label. Right swipes flip to
+  // 'mark' immediately so the green reveal tracks the finger.
+  const mode: 'mark' | 'delete' | 'archive' =
+    dx > 0 ? 'mark'
+    : dx <= -160 ? 'archive'
+    : 'delete';
   const offscreen = rowRef.current?.offsetWidth || 500;
-  const xPx = dx === -9999 ? -offscreen : dx;
+  const xPx = dx === -9999 ? -offscreen : dx === 9999 ? offscreen : dx;
+  const actionBg = mode === 'mark' ? '#10b981' : mode === 'archive' ? '#f59e0b' : 'var(--danger)';
+  const actionLabel = mode === 'mark' ? 'Mark read' : mode === 'archive' ? 'Archive' : 'Delete';
 
   return (
     <div className="row-outer" ref={rowRef}>
-      <div className={`row-actions ${showDelete ? 'is-delete' : ''}`}>
-        <span className="row-action-label">{showDelete ? 'Delete' : 'Archive'}</span>
+      <div
+        className="row-actions"
+        style={{
+          background: actionBg,
+          justifyContent: mode === 'mark' ? 'flex-start' : 'flex-end',
+          paddingLeft: mode === 'mark' ? 24 : 0,
+          paddingRight: mode === 'mark' ? 0 : 24,
+        }}
+      >
+        <span className="row-action-label">{actionLabel}</span>
       </div>
       <div
         className="row-inner"
@@ -389,11 +416,14 @@ function SwipeableRow({
   );
 }
 
-function MessageRow({ row, onTap, onArchive, onDelete, onChangeTier }: {
+function MessageRow({ row, onTap, onArchive, onDelete, onMarkRead, onChangeTier }: {
   row: RowMessage;
   onTap: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  // Optional — only the Important tab wires this. Right-swipe is a no-op when
+  // omitted (Sent rows have no unread state, Recent rows are already read).
+  onMarkRead?: () => void;
   // When present, the tier badge becomes a tappable picker. Only wired on the
   // Important tab — Sent rows have no tier so this never surfaces there.
   onChangeTier?: (senderEmail: string, senderName: string, newTier: 'A' | 'B' | 'C' | 'D') => void;
@@ -404,7 +434,7 @@ function MessageRow({ row, onTap, onArchive, onDelete, onChangeTier }: {
   const color = avatarColor(row.senderEmail || name);
   const [tierOpen, setTierOpen] = useState(false);
   return (
-    <SwipeableRow onTap={onTap} onArchive={onArchive} onDelete={onDelete}>
+    <SwipeableRow onTap={onTap} onArchive={onArchive} onDelete={onDelete} onMarkRead={onMarkRead}>
       <div className={`mrow ${row.isUnread ? 'unread' : ''}`}>
         <div className="mrow-avatar" style={{ background: color }}>{initial}</div>
         <div className="mrow-body">
@@ -1183,6 +1213,20 @@ export default function MobilePage() {
     }
   };
 
+  // Right-swipe handler on the Important tab. Mirrors the ThreadView markRead
+  // path: hits Gmail, then calls markImportantDone to clear the queue row and
+  // capture a Recent-read snapshot so the user can restore it.
+  const onMarkRead = async (row: RowMessage) => {
+    const ids = row.messageIds.length ? row.messageIds : [row.id];
+    try {
+      await performGmailAction('markRead', ids, row.account);
+      markImportantDone(ids);
+      showToast('Marked read');
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Mark read failed');
+    }
+  };
+
   // Change a sender's global tier. Updates server-side via PUT /senders and
   // reflects the change on every queue row from that sender. If the new tier is
   // 'D' (low / cleanup) the rows leave the Important list, since Important
@@ -1438,6 +1482,7 @@ export default function MobilePage() {
                   onTap={() => setOpenThread({ id: row.threadId, account: row.account, subject: row.subject })}
                   onArchive={() => onArchive(row)}
                   onDelete={() => onDelete(row)}
+                  onMarkRead={() => onMarkRead(row)}
                   onChangeTier={changeSenderTier}
                 />
               ))
