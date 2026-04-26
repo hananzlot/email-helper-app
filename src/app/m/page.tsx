@@ -363,7 +363,10 @@ function SwipeableRow({
         return;
       }
       setDx(0);
-    } else if (!moved.current && !skipTap.current) {
+    } else if (decided.current === null && !skipTap.current) {
+      // Pure tap — no horizontal swipe and no vertical scroll. Vertical scroll
+      // sets decided.current to 'v', which used to fall into the swipe-or-tap
+      // else branch and accidentally open the message under the user's finger.
       onTap();
     }
     decided.current = null;
