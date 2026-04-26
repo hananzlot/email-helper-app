@@ -331,10 +331,12 @@ function SwipeableRow({
     if (decided.current === null) {
       if (Math.abs(dxNow) > 8 || Math.abs(dyNow) > 8) {
         decided.current = Math.abs(dxNow) > Math.abs(dyNow) ? 'h' : 'v';
+        // Vertical drags must also count as "moved" so onTouchEnd doesn't
+        // treat a scroll gesture as a tap and open the row underneath.
+        moved.current = true;
       }
     }
     if (decided.current === 'h') {
-      moved.current = true;
       const maxRight = onMarkRead ? 220 : 60;
       setDx(Math.max(-220, Math.min(maxRight, dxNow)));
     }
