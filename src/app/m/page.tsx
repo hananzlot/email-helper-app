@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import type { GmailMessage } from '@/types';
 
 type Tab = 'important' | 'recent' | 'sent' | 'accounts';
@@ -438,6 +439,8 @@ function MessageRow({ row, onTap, onArchive, onDelete, onMarkRead, onChangeTier 
   const initial = senderInitial(emailLocal || name);
   const color = avatarColor(row.senderEmail || name);
   const [tierOpen, setTierOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const tierBtnRef = useRef<HTMLButtonElement | null>(null);
   return (
     <SwipeableRow onTap={onTap} onArchive={onArchive} onDelete={onDelete} onMarkRead={onMarkRead}>
       <div className={`mrow ${row.isUnread ? 'unread' : ''}`}>
@@ -454,22 +457,36 @@ function MessageRow({ row, onTap, onArchive, onDelete, onMarkRead, onChangeTier 
               // and the thread doesn't open underneath.
               <span className="mrow-tier-wrap" data-no-row-tap>
                 <button
+                  ref={tierBtnRef}
                   type="button"
                   className="mrow-tier mrow-tier-btn"
                   style={{ background: tierBadge(row.tier) }}
-                  onClick={() => setTierOpen(o => !o)}
+                  onClick={() => {
+                    // The picker is portaled to document.body to escape the
+                    // .mrow-subj overflow:hidden clip and .row-inner stacking
+                    // context. Anchor it from the button's viewport position.
+                    if (!tierOpen) {
+                      const rect = tierBtnRef.current?.getBoundingClientRect();
+                      if (rect) setMenuPos({ top: rect.bottom + 4, left: rect.left });
+                    }
+                    setTierOpen(o => !o);
+                  }}
                   aria-label={`Change tier (currently ${row.tier})`}
                 >
                   {row.tier}<span className="mrow-tier-caret">▾</span>
                 </button>
-                {tierOpen && (
+                {tierOpen && menuPos && typeof document !== 'undefined' && createPortal(
                   <>
-                    <span
+                    <div
                       className="mrow-tier-scrim"
                       data-no-row-tap
                       onClick={() => setTierOpen(false)}
                     />
-                    <span className="mrow-tier-menu" data-no-row-tap>
+                    <div
+                      className="mrow-tier-menu"
+                      data-no-row-tap
+                      style={{ top: menuPos.top, left: menuPos.left }}
+                    >
                       {(['A','B','C','D'] as const).map(t => (
                         <button
                           key={t}
@@ -484,8 +501,9 @@ function MessageRow({ row, onTap, onArchive, onDelete, onMarkRead, onChangeTier 
                           <span>{t === 'A' ? 'Top priority' : t === 'B' ? 'Important' : t === 'C' ? 'Normal' : 'Low / Cleanup'}</span>
                         </button>
                       ))}
-                    </span>
-                  </>
+                    </div>
+                  </>,
+                  document.body,
                 )}
               </span>
             ) : row.tier ? (
@@ -1765,13 +1783,15 @@ const styles = `
   cursor: pointer; font-family: inherit;
 }
 .mrow-tier-caret { font-size: 8px; opacity: 0.85; margin-left: 1px; }
-.mrow-tier-scrim { position: fixed; inset: 0; z-index: 60; background: transparent; }
+.mrow-tier-scrim {
+  position: fixed; inset: 0; z-index: 1000; background: transparent;
+}
 .mrow-tier-menu {
-  position: absolute; top: calc(100% + 4px); left: 0; z-index: 61;
+  position: fixed; z-index: 1001;
   background: white; border: 1px solid var(--border);
   border-radius: 10px; box-shadow: 0 10px 24px rgba(0,0,0,0.14);
-  min-width: 180px; overflow: hidden;
-  display: block; padding: 4px 0;
+  min-width: 200px; max-width: calc(100vw - 24px);
+  overflow: hidden; padding: 4px 0;
 }
 .mrow-tier-opt {
   display: flex; align-items: center; gap: 10px;
