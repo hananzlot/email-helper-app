@@ -876,6 +876,11 @@ function ComposeSheet({
         </button>
       </div>
       <div className="overlay-body compose-body">
+        {/* Error is shown twice — once at the top so it's visible right under the
+            Send button, once at the bottom for long replies where the quoted
+            thread pushes the form off-screen. The bottom copy used to be the
+            only one and was effectively invisible. */}
+        {error && <div className="state error compose-error-top">{error}</div>}
         {accounts.length > 1 && (
           <div className="compose-row">
             <label>From</label>
@@ -1967,6 +1972,19 @@ const styles = `
 }
 
 .compose-body { padding: 8px 0 80px; }
+.compose-error-top {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  margin: 0 0 8px;
+  padding: 10px 14px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #991b1b;
+  font-size: 14px;
+  text-align: left;
+}
 .compose-row {
   display: flex; align-items: center; gap: 8px;
   border-bottom: 1px solid var(--border);
