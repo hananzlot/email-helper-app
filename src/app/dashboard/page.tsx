@@ -3832,39 +3832,98 @@ function ComposeDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch the original message (reply or forward) and swap the placeholder with the real content.
-  // Done in-place via DOM so the user's caret position and any typing they've already done is preserved.
+  // Fetch the original content (reply: full thread; forward: just the original message)
+  // and swap the placeholder with the real content. Done in-place via DOM so the user's
+  // caret position and any typing they've already done is preserved.
+  //
+  // Reply mode pulls the *whole thread* — every message body, oldest-first — and inlines
+  // it in the body. That keeps the conversation history visible to the recipient even
+  // when the user picks a different From account at send time (cross-account reply,
+  // where we drop threadId and Gmail's native threading is unavailable).
   useEffect(() => {
     if (!includeOriginal || !replyContext?.messageId) return;
     let cancelled = false;
     const accountForFetch = replyContext.accountEmail;
     const savedAccount = _currentAccount;
     if (accountForFetch && accountForFetch !== _currentAccount) setCurrentAccount(accountForFetch);
-    gmailGet('message', { id: replyContext.messageId, format: 'full' })
-      .then((res) => {
-        if (accountForFetch && accountForFetch !== savedAccount) setCurrentAccount(savedAccount);
-        if (cancelled || !res.success) return;
-        const origBody = res.data.bodyHtml || res.data.body || '';
-        const origDate = res.data.date ? new Date(res.data.date).toLocaleString() : '';
-        const origFrom = res.data.sender || replyContext.to || '';
-        const block = isForward
-          ? `<hr style="border:none;border-top:1px solid #ccc;margin:16px 0"><strong>---------- Forwarded message ----------</strong><br>${origBody}`
-          : `<div style="border-left:2px solid #ccc;padding-left:12px;margin-top:12px;color:#666"><p style="margin:0 0 8px 0;font-size:12px">On ${origDate}, ${origFrom} wrote:</p>${origBody}</div>`;
-        const placeholder = bodyRef.current?.querySelector(`#${QUOTED_PLACEHOLDER_ID}`) as HTMLDivElement | null;
-        if (placeholder) {
-          placeholder.outerHTML = block;
-        }
-        // Sync state with the new DOM so autosave persists the quoted content
-        if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML);
-      })
-      .catch(() => {
-        if (accountForFetch && accountForFetch !== savedAccount) setCurrentAccount(savedAccount);
+
+    const replacePlaceholder = (block: string | null) => {
+      const placeholder = bodyRef.current?.querySelector(`#${QUOTED_PLACEHOLDER_ID}`) as HTMLDivElement | null;
+      if (!placeholder) return;
+      if (block) {
+        placeholder.outerHTML = block;
+      } else {
+        placeholder.remove();
+      }
+      if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML);
+    };
+
+    const buildOneQuoteBlock = (m: { sender?: string; senderEmail?: string; date?: string; bodyHtml?: string; body?: string }) => {
+      const origBody = m.bodyHtml || m.body || '';
+      const origDate = m.date ? new Date(m.date).toLocaleString() : '';
+      const origFrom = m.sender || m.senderEmail || '';
+      return `<p style="margin:0 0 8px 0;font-size:12px">On ${origDate}, ${origFrom} wrote:</p>${origBody}`;
+    };
+
+    const restoreAccount = () => {
+      if (accountForFetch && accountForFetch !== savedAccount) setCurrentAccount(savedAccount);
+    };
+
+    if (isForward) {
+      // Forward: just include the one message verbatim — user is starting a new conversation.
+      gmailGet('message', { id: replyContext.messageId, format: 'full' })
+        .then((res) => {
+          restoreAccount();
+          if (cancelled || !res.success) { replacePlaceholder(null); return; }
+          const origBody = res.data.bodyHtml || res.data.body || '';
+          replacePlaceholder(`<hr style="border:none;border-top:1px solid #ccc;margin:16px 0"><strong>---------- Forwarded message ----------</strong><br>${origBody}`);
+        })
+        .catch(() => { restoreAccount(); if (!cancelled) replacePlaceholder(null); });
+      return () => { cancelled = true; };
+    }
+
+    // Reply: fetch the full thread → all message IDs → each body in parallel → quote them all.
+    const threadId = replyContext.threadId;
+    if (!threadId) {
+      // No threadId (rare) — fall back to single-message quote so we still show *something*.
+      gmailGet('message', { id: replyContext.messageId, format: 'full' })
+        .then((res) => {
+          restoreAccount();
+          if (cancelled || !res.success) { replacePlaceholder(null); return; }
+          replacePlaceholder(`<div style="border-left:2px solid #ccc;padding-left:12px;margin-top:12px;color:#666">${buildOneQuoteBlock(res.data)}</div>`);
+        })
+        .catch(() => { restoreAccount(); if (!cancelled) replacePlaceholder(null); });
+      return () => { cancelled = true; };
+    }
+
+    (async () => {
+      try {
+        const tres = await gmailGet('thread', { id: threadId });
+        if (cancelled) { restoreAccount(); return; }
+        const ids: string[] = (tres.success && Array.isArray(tres.data?.messages))
+          ? tres.data.messages.map((m: { id: string }) => m.id).filter(Boolean)
+          : [replyContext.messageId];
+        const msgs = await Promise.all(
+          ids.map(id =>
+            gmailGet('message', { id, format: 'full' })
+              .then(r => (r.success ? r.data : null))
+              .catch(() => null)
+          )
+        );
+        restoreAccount();
         if (cancelled) return;
-        // On failure, just remove the placeholder so the user isn't left staring at "Loading…"
-        const placeholder = bodyRef.current?.querySelector(`#${QUOTED_PLACEHOLDER_ID}`);
-        placeholder?.remove();
-        if (bodyRef.current) setBodyHtml(bodyRef.current.innerHTML);
-      });
+        const valid = msgs.filter((m): m is NonNullable<typeof m> => !!m);
+        if (!valid.length) { replacePlaceholder(null); return; }
+        // Oldest-first so the recipient reads chronologically when expanded.
+        valid.sort((a, b) => (Date.parse(a.date || '') || 0) - (Date.parse(b.date || '') || 0));
+        const blocks = valid.map(m => `<div style="margin-top:12px">${buildOneQuoteBlock(m)}</div>`).join('');
+        replacePlaceholder(`<div style="border-left:2px solid #ccc;padding-left:12px;margin-top:12px;color:#666">${blocks}</div>`);
+      } catch {
+        restoreAccount();
+        if (!cancelled) replacePlaceholder(null);
+      }
+    })();
+
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -3952,8 +4011,16 @@ function ComposeDialog({
         cc: cc.trim() || undefined,
         bcc: bcc.trim() || undefined,
       };
-      // Only replies thread to the original — forwards start a new thread
-      if (isReply && replyContext?.threadId) {
+      // Replies thread to the original — but only when From matches the
+      // account that received the thread. Cross-account reply (user picked
+      // a different From in the dropdown): drop threadId / inReplyTo so
+      // Gmail doesn't try to look up a thread that doesn't exist in the
+      // sending mailbox. The conversation history already lives inline in
+      // bodyHtml (we fetched and quoted it on dialog mount), so the
+      // recipient still sees context — they just won't get native Gmail
+      // threading on our side. Forwards always start a new thread.
+      const sameAccount = !replyContext?.accountEmail || replyContext.accountEmail === from;
+      if (isReply && replyContext?.threadId && sameAccount) {
         payload.threadId = replyContext.threadId;
         payload.inReplyTo = replyContext.messageId;
       }

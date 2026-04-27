@@ -84,6 +84,11 @@ type ComposeState = {
   showCc: boolean;
   showBcc: boolean;
   account: string;
+  // The account that owns the original thread. When the user picks a
+  // different `account` (cross-account reply), we drop threadId / inReplyTo
+  // at send time because Gmail can't find the thread in the sending mailbox —
+  // the conversation history is preserved via the inline quoted block instead.
+  threadAccount?: string;
 };
 
 type ThreadHeader = { name: string; value: string };
@@ -163,6 +168,27 @@ function plainToHtml(text: string): string {
   return htmlEscape(text).replace(/\r?\n/g, '<br>');
 }
 
+/**
+ * Decode HTML entities in plain-text contexts. The reply_queue summaries and
+ * Gmail snippets sometimes arrive with entities like &#39; or &amp; that the
+ * triage/summarization pipeline left in. Rendering those via React's text
+ * binding shows the raw entity instead of the character — fix at display time
+ * rather than migrating the DB. Decode &amp; last so we don't double-decode
+ * sequences like &amp;quot;.
+ */
+function decodeHtmlEntities(s: string): string {
+  if (!s) return s;
+  return s
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCharCode(parseInt(n, 16)))
+    .replace(/&amp;/g, '&');
+}
+
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -236,6 +262,28 @@ function buildQuoted(orig: GmailMessage): string {
   const fromLine = `On ${orig.date}, ${cleanName(orig.sender) || orig.senderEmail} &lt;${htmlEscape(orig.senderEmail)}&gt; wrote:`;
   const body = orig.bodyHtml || (orig.body ? plainToHtml(orig.body) : '');
   return `<br><br><div style="border-left:2px solid #ccc;padding-left:10px;color:#555;">${fromLine}<br><br>${body}</div>`;
+}
+
+/**
+ * Build a quoted block containing every message in a thread, oldest first.
+ * Used for cross-account replies: when the user sends from an account that
+ * doesn't own the original thread, we strip threadId/inReplyTo (Gmail can't
+ * find the thread in the sending mailbox) and rely on this inline block to
+ * carry the conversation history into the recipient's view.
+ */
+function buildQuotedThread(messages: GmailMessage[]): string {
+  if (!messages.length) return '';
+  const sorted = [...messages].sort((a, b) => {
+    const ta = Date.parse(a.date || '') || 0;
+    const tb = Date.parse(b.date || '') || 0;
+    return ta - tb;
+  });
+  const blocks = sorted.map(m => {
+    const fromLine = `On ${m.date}, ${cleanName(m.sender) || m.senderEmail} &lt;${htmlEscape(m.senderEmail)}&gt; wrote:`;
+    const body = m.bodyHtml || (m.body ? plainToHtml(m.body) : '');
+    return `<div style="margin-top:12px;">${fromLine}<br><br>${body}</div>`;
+  });
+  return `<br><br><div style="border-left:2px solid #ccc;padding-left:10px;color:#555;">${blocks.join('')}</div>`;
 }
 
 function PullToRefresh({
@@ -527,10 +575,10 @@ function MessageRow({ row, onTap, onArchive, onDelete, onMarkRead, onChangeTier 
             ) : row.tier ? (
               <span className="mrow-tier" style={{ background: tierBadge(row.tier) }}>{row.tier}</span>
             ) : null}
-            {row.subject || '(no subject)'}
+            {decodeHtmlEntities(row.subject) || '(no subject)'}
             {row.threadCount > 1 && <span className="mrow-count">{row.threadCount}</span>}
           </div>
-          <div className="mrow-preview">{row.preview}</div>
+          <div className="mrow-preview">{decodeHtmlEntities(row.preview)}</div>
         </div>
       </div>
     </SwipeableRow>
@@ -551,7 +599,7 @@ function ThreadView({
   initialSubject: string;
   onClose: () => void;
   onAction: (kind: 'archive' | 'delete' | 'markRead' | 'markUnread', messageIds: string[]) => Promise<void>;
-  onCompose: (mode: 'reply' | 'replyAll' | 'forward', orig: GmailMessage) => void;
+  onCompose: (mode: 'reply' | 'replyAll' | 'forward', orig: GmailMessage, threadMessages?: GmailMessage[], threadAccount?: string) => void;
   // Fires whenever the user explicitly marks messages as read via the
   // Mark-as-read button in the thread toolbar. The parent uses this to drop
   // matching queue items from the Important list so the thread doesn't
@@ -651,9 +699,9 @@ function ThreadView({
       </div>
       {!loading && !error && last && (
         <div className="thread-actions">
-          <button className="primary" onClick={() => onCompose('reply', last)}>Reply</button>
-          <button onClick={() => onCompose('replyAll', last)}>Reply all</button>
-          <button onClick={() => onCompose('forward', last)}>Forward</button>
+          <button className="primary" onClick={() => onCompose('reply', last, messages, account)}>Reply</button>
+          <button onClick={() => onCompose('replyAll', last, messages, account)}>Reply all</button>
+          <button onClick={() => onCompose('forward', last, messages, account)}>Forward</button>
         </div>
       )}
     </div>
@@ -838,6 +886,15 @@ function ComposeSheet({
     setError(null);
     try {
       const html = plainToHtml(state.body) + (state.quotedHtml || '');
+      // Cross-account reply: when the sending account doesn't own the original
+      // thread, drop threadId / inReplyTo so Gmail doesn't try (and fail) to
+      // look up the thread in the wrong mailbox. The conversation history is
+      // already inlined as quoted HTML in the body, so the recipient still
+      // sees full context — they just won't get native Gmail threading on
+      // our side.
+      const sameAccount = !state.threadAccount || state.threadAccount === state.account;
+      const threadId = sameAccount ? state.threadId : undefined;
+      const inReplyTo = sameAccount ? state.inReplyTo : undefined;
       // 30s ceiling — if iOS suspends the PWA tab mid-request the fetch hangs
       // forever and the Send button reads "Sending…" until the user reopens the app.
       await api('gmail', {
@@ -851,8 +908,8 @@ function ComposeSheet({
           body: html,
           cc: state.cc.trim() || undefined,
           bcc: state.bcc.trim() || undefined,
-          inReplyTo: state.inReplyTo,
-          threadId: state.threadId,
+          inReplyTo,
+          threadId,
         },
       });
       onSent();
@@ -1424,8 +1481,8 @@ export default function MobilePage() {
     }
   };
 
-  const openCompose = (mode: ComposeMode, orig?: GmailMessage) => {
-    const account = orig?.accountEmail || (openThread?.account) || activeAccount;
+  const openCompose = (mode: ComposeMode, orig?: GmailMessage, threadMessages?: GmailMessage[], threadAccount?: string) => {
+    const account = threadAccount || orig?.accountEmail || (openThread?.account) || activeAccount;
     if (mode === 'new') {
       setCompose({
         mode, to: '', cc: '', bcc: '', subject: '', body: '',
@@ -1435,11 +1492,18 @@ export default function MobilePage() {
     }
     if (!orig) return;
     const subject = buildReplySubject(mode, orig.subject);
+    // For replies prefer the full thread so cross-account sends still carry
+    // the conversation in the body. Forward gets just the original message
+    // (the user is starting a new conversation, not continuing one).
+    const quotedHtml = (mode !== 'forward' && threadMessages && threadMessages.length > 1)
+      ? buildQuotedThread(threadMessages)
+      : buildQuoted(orig);
     if (mode === 'forward') {
       setCompose({
         mode, to: '', cc: '', bcc: '', subject, body: '',
-        quotedHtml: buildQuoted(orig),
+        quotedHtml,
         showCc: false, showBcc: false, account,
+        threadAccount,
       });
       return;
     }
@@ -1457,10 +1521,11 @@ export default function MobilePage() {
     }
     setCompose({
       mode, to: toAddr, cc, bcc: '', subject, body: '\n\n',
-      quotedHtml: buildQuoted(orig),
+      quotedHtml,
       inReplyTo: orig.id,
       threadId: orig.threadId,
       showCc: !!cc, showBcc: false, account,
+      threadAccount,
     });
   };
 
@@ -1698,6 +1763,10 @@ export default function MobilePage() {
           onClose={() => setCompose(null)}
           onSent={() => {
             setCompose(null);
+            // After a successful reply/replyAll/forward, drop back to the
+            // inbox: the user expects "I'm done with this thread" once they
+            // hit send. New compose (no thread open) just closes the sheet.
+            if (compose.mode !== 'new') setOpenThread(null);
             showToast('Sent');
             if (tab === 'sent') setTimeout(() => { loadSentMail(); }, 1500);
           }}

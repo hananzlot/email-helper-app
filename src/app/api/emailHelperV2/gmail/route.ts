@@ -258,6 +258,26 @@ export async function POST(request: NextRequest) {
     const errStr = String(err);
     // If "not found" — the message might belong to a different connected account
     // Try all other accounts before giving up
+    // SEND fallback: a "not found" from Gmail on send means threadId/inReplyTo
+    // point at a thread that doesn't exist in the *sending* account (cross-
+    // account reply where our client thought the thread was here, but it's
+    // actually in another connected mailbox). The conversation history is
+    // already inlined in the body, so we can safely retry the send without
+    // threadId/inReplyTo from the same From — recipient still has context,
+    // we just lose native Gmail threading on our side.
+    if (action === 'send' && (errStr.includes('not found') || errStr.includes('Not Found') || errStr.includes('notFound'))) {
+      try {
+        const { threadId: _t, inReplyTo: _r, ...standalone } = params;
+        void _t; void _r;
+        const sent = await gmail.sendEmail(client, standalone as Parameters<typeof gmail.sendEmail>[1]);
+        console.log('Gmail POST: send succeeded after dropping threadId/inReplyTo (cross-account reply)');
+        return apiSuccess({ ...sent, threadFallback: true });
+      } catch (retryErr) {
+        console.error('Gmail POST: send retry without threadId also failed:', retryErr);
+        // Fall through to the standard error response below.
+      }
+    }
+
     if (errStr.includes('not found') || errStr.includes('Not Found') || errStr.includes('notFound')) {
       const { getRequestContext: getCtx } = await import('@/lib/api-helpers');
       const { userId } = await getCtx(request);
