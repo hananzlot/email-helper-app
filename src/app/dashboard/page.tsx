@@ -107,15 +107,22 @@ async function gmailGet(action: string, params: Record<string, string> = {}) {
   return res.json();
 }
 
-async function gmailPost(action: string, data: Record<string, unknown> = {}) {
+async function gmailPost(action: string, data: Record<string, unknown> = {}, opts: { timeoutMs?: number } = {}) {
   await waitForRateLimit();
-  const res = await fetch(withAccount('/api/emailHelperV2/gmail'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, ...data }),
-  });
-  handleRateLimitResponse(res);
-  return res.json();
+  const ctrl = opts.timeoutMs ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), opts.timeoutMs) : null;
+  try {
+    const res = await fetch(withAccount('/api/emailHelperV2/gmail'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...data }),
+      signal: ctrl?.signal,
+    });
+    handleRateLimitResponse(res);
+    return res.json();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function apiGet(path: string) {
@@ -3950,12 +3957,12 @@ function ComposeDialog({
         payload.threadId = replyContext.threadId;
         payload.inReplyTo = replyContext.messageId;
       }
-      const res = await gmailPost('send', payload);
+      // 30s ceiling so the button always recovers even if the network/Netlify hangs.
+      // Gmail itself accepts sends in <2s; anything longer means we've lost the response.
+      const res = await gmailPost('send', payload, { timeoutMs: 30_000 });
       if (res.success) {
-        // Clean up draft we may have autosaved
-        if (draftId) {
-          try { await gmailPost('deleteDraft', { draftId }); } catch {}
-        }
+        // Draft cleanup is best-effort and must not block UI recovery — fire and forget.
+        if (draftId) gmailPost('deleteDraft', { draftId }).catch(() => {});
         const successTitle = isForward ? 'Forwarded' : isReply ? 'Reply sent' : 'Email sent';
         showToast(successTitle, `To: ${to.trim()} (via ${from})`);
         _onEmailSent?.();
@@ -3963,12 +3970,12 @@ function ComposeDialog({
         onClose();
       } else {
         showToast('Send failed', res.error);
-        setSending(false);
       }
     } catch (err) {
-      showToast('Send failed', String(err));
-      setSending(false);
+      const aborted = err instanceof DOMException && err.name === 'AbortError';
+      showToast('Send failed', aborted ? 'Request timed out — check your Sent folder before retrying' : String(err));
     } finally {
+      setSending(false);
       if (from !== savedAccount) setCurrentAccount(savedAccount);
     }
   }
