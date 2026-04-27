@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 3,
+            "command": "case \"$PWD\" in /home/user/email-helper-app|/home/user/email-helper-app/*) ;; *) exit 0 ;; esac; REPO=/home/user/email-helper-app; [ -d \"$REPO/.git\" ] || exit 0; timeout 1 git -C \"$REPO\" fetch -q origin main 2>/dev/null || exit 0; BEHIND=$(git -C \"$REPO\" rev-list --count main..origin/main 2>/dev/null); [ -z \"$BEHIND\" ] && exit 0; [ \"$BEHIND\" = \"0\" ] && exit 0; COMMITS=$(git -C \"$REPO\" log --oneline main..origin/main 2>/dev/null | head -10); MSG=$(printf 'main is behind origin/main by %s commit(s):\\n%s' \"$BEHIND\" \"$COMMITS\"); printf '%s' \"$MSG\" | jq -Rs '{hookSpecificOutput:{hookEventName:\"UserPromptSubmit\",additionalContext:.}}'; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}
