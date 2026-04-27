@@ -217,7 +217,12 @@ function pickHeader(headers: ThreadHeader[] | undefined, name: string): string {
 function parseAddress(s: string): { name: string; email: string } {
   const m = s.match(/^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/);
   if (m) return { name: m[1].trim(), email: m[2].trim() };
-  return { name: '', email: s.trim() };
+  // Only treat the bare input as an email if it actually looks like one.
+  // Without this guard a display-name-only string ("Twilio Support") would
+  // get returned as the email and produce "To: Twilio Support" — Gmail 400.
+  const trimmed = s.trim();
+  if (trimmed.includes('@')) return { name: '', email: trimmed };
+  return { name: trimmed, email: '' };
 }
 
 function buildReplySubject(mode: ComposeMode, original: string): string {
@@ -1424,7 +1429,6 @@ export default function MobilePage() {
       return;
     }
     if (!orig) return;
-    const fromAddr = parseAddress(orig.sender || `<${orig.senderEmail}>`);
     const subject = buildReplySubject(mode, orig.subject);
     if (mode === 'forward') {
       setCompose({
@@ -1434,11 +1438,15 @@ export default function MobilePage() {
       });
       return;
     }
-    const toAddr = fromAddr.email;
+    // senderEmail is the structured email address extracted from the From header
+    // upstream in lib/gmail.ts. orig.sender is the *display name* only — feeding
+    // it to parseAddress without angle brackets used to produce a bogus To header.
+    const toAddr = orig.senderEmail;
     let cc = '';
     if (mode === 'replyAll') {
-      const others = (orig.to || '').split(',').map(s => parseAddress(s).email).filter(Boolean);
-      const ccs = (orig.cc || '').split(',').map(s => parseAddress(s).email).filter(Boolean);
+      const valid = (e: string) => e.includes('@');
+      const others = (orig.to || '').split(',').map(s => parseAddress(s).email).filter(valid);
+      const ccs = (orig.cc || '').split(',').map(s => parseAddress(s).email).filter(valid);
       const all = [...others, ...ccs].filter(e => e.toLowerCase() !== account.toLowerCase() && e.toLowerCase() !== toAddr.toLowerCase());
       cc = Array.from(new Set(all)).join(', ');
     }

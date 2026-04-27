@@ -603,6 +603,17 @@ function sanitizeHeader(value: string): string {
   return value.replace(/[\r\n\0]/g, '');
 }
 
+/** Every comma-separated entry in a recipient list must contain an '@'. */
+function assertValidRecipientList(list: string, fieldName: string): void {
+  const entries = list.split(',').map(e => e.trim()).filter(Boolean);
+  for (const entry of entries) {
+    const inBrackets = entry.match(/<([^>]+)>/)?.[1] || entry;
+    if (!inBrackets.includes('@')) {
+      throw new Error(`Invalid ${fieldName} recipient: "${entry}" is missing an email address`);
+    }
+  }
+}
+
 export async function sendEmail(
   gmail: gmail_v1.Gmail,
   options: {
@@ -615,6 +626,12 @@ export async function sendEmail(
     threadId?: string;
   }
 ) {
+  // Fail fast on malformed recipients — Gmail returns "Invalid To header" 400
+  // otherwise and the user just sees the send hang or fail without context.
+  assertValidRecipientList(options.to, 'To');
+  if (options.cc) assertValidRecipientList(options.cc, 'Cc');
+  if (options.bcc) assertValidRecipientList(options.bcc, 'Bcc');
+
   // Build headers, filter out empty optional ones, then add blank line + body
   const headers = [
     `To: ${sanitizeHeader(options.to)}`,

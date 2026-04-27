@@ -292,6 +292,10 @@ export async function POST(request: NextRequest) {
     }
     console.error('Gmail POST error:', err);
     console.error('Gmail operation failed:', err);
-    return apiError('Gmail operation failed', 500);
+    // Surface Gmail's own error messages (e.g. "Invalid To header") so the user
+    // sees a useful toast instead of an opaque "Gmail operation failed".
+    const errAny = err as { message?: string; code?: number; errors?: { message?: string }[] };
+    const detail = errAny?.errors?.[0]?.message || errAny?.message || 'Gmail operation failed';
+    return apiError(detail, errAny?.code === 400 ? 400 : 500);
   }
 }
