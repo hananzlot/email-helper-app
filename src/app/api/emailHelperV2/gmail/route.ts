@@ -181,10 +181,21 @@ export async function POST(request: NextRequest) {
   if ('error' in result) return apiError(result.error, 401);
   const { gmail: client } = result;
 
+  // Read the body ONCE up front. The catch block used to do
+  // `request.clone().json()` for the not-found fallback, but on a NextRequest
+  // whose body has already been consumed that throws "TypeError: unusable"
+  // from undici's stream layer — surfacing as an uncaught framework error
+  // and an opaque HTTP 500 to the client.
+  let body: Record<string, unknown>;
   try {
-    const body = await request.json();
-    const { action, ...params } = body;
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return apiError('Invalid request body', 400);
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { action, ...params } = body as any;
 
+  try {
     switch (action) {
       // Modify operations
       case 'archive':
@@ -248,44 +259,40 @@ export async function POST(request: NextRequest) {
     // If "not found" — the message might belong to a different connected account
     // Try all other accounts before giving up
     if (errStr.includes('not found') || errStr.includes('Not Found') || errStr.includes('notFound')) {
-      const body = await request.clone().json().catch(() => null);
-      if (body) {
-        const { getRequestContext: getCtx } = await import('@/lib/api-helpers');
-        const { userId } = await getCtx(request);
-        if (userId) {
-          const { createSupabaseAdmin } = await import('@/lib/supabase-server');
-          const { TABLES } = await import('@/lib/tables');
-          const { getValidGmailToken } = await import('@/lib/auth');
-          const admin = createSupabaseAdmin();
-          const { data: accounts } = await admin
-            .from(TABLES.GMAIL_ACCOUNTS)
-            .select('email')
-            .eq('user_id', userId)
-            .eq('status', 'connected');
+      const { getRequestContext: getCtx } = await import('@/lib/api-helpers');
+      const { userId } = await getCtx(request);
+      if (userId) {
+        const { createSupabaseAdmin } = await import('@/lib/supabase-server');
+        const { TABLES } = await import('@/lib/tables');
+        const { getValidGmailToken } = await import('@/lib/auth');
+        const admin = createSupabaseAdmin();
+        const { data: accounts } = await admin
+          .from(TABLES.GMAIL_ACCOUNTS)
+          .select('email')
+          .eq('user_id', userId)
+          .eq('status', 'connected');
 
-          const currentAccount = request.nextUrl.searchParams.get('account');
-          const otherAccounts = (accounts || []).filter((a: { email: string }) => a.email !== currentAccount);
+        const currentAccount = request.nextUrl.searchParams.get('account');
+        const otherAccounts = (accounts || []).filter((a: { email: string }) => a.email !== currentAccount);
 
-          for (const acct of otherAccounts) {
-            try {
-              const token = await getValidGmailToken(userId, acct.email);
-              const altClient = gmail.getGmailClient(token);
-              const { action: act, ...params } = body;
-              switch (act) {
-                case 'archive': await gmail.batchArchive(altClient, params.messageIds); break;
-                case 'trash': await gmail.batchTrash(altClient, params.messageIds); break;
-                case 'delete': await Promise.all(params.messageIds.map((id: string) => gmail.deleteMessage(altClient, id))); break;
-                case 'markRead': await gmail.batchModify(altClient, params.messageIds, [], ['UNREAD']); break;
-                case 'markUnread': await gmail.batchModify(altClient, params.messageIds, ['UNREAD'], []); break;
-                case 'star': await gmail.batchModify(altClient, params.messageIds, ['STARRED'], []); break;
-                case 'unstar': await gmail.batchModify(altClient, params.messageIds, [], ['STARRED']); break;
-                default: continue;
-              }
-              console.log(`Gmail POST: action ${act} succeeded on fallback account`);
-              return apiSuccess({ [act]: params.messageIds?.length || 1, fallbackAccount: acct.email });
-            } catch {
-              continue; // Try next account
+        for (const acct of otherAccounts) {
+          try {
+            const token = await getValidGmailToken(userId, acct.email);
+            const altClient = gmail.getGmailClient(token);
+            switch (action) {
+              case 'archive': await gmail.batchArchive(altClient, params.messageIds); break;
+              case 'trash': await gmail.batchTrash(altClient, params.messageIds); break;
+              case 'delete': await Promise.all(params.messageIds.map((id: string) => gmail.deleteMessage(altClient, id))); break;
+              case 'markRead': await gmail.batchModify(altClient, params.messageIds, [], ['UNREAD']); break;
+              case 'markUnread': await gmail.batchModify(altClient, params.messageIds, ['UNREAD'], []); break;
+              case 'star': await gmail.batchModify(altClient, params.messageIds, ['STARRED'], []); break;
+              case 'unstar': await gmail.batchModify(altClient, params.messageIds, [], ['STARRED']); break;
+              default: continue;
             }
+            console.log(`Gmail POST: action ${action} succeeded on fallback account`);
+            return apiSuccess({ [action]: params.messageIds?.length || 1, fallbackAccount: acct.email });
+          } catch {
+            continue; // Try next account
           }
         }
       }
