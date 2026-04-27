@@ -114,7 +114,7 @@ type RowMessage = {
 
 async function api<T = unknown>(
   path: string,
-  opts: { account?: string; method?: string; body?: unknown } = {}
+  opts: { account?: string; method?: string; body?: unknown; timeoutMs?: number } = {}
 ): Promise<T> {
   const url = new URL(`/api/emailHelperV2/${path}`, window.location.origin);
   if (opts.account) url.searchParams.set('account', opts.account);
@@ -126,7 +126,20 @@ async function api<T = unknown>(
     init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify(opts.body);
   }
-  const res = await fetch(url.toString(), init);
+  const ctrl = opts.timeoutMs ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), opts.timeoutMs) : null;
+  if (ctrl) init.signal = ctrl.signal;
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), init);
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new Error('Request timed out — check your Sent folder before retrying');
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   let json: ApiRes<T>;
   try {
     json = (await res.json()) as ApiRes<T>;
@@ -820,9 +833,12 @@ function ComposeSheet({
     setError(null);
     try {
       const html = plainToHtml(state.body) + (state.quotedHtml || '');
+      // 30s ceiling — if iOS suspends the PWA tab mid-request the fetch hangs
+      // forever and the Send button reads "Sending…" until the user reopens the app.
       await api('gmail', {
         account: state.account,
         method: 'POST',
+        timeoutMs: 30_000,
         body: {
           action: 'send',
           to: state.to.trim(),
