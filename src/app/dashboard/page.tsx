@@ -513,7 +513,7 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
               style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
               Reply All
             </button>
-            <ForwardButton messageId={messageId} accountEmail={accountEmail} subject={email.subject || ''} showToast={showToast} />
+            <ForwardButton messageId={messageId} threadId={email.threadId} accountEmail={accountEmail} subject={email.subject || ''} showToast={showToast} />
             <button onClick={() => flashAction('markRead', () => { onAction(email.isUnread ? 'markRead' : 'markUnread', [messageId], undefined, accountEmail || _currentAccount); setTimeout(onClose, 400); })}
               className="px-3 py-2 text-xs font-medium rounded-lg border transition-all active:scale-90"
               style={{ borderColor: 'var(--border)', background: clickedBtn === 'markRead' ? '#dbeafe' : undefined, color: clickedBtn === 'markRead' ? '#1e40af' : undefined }}>
@@ -651,8 +651,8 @@ function StarButton({ messageId, accountEmail, onAction, size = 'sm' }: {
   );
 }
 
-function ForwardButton({ messageId, accountEmail, subject, size = 'sm', onEmailSent }: {
-  messageId: string; accountEmail?: string; subject: string;
+function ForwardButton({ messageId, threadId, accountEmail, subject, size = 'sm', onEmailSent }: {
+  messageId: string; threadId?: string; accountEmail?: string; subject: string;
   showToast?: (title: string, subtitle?: string) => void;
   size?: 'sm' | 'xs';
   onEmailSent?: () => void;
@@ -664,6 +664,7 @@ function ForwardButton({ messageId, accountEmail, subject, size = 'sm', onEmailS
           mode: 'forward',
           subject,
           messageId,
+          threadId,
           accountEmail,
           onSent: onEmailSent,
         });
@@ -1829,6 +1830,23 @@ export default function Dashboard() {
         localStorage.setItem('email_helper_quick_replies', JSON.stringify(defaults));
       }
     } catch (e) { console.error('Failed to load quick reply templates:', e); }
+  }, []);
+
+  // When InlinePreview resolves the actual Gmail read state, sync the inbox
+  // cache so the left-column MarkReadButton stays in sync with the right-pane
+  // one. (CleanupTab/ReplyQueueTab listen for the same event in their own scope.)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ messageId: string; accountEmail?: string; isUnread: boolean }>).detail;
+      if (!detail) return;
+      setMessages(prev => prev.map(m =>
+        m.id === detail.messageId && (m.accountEmail || '') === (detail.accountEmail || '')
+          ? { ...m, isUnread: detail.isUnread }
+          : m
+      ));
+    };
+    window.addEventListener('email-read-state', handler);
+    return () => window.removeEventListener('email-read-state', handler);
   }, []);
 
   // Advance split preview to next item (used by snooze and other non-handleAction paths)
@@ -3908,15 +3926,69 @@ function ComposeDialog({
     };
 
     if (isForward) {
-      // Forward: just include the one message verbatim — user is starting a new conversation.
-      gmailGet('message', { id: replyContext.messageId, format: 'full' })
-        .then((res) => {
+      // Forward: include the entire thread oldest-first so the recipient sees
+      // the whole history. Falls back to the single message if no threadId or
+      // the thread fetch fails.
+      const fwdThreadId = replyContext.threadId;
+      const buildFwdHeader = (m: { sender?: string; senderEmail?: string; date?: string; subject?: string; to?: string }) => {
+        const from = m.sender || m.senderEmail || '';
+        const date = m.date ? new Date(m.date).toLocaleString() : '';
+        const subj = m.subject || '';
+        const to = m.to || '';
+        return `<div style="font-size:12px;margin:0 0 8px 0">` +
+          `<div><strong>From:</strong> ${from}</div>` +
+          (date ? `<div><strong>Date:</strong> ${date}</div>` : '') +
+          (subj ? `<div><strong>Subject:</strong> ${subj}</div>` : '') +
+          (to ? `<div><strong>To:</strong> ${to}</div>` : '') +
+          `</div>`;
+      };
+      const renderForward = (msgs: { sender?: string; senderEmail?: string; date?: string; subject?: string; to?: string; bodyHtml?: string; body?: string }[]) => {
+        const sorted = [...msgs].sort((a, b) => (Date.parse(a.date || '') || 0) - (Date.parse(b.date || '') || 0));
+        const blocks = sorted.map(m => {
+          const body = m.bodyHtml || m.body || '';
+          return `<div style="margin-top:16px">${buildFwdHeader(m)}${body}</div>`;
+        }).join('<hr style="border:none;border-top:1px solid #eee;margin:16px 0">');
+        return `<hr style="border:none;border-top:1px solid #ccc;margin:16px 0"><strong>---------- Forwarded message ----------</strong>${blocks}`;
+      };
+
+      const fetchSingle = () => {
+        gmailGet('message', { id: replyContext.messageId!, format: 'full' })
+          .then((res) => {
+            restoreAccount();
+            if (cancelled || !res.success) { replacePlaceholder(null); return; }
+            replacePlaceholder(renderForward([res.data]));
+          })
+          .catch(() => { restoreAccount(); if (!cancelled) replacePlaceholder(null); });
+      };
+
+      if (!fwdThreadId) { fetchSingle(); return () => { cancelled = true; }; }
+
+      (async () => {
+        try {
+          const tres = await gmailGet('thread', { id: fwdThreadId });
+          if (cancelled) { restoreAccount(); return; }
+          const ids: string[] = (tres.success && Array.isArray(tres.data?.messages))
+            ? tres.data.messages.map((m: { id: string }) => m.id).filter(Boolean)
+            : [];
+          if (!ids.length) { restoreAccount(); fetchSingle(); return; }
+          const fetched = await Promise.all(
+            ids.map(id =>
+              gmailGet('message', { id, format: 'full' })
+                .then(r => (r.success ? r.data : null))
+                .catch(() => null)
+            )
+          );
           restoreAccount();
-          if (cancelled || !res.success) { replacePlaceholder(null); return; }
-          const origBody = res.data.bodyHtml || res.data.body || '';
-          replacePlaceholder(`<hr style="border:none;border-top:1px solid #ccc;margin:16px 0"><strong>---------- Forwarded message ----------</strong><br>${origBody}`);
-        })
-        .catch(() => { restoreAccount(); if (!cancelled) replacePlaceholder(null); });
+          if (cancelled) return;
+          const valid = fetched.filter((m): m is NonNullable<typeof m> => !!m);
+          if (!valid.length) { replacePlaceholder(null); return; }
+          replacePlaceholder(renderForward(valid));
+        } catch {
+          restoreAccount();
+          if (!cancelled) fetchSingle();
+        }
+      })();
+
       return () => { cancelled = true; };
     }
 
@@ -4451,12 +4523,24 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   }, [email]);
 
   useEffect(() => {
+    // Once we know Gmail's true read state, broadcast it so the left-column
+    // cards (InboxTab, ReplyQueueTab, etc.) can refresh their MarkReadButton
+    // label and stay in sync with this pane.
+    const broadcastRead = (resolvedUnread: boolean) => {
+      try {
+        window.dispatchEvent(new CustomEvent('email-read-state', {
+          detail: { messageId, accountEmail, isUnread: resolvedUnread },
+        }));
+      } catch {}
+    };
     // Check in-memory cache first (instant, no server call)
     const cacheKey = `${messageId}:${accountEmail || ''}`;
     const cached = emailContentCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
       setEmail(cached.data);
-      setIsUnread((cached.data as { isUnread?: boolean })?.isUnread ?? true);
+      const u = (cached.data as { isUnread?: boolean })?.isUnread ?? true;
+      setIsUnread(u);
+      broadcastRead(u);
       setLoading(false);
       return;
     }
@@ -4470,7 +4554,9 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
       if (res.success) {
         if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
         setEmail(res.data);
-        setIsUnread(res.data.isUnread ?? true);
+        const u = res.data.isUnread ?? true;
+        setIsUnread(u);
+        broadcastRead(u);
         emailContentCache.set(cacheKey, { data: res.data, timestamp: Date.now() });
         setLoading(false);
       } else {
@@ -4479,7 +4565,9 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
         const retry = await gmailGet('message', { id: messageId, format: 'full' });
         if (retry.success) {
           setEmail(retry.data);
-          setIsUnread(retry.data.isUnread ?? true);
+          const u = retry.data.isUnread ?? true;
+          setIsUnread(u);
+          broadcastRead(u);
           emailContentCache.set(cacheKey, { data: retry.data, timestamp: Date.now() });
         } else {
           setEmail(null);
@@ -4536,7 +4624,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
           style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
           Reply All
         </button>
-        <ForwardButton messageId={messageId} accountEmail={accountEmail} subject={email?.subject || ''} showToast={showToast} />
+        <ForwardButton messageId={messageId} threadId={email?.threadId} accountEmail={accountEmail} subject={email?.subject || ''} showToast={showToast} />
         <MarkReadButton isUnread={isUnread} messageId={messageId} accountEmail={accountEmail} onAction={(action, ids, label, acct) => {
           onAction(action, ids, label, acct);
           setIsUnread(!isUnread);
@@ -4688,7 +4776,7 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg border"
                   style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
                   Reply All</button>
-                <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
+                <ForwardButton messageId={msg.id} threadId={msg.threadId} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
                 <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <SnoozeDropdown onSnooze={(hours, label) => {
                   const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
@@ -4831,6 +4919,18 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<string | null>(null);
+  // Real read state per message — overrides the queue's "everything is unread"
+  // assumption once the right-pane preview resolves the actual Gmail state.
+  const [readOverrides, setReadOverrides] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent<{ messageId: string; isUnread: boolean }>).detail;
+      if (!d) return;
+      setReadOverrides(prev => prev[d.messageId] === d.isUnread ? prev : { ...prev, [d.messageId]: d.isUnread });
+    };
+    window.addEventListener('email-read-state', handler);
+    return () => window.removeEventListener('email-read-state', handler);
+  }, []);
   // Drag-and-drop reorder state
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -5176,7 +5276,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                           },
                         })} />
                     )}
-                    <MarkReadButton isUnread={true} messageId={item.message_id} accountEmail={item.account_email} onAction={(action, ids, label, acct) => { queueAction(action, item.message_id, item.id, acct || item.account_email); }} />
+                    <MarkReadButton isUnread={readOverrides[item.message_id] ?? true} messageId={item.message_id} accountEmail={item.account_email} onAction={(action, ids, label, acct) => { queueAction(action, item.message_id, item.id, acct || item.account_email); }} />
                     <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(item.id, hours, label)} />
                     <button onClick={() => queueAction('archive', item.message_id, item.id, item.account_email)} title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
@@ -5748,7 +5848,7 @@ function CleanupTab({ unified, onAction, showToast, onPreview, onDialogPreview, 
                         </div>
                         <div className="flex gap-1 flex-shrink-0 items-center">
                           <span className="text-[10px] self-center mr-1" style={{ color: 'var(--muted)' }}>{new Date(msg.date).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
-                          <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} size="xs" />
+                          <ForwardButton messageId={msg.id} threadId={msg.threadId} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} size="xs" />
                           <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={handleMessageAction} size="xs" />
                           <button onClick={(e) => { e.stopPropagation(); handleMessageAction('archive', [msg.id], undefined, msg.accountEmail || _currentAccount); }}
                             title="Archive" className="p-1 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
@@ -6484,7 +6584,7 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                         )}
                       </div>
                       <div className="flex gap-2 flex-shrink-0 items-center">
-                        <ForwardButton messageId={latest.id} accountEmail={latest.accountEmail} subject={latest.subject || ''} showToast={showToast} size="xs" />
+                        <ForwardButton messageId={latest.id} threadId={latest.threadId} accountEmail={latest.accountEmail} subject={latest.subject || ''} showToast={showToast} size="xs" />
                         <div onClick={(e) => e.stopPropagation()}>
                           <SnoozeDropdown onSnooze={(hours, label) => {
                             const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
@@ -6573,7 +6673,7 @@ function FollowUpTab({ accounts, unified, onPreview, onDialogPreview, showToast,
                     </div>
                     <div className="flex gap-2 flex-shrink-0 items-center">
                       <div onClick={(e) => e.stopPropagation()}>
-                        <ForwardButton messageId={latest.id} accountEmail={latest.accountEmail} subject={convo.subject || ''} showToast={showToast} size="xs" />
+                        <ForwardButton messageId={latest.id} threadId={latest.threadId} accountEmail={latest.accountEmail} subject={convo.subject || ''} showToast={showToast} size="xs" />
                       </div>
                       <div onClick={(e) => e.stopPropagation()}>
                         <SnoozeDropdown onSnooze={(hours, label) => {
@@ -7393,7 +7493,7 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
                       },
                     })} />
                 )}
-                <ForwardButton messageId={msg.id} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
+                <ForwardButton messageId={msg.id} threadId={msg.threadId} accountEmail={msg.accountEmail} subject={msg.subject || ''} showToast={showToast} />
                 <MarkReadButton isUnread={msg.isUnread} messageId={msg.id} accountEmail={msg.accountEmail} onAction={onAction} />
                 <SnoozeDropdown onSnooze={(hours, label) => {
                   const until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
