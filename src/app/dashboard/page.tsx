@@ -825,6 +825,10 @@ export default function Dashboard() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  // Increments each time a new search starts; in-flight calls bail out if their
+  // token no longer matches, so two debounced searches can't interleave their
+  // setSearchResults appends and produce duplicate-key React renders.
+  const searchTokenRef = React.useRef(0);
   const [searchSelectedIds, setSearchSelectedIds] = useState<Set<string>>(new Set());
   const [searchSelectionActive, setSearchSelectionActive] = useState<GmailMessage[]>([]);
   // Sender tiers for search results (loaded from API)
@@ -893,6 +897,20 @@ export default function Dashboard() {
       setSearchLoading(false);
       return;
     }
+    const myToken = ++searchTokenRef.current;
+    const isStale = () => searchTokenRef.current !== myToken;
+    // Dedupe key: same Gmail id can legitimately exist in multiple accounts
+    // (CLAUDE.md), so the composite (id, accountEmail) is what must be unique.
+    const keyOf = (m: GmailMessage) => `${m.id}-${m.accountEmail}`;
+    const dedupeAppend = (prev: GmailMessage[], extra: GmailMessage[]) => {
+      const seen = new Set(prev.map(keyOf));
+      const merged = [...prev];
+      for (const m of extra) {
+        const k = keyOf(m);
+        if (!seen.has(k)) { seen.add(k); merged.push(m); }
+      }
+      return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 100);
+    };
     setSearchLoading(true);
     const q = query.toLowerCase();
     const seenIds = new Set<string>();
@@ -905,13 +923,17 @@ export default function Dashboard() {
       m.snippet?.toLowerCase().includes(q)
     );
     localResults.forEach(m => seenIds.add(m.id));
+    if (isStale()) return;
     if (localResults.length > 0) {
       setSearchResults(localResults.slice(0, 50));
+    } else {
+      setSearchResults([]);
     }
 
     // Step 2: Search Supabase cache for messages not already found
     try {
       const cacheRes = await apiGet('inbox-cache');
+      if (isStale()) return;
       if (cacheRes.success && cacheRes.data?.messages?.length > 0) {
         const cacheMatches = cacheRes.data.messages
           .filter((m: { sender: string; sender_email: string; subject: string; snippet: string; gmail_id: string }) =>
@@ -929,7 +951,7 @@ export default function Dashboard() {
           } as GmailMessage));
         cacheMatches.forEach((m: GmailMessage) => seenIds.add(m.id));
         if (cacheMatches.length > 0) {
-          setSearchResults(prev => [...prev, ...cacheMatches].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 100));
+          setSearchResults(prev => dedupeAppend(prev, cacheMatches));
         }
       }
     } catch {}
@@ -942,6 +964,7 @@ export default function Dashboard() {
       if (unified && accounts.length > 1) {
         const savedAccount = _currentAccount;
         for (const acct of accounts) {
+          if (isStale()) { setCurrentAccount(savedAccount); return; }
           setCurrentAccount(acct.email);
           try {
             const res = await gmailGet('search', { q: gmailQuery, max: '20' });
@@ -958,6 +981,7 @@ export default function Dashboard() {
         setCurrentAccount(savedAccount);
       } else {
         const res = await gmailGet('search', { q: gmailQuery, max: '30' });
+        if (isStale()) return;
         if (res.success && res.data?.messages) {
           for (const msg of res.data.messages) {
             if (!seenIds.has(msg.id)) {
@@ -968,16 +992,14 @@ export default function Dashboard() {
         }
       }
 
+      if (isStale()) return;
       if (gmailResults.length > 0) {
-        setSearchResults(prev => {
-          const merged = [...prev, ...gmailResults].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          return merged.slice(0, 100);
-        });
+        setSearchResults(prev => dedupeAppend(prev, gmailResults));
       }
     } catch (err) {
       console.error('Gmail search error:', err);
     } finally {
-      setSearchLoading(false);
+      if (!isStale()) setSearchLoading(false);
     }
   }
 
@@ -2708,7 +2730,7 @@ export default function Dashboard() {
                         </div>
                       )}
                     </div>
-                    {searchResults.map((msg) => {
+                    {Array.from(new Map(searchResults.map(m => [`${m.id}-${m.accountEmail}`, m])).values()).map((msg) => {
                       const isSelected = searchSelectedIds.has(msg.id);
                       return (
                       <div key={`${msg.id}-${msg.accountEmail}`}
