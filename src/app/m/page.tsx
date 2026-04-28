@@ -697,9 +697,19 @@ function ThreadView({
       <div className="overlay-body">
         {loading && <div className="state">Loading thread…</div>}
         {error && <div className="state error">{error}</div>}
-        {!loading && !error && messages.map((m, idx) => (
-          <ThreadMessage key={m.id} msg={m} account={account} expanded={idx === messages.length - 1} />
-        ))}
+        {!loading && !error && (() => {
+          // Render newest-first so the user lands on the most recent message
+          // when opening a thread. Gmail returns thread.messages oldest-first;
+          // sort by date desc with a fallback to original order.
+          const ordered = [...messages].sort((a, b) => {
+            const ta = Date.parse(a.date || '') || 0;
+            const tb = Date.parse(b.date || '') || 0;
+            return tb - ta;
+          });
+          return ordered.map((m, idx) => (
+            <ThreadMessage key={m.id} msg={m} account={account} expanded={idx === 0} />
+          ));
+        })()}
       </div>
       {!loading && !error && last && (
         <div className="thread-actions">
