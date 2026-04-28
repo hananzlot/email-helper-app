@@ -1832,23 +1832,6 @@ export default function Dashboard() {
     } catch (e) { console.error('Failed to load quick reply templates:', e); }
   }, []);
 
-  // When InlinePreview resolves the actual Gmail state, sync the inbox cache
-  // so the left-column MarkReadButton stays in sync with the right-pane one.
-  // (ReplyQueueTab listens for the same event in its own scope.)
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ messageId: string; accountEmail?: string; isUnread: boolean }>).detail;
-      if (!detail) return;
-      setMessages(prev => prev.map(m =>
-        m.id === detail.messageId && (m.accountEmail || '') === (detail.accountEmail || '')
-          ? { ...m, isUnread: detail.isUnread }
-          : m
-      ));
-    };
-    window.addEventListener('email-meta-resolved', handler);
-    return () => window.removeEventListener('email-meta-resolved', handler);
-  }, []);
-
   // Advance split preview to next item (used by snooze and other non-handleAction paths)
   function advancePreview(messageId: string) {
     if (splitPreviewId && splitPreviewId === messageId) {
@@ -4523,16 +4506,19 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   }, [email]);
 
   useEffect(() => {
-    // Once we know Gmail's true state for this email, broadcast it so the
-    // left-column cards (InboxTab, ReplyQueueTab, etc.) can refresh their
-    // MarkReadButton label and show an attachment indicator.
-    const broadcast = (data: { isUnread?: boolean; attachments?: { attachmentId: string }[] }) => {
+    // The app's invariant is that every email visible in a tab is unread (see
+    // CLAUDE.md: "Tabs Only Show Unread Emails"), so the MarkReadButton stays
+    // pinned at "Mark Read" in this pane regardless of what Gmail reports —
+    // Gmail's flag can lag the app's view and produce a confusing "Mark
+    // Unread" label on a card the user is reading specifically because it's
+    // unread. We do still broadcast attachment presence so the queue card
+    // can show a paperclip.
+    const broadcastAttachments = (data: { attachments?: { attachmentId: string }[] }) => {
       try {
         window.dispatchEvent(new CustomEvent('email-meta-resolved', {
           detail: {
             messageId,
             accountEmail,
-            isUnread: data.isUnread ?? true,
             hasAttachments: !!(data.attachments && data.attachments.length > 0),
           },
         }));
@@ -4543,9 +4529,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
     const cached = emailContentCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
       setEmail(cached.data);
-      const u = (cached.data as { isUnread?: boolean })?.isUnread ?? true;
-      setIsUnread(u);
-      broadcast(cached.data as { isUnread?: boolean; attachments?: { attachmentId: string }[] });
+      broadcastAttachments(cached.data as { attachments?: { attachmentId: string }[] });
       setLoading(false);
       return;
     }
@@ -4559,9 +4543,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
       if (res.success) {
         if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
         setEmail(res.data);
-        const u = res.data.isUnread ?? true;
-        setIsUnread(u);
-        broadcast(res.data);
+        broadcastAttachments(res.data);
         emailContentCache.set(cacheKey, { data: res.data, timestamp: Date.now() });
         setLoading(false);
       } else {
@@ -4570,9 +4552,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
         const retry = await gmailGet('message', { id: messageId, format: 'full' });
         if (retry.success) {
           setEmail(retry.data);
-          const u = retry.data.isUnread ?? true;
-          setIsUnread(u);
-          broadcast(retry.data);
+          broadcastAttachments(retry.data);
           emailContentCache.set(cacheKey, { data: retry.data, timestamp: Date.now() });
         } else {
           setEmail(null);
@@ -4924,20 +4904,17 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<string | null>(null);
-  // Real read state + attachment presence per message — populated when the
-  // right-pane preview loads the email and resolves Gmail's actual state.
-  // Without this the queue cards would always show "Mark Read" and no
-  // attachment indicator, since the queue table doesn't store either.
-  const [readOverrides, setReadOverrides] = useState<Record<string, boolean>>({});
+  // Attachment presence per message — populated by the right-pane preview
+  // loading the email. Queue table doesn't store hasAttachments so we rely on
+  // the broadcast from InlinePreview / EmailPreviewModal. We deliberately do
+  // NOT track read state here: every queue item is unread by app invariant
+  // (CLAUDE.md), so MarkReadButton stays at "Mark Read".
   const [hasAttachmentsMap, setHasAttachmentsMap] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const handler = (e: Event) => {
-      const d = (e as CustomEvent<{ messageId: string; isUnread: boolean; hasAttachments?: boolean }>).detail;
-      if (!d) return;
-      setReadOverrides(prev => prev[d.messageId] === d.isUnread ? prev : { ...prev, [d.messageId]: d.isUnread });
-      if (typeof d.hasAttachments === 'boolean') {
-        setHasAttachmentsMap(prev => prev[d.messageId] === d.hasAttachments ? prev : { ...prev, [d.messageId]: d.hasAttachments! });
-      }
+      const d = (e as CustomEvent<{ messageId: string; hasAttachments?: boolean }>).detail;
+      if (!d || typeof d.hasAttachments !== 'boolean') return;
+      setHasAttachmentsMap(prev => prev[d.messageId] === d.hasAttachments ? prev : { ...prev, [d.messageId]: d.hasAttachments! });
     };
     window.addEventListener('email-meta-resolved', handler);
     return () => window.removeEventListener('email-meta-resolved', handler);
@@ -5292,7 +5269,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                           },
                         })} />
                     )}
-                    <MarkReadButton isUnread={readOverrides[item.message_id] ?? true} messageId={item.message_id} accountEmail={item.account_email} onAction={(action, ids, label, acct) => { queueAction(action, item.message_id, item.id, acct || item.account_email); }} />
+                    <MarkReadButton isUnread={true} messageId={item.message_id} accountEmail={item.account_email} onAction={(action, ids, label, acct) => { queueAction(action, item.message_id, item.id, acct || item.account_email); }} />
                     <SnoozeDropdown onSnooze={(hours, label) => snoozeItem(item.id, hours, label)} />
                     <button onClick={() => queueAction('archive', item.message_id, item.id, item.account_email)} title="Archive" className="p-1.5 rounded-lg border hover:bg-gray-50 transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
