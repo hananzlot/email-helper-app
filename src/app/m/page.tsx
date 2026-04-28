@@ -749,9 +749,9 @@ function ThreadMessage({ msg, account, expanded: initialExpanded }: { msg: Gmail
         </div>
         <div className="tmsg-meta">
           <div className="tmsg-from"><strong>{name}</strong> <span className="muted">&lt;{msg.senderEmail}&gt;</span></div>
-          <div className="muted small">to {msg.to || 'me'}</div>
-          {msg.cc && <div className="muted small">cc {msg.cc}</div>}
-          {msg.bcc && <div className="muted small">bcc {msg.bcc}</div>}
+          <div className="muted small">To: {msg.to || 'me'}</div>
+          {msg.cc && <div className="muted small">Cc: {msg.cc}</div>}
+          {msg.bcc && <div className="muted small">Bcc: {msg.bcc}</div>}
         </div>
         <div className="muted small">{formatDate(msg.date)}</div>
       </div>
