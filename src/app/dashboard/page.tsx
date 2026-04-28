@@ -1832,9 +1832,9 @@ export default function Dashboard() {
     } catch (e) { console.error('Failed to load quick reply templates:', e); }
   }, []);
 
-  // When InlinePreview resolves the actual Gmail read state, sync the inbox
-  // cache so the left-column MarkReadButton stays in sync with the right-pane
-  // one. (CleanupTab/ReplyQueueTab listen for the same event in their own scope.)
+  // When InlinePreview resolves the actual Gmail state, sync the inbox cache
+  // so the left-column MarkReadButton stays in sync with the right-pane one.
+  // (ReplyQueueTab listens for the same event in its own scope.)
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ messageId: string; accountEmail?: string; isUnread: boolean }>).detail;
@@ -1845,8 +1845,8 @@ export default function Dashboard() {
           : m
       ));
     };
-    window.addEventListener('email-read-state', handler);
-    return () => window.removeEventListener('email-read-state', handler);
+    window.addEventListener('email-meta-resolved', handler);
+    return () => window.removeEventListener('email-meta-resolved', handler);
   }, []);
 
   // Advance split preview to next item (used by snooze and other non-handleAction paths)
@@ -4523,13 +4523,18 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
   }, [email]);
 
   useEffect(() => {
-    // Once we know Gmail's true read state, broadcast it so the left-column
-    // cards (InboxTab, ReplyQueueTab, etc.) can refresh their MarkReadButton
-    // label and stay in sync with this pane.
-    const broadcastRead = (resolvedUnread: boolean) => {
+    // Once we know Gmail's true state for this email, broadcast it so the
+    // left-column cards (InboxTab, ReplyQueueTab, etc.) can refresh their
+    // MarkReadButton label and show an attachment indicator.
+    const broadcast = (data: { isUnread?: boolean; attachments?: { attachmentId: string }[] }) => {
       try {
-        window.dispatchEvent(new CustomEvent('email-read-state', {
-          detail: { messageId, accountEmail, isUnread: resolvedUnread },
+        window.dispatchEvent(new CustomEvent('email-meta-resolved', {
+          detail: {
+            messageId,
+            accountEmail,
+            isUnread: data.isUnread ?? true,
+            hasAttachments: !!(data.attachments && data.attachments.length > 0),
+          },
         }));
       } catch {}
     };
@@ -4540,7 +4545,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
       setEmail(cached.data);
       const u = (cached.data as { isUnread?: boolean })?.isUnread ?? true;
       setIsUnread(u);
-      broadcastRead(u);
+      broadcast(cached.data as { isUnread?: boolean; attachments?: { attachmentId: string }[] });
       setLoading(false);
       return;
     }
@@ -4556,7 +4561,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
         setEmail(res.data);
         const u = res.data.isUnread ?? true;
         setIsUnread(u);
-        broadcastRead(u);
+        broadcast(res.data);
         emailContentCache.set(cacheKey, { data: res.data, timestamp: Date.now() });
         setLoading(false);
       } else {
@@ -4567,7 +4572,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
           setEmail(retry.data);
           const u = retry.data.isUnread ?? true;
           setIsUnread(u);
-          broadcastRead(u);
+          broadcast(retry.data);
           emailContentCache.set(cacheKey, { data: retry.data, timestamp: Date.now() });
         } else {
           setEmail(null);
@@ -4919,17 +4924,23 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
   const [loading, setLoading] = useState(true);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<string | null>(null);
-  // Real read state per message — overrides the queue's "everything is unread"
-  // assumption once the right-pane preview resolves the actual Gmail state.
+  // Real read state + attachment presence per message — populated when the
+  // right-pane preview loads the email and resolves Gmail's actual state.
+  // Without this the queue cards would always show "Mark Read" and no
+  // attachment indicator, since the queue table doesn't store either.
   const [readOverrides, setReadOverrides] = useState<Record<string, boolean>>({});
+  const [hasAttachmentsMap, setHasAttachmentsMap] = useState<Record<string, boolean>>({});
   useEffect(() => {
     const handler = (e: Event) => {
-      const d = (e as CustomEvent<{ messageId: string; isUnread: boolean }>).detail;
+      const d = (e as CustomEvent<{ messageId: string; isUnread: boolean; hasAttachments?: boolean }>).detail;
       if (!d) return;
       setReadOverrides(prev => prev[d.messageId] === d.isUnread ? prev : { ...prev, [d.messageId]: d.isUnread });
+      if (typeof d.hasAttachments === 'boolean') {
+        setHasAttachmentsMap(prev => prev[d.messageId] === d.hasAttachments ? prev : { ...prev, [d.messageId]: d.hasAttachments! });
+      }
     };
-    window.addEventListener('email-read-state', handler);
-    return () => window.removeEventListener('email-read-state', handler);
+    window.addEventListener('email-meta-resolved', handler);
+    return () => window.removeEventListener('email-meta-resolved', handler);
   }, []);
   // Drag-and-drop reorder state
   const [dragId, setDragId] = useState<string | null>(null);
@@ -5223,6 +5234,11 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-sm font-medium">{item.subject}</span>
+                        {hasAttachmentsMap[item.message_id] && (
+                          <span title="Has attachment" style={{ color: 'var(--muted)', display: 'inline-flex', alignItems: 'center' }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                          </span>
+                        )}
                         {item.received && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#f1f5f9', color: '#64748b' }}>
                             {new Date(item.received).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
