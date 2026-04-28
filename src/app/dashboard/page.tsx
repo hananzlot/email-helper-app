@@ -455,18 +455,26 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
         {/* Sticky action bar */}
         {email && !loading && (
           <div className="border-t p-3 flex gap-2 flex-wrap items-center" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
-            <button onClick={() => _openCompose?.({
-                to: email.senderEmail, subject: email.subject, threadId: email.threadId, messageId: email.id,
-                accountEmail, onSent: () => onEmailSent?.(),
-              })}
+            <button onClick={() => {
+                _openCompose?.({
+                  mode: 'reply',
+                  to: email.senderEmail, subject: email.subject, threadId: email.threadId, messageId: email.id,
+                  accountEmail, onSent: () => onEmailSent?.(),
+                });
+                onClose();
+              }}
               className="px-4 py-2 text-xs font-semibold rounded-lg text-white transition-transform active:scale-90" style={{ background: 'var(--accent)' }}>
               Reply
             </button>
-            <button onClick={() => _openCompose?.({
-                to: email.senderEmail, subject: email.subject, threadId: email.threadId, messageId: email.id,
-                cc: buildReplyAllCc(email.to, email.cc, email.senderEmail, accountEmail),
-                accountEmail, onSent: () => onEmailSent?.(),
-              })}
+            <button onClick={() => {
+                _openCompose?.({
+                  mode: 'reply',
+                  to: email.senderEmail, subject: email.subject, threadId: email.threadId, messageId: email.id,
+                  cc: buildReplyAllCc(email.to, email.cc, email.senderEmail, accountEmail),
+                  accountEmail, onSent: () => onEmailSent?.(),
+                });
+                onClose();
+              }}
               className="px-3 py-2 text-xs font-semibold rounded-lg transition-transform active:scale-90 border"
               style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
               Reply All
@@ -4484,6 +4492,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
       {/* Action bar */}
       <div className="px-4 py-2 border-b flex gap-1.5 flex-wrap" style={{ borderColor: 'var(--border)', background: '#f8fafc' }}>
         <button onClick={() => _openCompose?.({
+            mode: 'reply',
             to: email.senderEmail, subject: email.subject, threadId: email.threadId, messageId: email.id, accountEmail,
           })}
           className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white"
@@ -4491,6 +4500,7 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
           Reply
         </button>
         <button onClick={() => _openCompose?.({
+            mode: 'reply',
             to: email.senderEmail, subject: email.subject, threadId: email.threadId, messageId: email.id,
             cc: buildReplyAllCc(email.to, email.cc, email.senderEmail, accountEmail), accountEmail,
           })}
@@ -4632,12 +4642,14 @@ function InboxTab({ messages, loading, actionLoading, onAction, onRefresh, showT
                   }}
                 />
                 <button onClick={() => _openCompose?.({
+                    mode: 'reply',
                     to: msg.senderEmail, subject: msg.subject, threadId: msg.threadId, messageId: msg.id,
                     accountEmail: (msg as unknown as Record<string, unknown>).accountEmail as string,
                     onSent: () => onRefresh(),
                   })}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
                 <button onClick={() => _openCompose?.({
+                    mode: 'reply',
                     to: msg.senderEmail, subject: msg.subject, threadId: msg.threadId, messageId: msg.id,
                     cc: buildReplyAllCc(msg.to || '', (msg as any).cc || '', msg.senderEmail, (msg as any).accountEmail),
                     accountEmail: (msg as unknown as Record<string, unknown>).accountEmail as string,
@@ -5104,12 +5116,14 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
                   </div>
                   <div className="flex gap-2 mt-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => _openCompose?.({
+                        mode: 'reply',
                         to: item.sender_email, subject: item.subject, threadId: item.thread_id, messageId: item.message_id,
                         accountEmail: item.account_email,
                         onSent: () => { onAction('markRead', [item.message_id], undefined, item.account_email); showToast('Reply sent & marked as read'); },
                       })}
                       className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
                     <button onClick={() => _openCompose?.({
+                        mode: 'reply',
                         to: item.sender_email, subject: item.subject, threadId: item.thread_id, messageId: item.message_id,
                         cc: buildReplyAllCc(item.to || '', item.cc || '', item.sender_email, item.account_email),
                         accountEmail: item.account_email,
@@ -7318,12 +7332,14 @@ function SearchReviewsTab({ messages, onAction, showToast, onPreview, onDialogPr
               </div>
               <div className="flex gap-2 mt-3 flex-wrap" onClick={(e) => e.stopPropagation()}>
                 <button onClick={() => _openCompose?.({
+                    mode: 'reply',
                     to: msg.senderEmail, subject: msg.subject, threadId: msg.threadId, messageId: msg.id,
                     accountEmail: msg.accountEmail,
                     onSent: () => { onAction('markRead', [msg.id], undefined, msg.accountEmail); showToast('Reply sent & marked as read'); },
                   })}
                   className="px-3 py-1.5 text-xs font-semibold rounded-lg text-white" style={{ background: 'var(--accent)' }}>Reply</button>
                 <button onClick={() => _openCompose?.({
+                    mode: 'reply',
                     to: msg.senderEmail, subject: msg.subject, threadId: msg.threadId, messageId: msg.id,
                     cc: buildReplyAllCc(msg.to || '', msg.cc || '', msg.senderEmail, msg.accountEmail),
                     accountEmail: msg.accountEmail,
