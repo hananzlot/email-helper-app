@@ -2547,29 +2547,31 @@ export default function Dashboard() {
         </div>
 
 
-        {/* Per-account sync progress — horizontal row below badges, overlays without pushing content */}
+        {/* Per-account sync progress — compact badges. On desktop they overlay
+            without pushing content; on mobile they take their own row to avoid
+            covering the search/tab bar below. */}
         {Object.keys(syncProgress).length > 0 && (
-          <div className="flex flex-wrap justify-end gap-2 pointer-events-none" style={{ marginTop: -2, marginBottom: -48, position: 'relative', zIndex: 20 }}>
+          <div className="flex flex-wrap justify-end gap-1.5 pointer-events-none" style={{ marginTop: -2, marginBottom: isMobile ? 6 : -32, position: 'relative', zIndex: 20 }}>
             {Object.entries(syncProgress).map(([email, s]) => {
               const pct = s.total > 0 ? Math.min(100, Math.round((Math.min(s.cached, s.total) / s.total) * 100)) : 0;
               const isComplete = pct >= 100;
               const isSyncing = !s.done && !isComplete;
               return (
-                <div key={email} className="px-3 py-2 rounded-lg border shadow-sm pointer-events-auto" style={{ background: isComplete ? '#f0fdf4' : '#fefce8', borderColor: isComplete ? '#bbf7d0' : '#fde68a', width: 240 }}>
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    {isSyncing && <div className="w-2.5 h-2.5 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
-                    {isComplete && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
-                    {!isSyncing && !isComplete && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>}
-                    <span className="text-xs font-semibold truncate" style={{ color: isComplete ? '#166534' : '#92400e' }}>{email}</span>
+                <div key={email} className="px-2 py-1 rounded-md border shadow-sm pointer-events-auto" style={{ background: isComplete ? '#f0fdf4' : '#fefce8', borderColor: isComplete ? '#bbf7d0' : '#fde68a', width: isMobile ? 150 : 180 }}>
+                  <div className="flex items-center gap-1 mb-0.5">
+                    {isSyncing && <div className="w-2 h-2 border-[1.5px] border-t-transparent rounded-full animate-spin flex-shrink-0" style={{ borderColor: '#f59e0b', borderTopColor: 'transparent' }} />}
+                    {isComplete && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
+                    {!isSyncing && !isComplete && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>}
+                    <span className="text-[10px] font-semibold truncate" style={{ color: isComplete ? '#166534' : '#92400e' }}>{email}</span>
                   </div>
-                  <div className="w-full h-2 rounded-full overflow-hidden mb-1" style={{ background: isComplete ? '#dcfce7' : '#fef3c7' }}>
+                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: isComplete ? '#dcfce7' : '#fef3c7' }}>
                     <div className="h-full rounded-full transition-all duration-1000" style={{ background: isComplete ? '#22c55e' : '#f59e0b', width: `${pct}%` }} />
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold" style={{ color: isComplete ? '#16a34a' : '#92400e' }}>
-                      {Math.min(s.cached, s.total).toLocaleString()} / {s.total.toLocaleString()}
+                  <div className="flex items-center justify-between mt-0.5">
+                    <span className="text-[9px] font-semibold" style={{ color: isComplete ? '#16a34a' : '#92400e' }}>
+                      {Math.min(s.cached, s.total).toLocaleString()}/{s.total.toLocaleString()}
                     </span>
-                    <span className="text-[11px] font-bold" style={{ color: isComplete ? '#16a34a' : '#b45309' }}>
+                    <span className="text-[9px] font-bold" style={{ color: isComplete ? '#16a34a' : '#b45309' }}>
                       {pct}%
                     </span>
                   </div>
@@ -4941,7 +4943,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     count: items.length,
   }));
 
-  // Sort groups: pinned first, then manual order, then priority score (using lead item)
+  // Sort groups: pinned first, then manual order, then newest received date (using lead item)
   const sortedActive = groupedItems.sort((a, b) => {
     const aPinned = pinnedIds.has(a.lead.id) ? 0 : 1;
     const bPinned = pinnedIds.has(b.lead.id) ? 0 : 1;
@@ -4951,7 +4953,7 @@ function ReplyQueueTab({ onAction, showToast, reloadKey, onPreview, onDialogPrev
     if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
     if (aIdx !== -1) return -1;
     if (bIdx !== -1) return 1;
-    return (b.lead.priority_score || 0) - (a.lead.priority_score || 0);
+    return (Date.parse(b.lead.received || '') || 0) - (Date.parse(a.lead.received || '') || 0);
   });
 
   // Track expanded thread groups
