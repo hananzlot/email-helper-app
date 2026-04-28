@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { GmailMessage } from '@/types';
+import type { GmailMessage, GmailAttachment } from '@/types';
 
 // ============ TYPES ============
 
@@ -226,6 +226,115 @@ function sanitizeEmailHtml(html: string): string {
   return s;
 }
 
+// Shared attachments UI: list + click-to-preview overlay. Used by EmailPreviewModal
+// (full-screen) and InlinePreview (split-pane) so both render the same controls.
+function AttachmentsList({ attachments, messageId, accountEmail, showToast }: {
+  attachments: GmailAttachment[] | undefined;
+  messageId: string;
+  accountEmail?: string;
+  showToast: (title: string, subtitle?: string) => void;
+}) {
+  const [attachmentLoading, setAttachmentLoading] = useState<string | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<{ url: string; filename: string; mimeType: string } | null>(null);
+
+  const attachmentIcon = (mime: string) => {
+    if (mime.startsWith('image/')) return '🖼';
+    if (mime.includes('pdf')) return '📄';
+    if (mime.includes('spreadsheet') || mime.includes('excel') || mime.includes('csv')) return '📊';
+    if (mime.includes('document') || mime.includes('word')) return '📝';
+    if (mime.includes('zip') || mime.includes('compressed')) return '📦';
+    return '📎';
+  };
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  async function openAttachment(att: GmailAttachment) {
+    setAttachmentLoading(att.attachmentId);
+    try {
+      const savedAccount = _currentAccount;
+      if (accountEmail && accountEmail !== _currentAccount) setCurrentAccount(accountEmail);
+      const res = await gmailGet('attachment', { id: messageId, attachmentId: att.attachmentId });
+      if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
+      if (!res.success || !res.data?.data) {
+        showToast('Error', 'Could not load attachment');
+        return;
+      }
+      const base64 = res.data.data.replace(/-/g, '+').replace(/_/g, '/');
+      const dataUrl = `data:${att.mimeType};base64,${base64}`;
+      if (att.mimeType.startsWith('image/') || att.mimeType === 'application/pdf') {
+        setPreviewAttachment({ url: dataUrl, filename: att.filename, mimeType: att.mimeType });
+      } else {
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = att.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast('Downloaded', att.filename);
+      }
+    } catch (err) {
+      console.error('Attachment fetch error:', err);
+      showToast('Error', 'Failed to load attachment');
+    } finally {
+      setAttachmentLoading(null);
+    }
+  }
+
+  if (!attachments || attachments.length === 0) return null;
+
+  return (
+    <>
+      <div className="px-5 py-3 border-b" style={{ borderColor: 'var(--border)', background: '#fffbeb' }}>
+        <div className="text-xs font-semibold mb-2" style={{ color: '#92400e' }}>
+          {attachments.length} Attachment{attachments.length > 1 ? 's' : ''}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {attachments.map((att, i) => (
+            <button key={`${att.attachmentId}-${i}`} onClick={() => openAttachment(att)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs text-left hover:shadow-md transition-shadow"
+              style={{ background: 'white', borderColor: '#fbbf24', cursor: 'pointer', opacity: attachmentLoading === att.attachmentId ? 0.6 : 1 }}>
+              <span className="text-base">{attachmentLoading === att.attachmentId ? '⏳' : attachmentIcon(att.mimeType)}</span>
+              <div>
+                <div className="font-medium truncate" style={{ maxWidth: 180 }}>{att.filename}</div>
+                <div style={{ color: 'var(--muted)' }}>{formatSize(att.size)} · Click to {att.mimeType.startsWith('image/') || att.mimeType.includes('pdf') ? 'preview' : 'download'}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+      {previewAttachment && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/60" onClick={() => setPreviewAttachment(null)} />
+          <div className="relative z-10 bg-white rounded-xl shadow-2xl w-full max-w-[95vw] sm:max-w-3xl mx-4 max-h-[85vh] overflow-auto">
+            <div className="sticky top-0 flex items-center justify-between p-3 border-b bg-white rounded-t-xl" style={{ borderColor: 'var(--border)' }}>
+              <span className="font-medium text-sm truncate">{previewAttachment.filename}</span>
+              <div className="flex gap-2">
+                <a href={previewAttachment.url} download={previewAttachment.filename}
+                  className="px-3 py-1 text-xs font-medium rounded-lg text-white" style={{ background: 'var(--accent)' }}>
+                  Download
+                </a>
+                <button onClick={() => setPreviewAttachment(null)} className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>✕</button>
+              </div>
+            </div>
+            <div className="p-4 flex items-center justify-center">
+              {previewAttachment.mimeType.startsWith('image/') ? (
+                <img src={previewAttachment.url} alt={previewAttachment.filename} className="max-w-full max-h-[70vh] rounded-lg" />
+              ) : previewAttachment.mimeType === 'application/pdf' ? (
+                <iframe src={previewAttachment.url} className="w-full rounded-lg" style={{ height: '70vh' }} title={previewAttachment.filename} />
+              ) : (
+                <div className="text-sm py-8" style={{ color: 'var(--muted)' }}>Preview not available for this file type</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToast, onSnooze, onEmailSent }: {
   messageId: string;
   accountEmail?: string;
@@ -315,61 +424,6 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  const [attachmentLoading, setAttachmentLoading] = useState<string | null>(null);
-  const [previewAttachment, setPreviewAttachment] = useState<{ url: string; filename: string; mimeType: string } | null>(null);
-
-  const attachmentIcon = (mime: string) => {
-    if (mime.startsWith('image/')) return '🖼';
-    if (mime.includes('pdf')) return '📄';
-    if (mime.includes('spreadsheet') || mime.includes('excel') || mime.includes('csv')) return '📊';
-    if (mime.includes('document') || mime.includes('word')) return '📝';
-    if (mime.includes('zip') || mime.includes('compressed')) return '📦';
-    return '📎';
-  };
-
-  async function openAttachment(att: { filename: string; mimeType: string; attachmentId: string }) {
-    setAttachmentLoading(att.attachmentId);
-    try {
-      const savedAccount = _currentAccount;
-      if (accountEmail && accountEmail !== _currentAccount) setCurrentAccount(accountEmail);
-      const res = await gmailGet('attachment', { id: messageId, attachmentId: att.attachmentId });
-      if (accountEmail && accountEmail !== savedAccount) setCurrentAccount(savedAccount);
-
-      if (!res.success || !res.data?.data) {
-        showToast('Error', 'Could not load attachment');
-        return;
-      }
-      // Gmail returns base64url — convert to standard base64
-      const base64 = res.data.data.replace(/-/g, '+').replace(/_/g, '/');
-      const dataUrl = `data:${att.mimeType};base64,${base64}`;
-
-      // For images and PDFs, show inline preview
-      if (att.mimeType.startsWith('image/') || att.mimeType === 'application/pdf') {
-        setPreviewAttachment({ url: dataUrl, filename: att.filename, mimeType: att.mimeType });
-      } else {
-        // For other files, trigger download
-        const link = document.createElement('a');
-        link.href = dataUrl;
-        link.download = att.filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        showToast('Downloaded', att.filename);
-      }
-    } catch (err) {
-      console.error('Attachment fetch error:', err);
-      showToast('Error', 'Failed to load attachment');
-    } finally {
-      setAttachmentLoading(null);
-    }
-  }
-
-  const formatSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
@@ -412,27 +466,7 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
                 {email.cc && <div className="text-xs pl-12" style={{ color: 'var(--muted)' }}><span className="font-semibold">Cc:</span> {email.cc}</div>}
               </div>
 
-              {/* Attachments */}
-              {email.attachments && email.attachments.length > 0 && (
-                <div className="px-5 py-3 border-b" style={{ borderColor: 'var(--border)', background: '#fffbeb' }}>
-                  <div className="text-xs font-semibold mb-2" style={{ color: '#92400e' }}>
-                    {email.attachments.length} Attachment{email.attachments.length > 1 ? 's' : ''}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {email.attachments.map((att: any, i: number) => (
-                      <button key={i} onClick={() => openAttachment(att)}
-                        className="flex items-center gap-2 px-3 py-2 rounded-lg border text-xs text-left hover:shadow-md transition-shadow"
-                        style={{ background: 'white', borderColor: '#fbbf24', cursor: 'pointer', opacity: attachmentLoading === att.attachmentId ? 0.6 : 1 }}>
-                        <span className="text-base">{attachmentLoading === att.attachmentId ? '⏳' : attachmentIcon(att.mimeType)}</span>
-                        <div>
-                          <div className="font-medium truncate" style={{ maxWidth: 180 }}>{att.filename}</div>
-                          <div style={{ color: 'var(--muted)' }}>{formatSize(att.size)} · Click to {att.mimeType.startsWith('image/') || att.mimeType.includes('pdf') ? 'preview' : 'download'}</div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <AttachmentsList attachments={email.attachments} messageId={messageId} accountEmail={accountEmail} showToast={showToast} />
 
               {/* Email body */}
               <div className="p-5">
@@ -516,34 +550,6 @@ function EmailPreviewModal({ messageId, accountEmail, onClose, onAction, showToa
           </div>
         )}
       </div>
-
-      {/* Attachment preview overlay */}
-      {previewAttachment && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/60" onClick={() => setPreviewAttachment(null)} />
-          <div className="relative z-10 bg-white rounded-xl shadow-2xl w-full max-w-[95vw] sm:max-w-3xl mx-4 max-h-[85vh] overflow-auto">
-            <div className="sticky top-0 flex items-center justify-between p-3 border-b bg-white rounded-t-xl" style={{ borderColor: 'var(--border)' }}>
-              <span className="font-medium text-sm truncate">{previewAttachment.filename}</span>
-              <div className="flex gap-2">
-                <a href={previewAttachment.url} download={previewAttachment.filename}
-                  className="px-3 py-1 text-xs font-medium rounded-lg text-white" style={{ background: 'var(--accent)' }}>
-                  Download
-                </a>
-                <button onClick={() => setPreviewAttachment(null)} className="px-2 py-1 text-xs rounded-lg border" style={{ borderColor: 'var(--border)' }}>✕</button>
-              </div>
-            </div>
-            <div className="p-4 flex items-center justify-center">
-              {previewAttachment.mimeType.startsWith('image/') ? (
-                <img src={previewAttachment.url} alt={previewAttachment.filename} className="max-w-full max-h-[70vh] rounded-lg" />
-              ) : previewAttachment.mimeType === 'application/pdf' ? (
-                <iframe src={previewAttachment.url} className="w-full rounded-lg" style={{ height: '70vh' }} title={previewAttachment.filename} />
-              ) : (
-                <div className="text-sm py-8" style={{ color: 'var(--muted)' }}>Preview not available for this file type</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Delete confirmation */}
       {confirmDelete && (
@@ -4555,6 +4561,8 @@ function InlinePreview({ messageId, accountEmail, onAction, showToast }: {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
         </button>
       </div>
+
+      <AttachmentsList attachments={email.attachments} messageId={messageId} accountEmail={accountEmail} showToast={showToast} />
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
