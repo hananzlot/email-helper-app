@@ -605,7 +605,11 @@ function ThreadView({
   // matching queue items from the Important list so the thread doesn't
   // linger there once the user has handled it. Opening a thread does NOT
   // auto-mark it read — that's only ever a user action.
-  onMessagesRead?: (messageIds: string[]) => void;
+  // threadId is passed alongside messageIds because the queue's stored
+  // message_id occasionally doesn't match any of the just-fetched thread's
+  // message IDs (older queue rows, server-side thread reshuffling), so the
+  // parent uses thread_id as a fallback match.
+  onMessagesRead?: (messageIds: string[], threadId: string) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState<GmailMessage[]>([]);
@@ -659,7 +663,7 @@ function ThreadView({
         const next = new Map(unreadOverride);
         for (const id of ids) next.set(id, kind === 'markUnread');
         setUnreadOverride(next);
-        if (kind === 'markRead') onMessagesRead?.(ids);
+        if (kind === 'markRead') onMessagesRead?.(ids, threadId);
       } else {
         onClose();
       }
@@ -1431,11 +1435,15 @@ export default function MobilePage() {
   // mark their queue rows done server-side so they don't reappear on reload.
   // Also records a snapshot of each removed item in the Recent-read list
   // (local-only) so the user can get back to something they cleared by mistake.
-  const markImportantDone = useCallback((messageIds: string[]) => {
+  const markImportantDone = useCallback((messageIds: string[], threadId?: string) => {
     const ids = new Set(messageIds);
-    const toRemove = important.filter(q => ids.has(q.message_id));
+    // Match by message_id first, fall back to thread_id so queue rows whose
+    // stored message_id is no longer in the just-fetched thread (older rows,
+    // server-side thread reshuffling) still get cleared.
+    const matches = (q: QueueItem) => ids.has(q.message_id) || (!!threadId && q.thread_id === threadId);
+    const toRemove = important.filter(matches);
     if (toRemove.length === 0) return;
-    setImportant(p => p.filter(q => !ids.has(q.message_id)));
+    setImportant(p => p.filter(q => !matches(q)));
     for (const q of toRemove) {
       api('queue', { method: 'PUT', body: { message_id: q.message_id, status: 'done' } }).catch(() => {});
     }
