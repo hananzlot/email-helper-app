@@ -694,7 +694,7 @@ function ThreadView({
         {loading && <div className="state">Loading thread…</div>}
         {error && <div className="state error">{error}</div>}
         {!loading && !error && messages.map((m, idx) => (
-          <ThreadMessage key={m.id} msg={m} expanded={idx === messages.length - 1} />
+          <ThreadMessage key={m.id} msg={m} account={account} expanded={idx === messages.length - 1} />
         ))}
       </div>
       {!loading && !error && last && (
@@ -708,10 +708,39 @@ function ThreadView({
   );
 }
 
-function ThreadMessage({ msg, expanded: initialExpanded }: { msg: GmailMessage; expanded: boolean }) {
+function ThreadMessage({ msg, account, expanded: initialExpanded }: { msg: GmailMessage; account: string; expanded: boolean }) {
   const [open, setOpen] = useState(initialExpanded);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [previewAtt, setPreviewAtt] = useState<{ url: string; filename: string; mimeType: string } | null>(null);
   const name = fallbackName(msg.sender, msg.senderEmail);
   const html = msg.bodyHtml || (msg.body ? plainToHtml(msg.body) : msg.snippet || '');
+  const attachments = msg.attachments || [];
+  const fmtSize = (b: number) => b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`;
+
+  async function openAttachment(att: { filename: string; mimeType: string; attachmentId: string }) {
+    setBusyId(att.attachmentId);
+    try {
+      const res = await api<{ data?: string }>(`gmail?action=attachment&id=${encodeURIComponent(msg.id)}&attachmentId=${encodeURIComponent(att.attachmentId)}`, { account });
+      if (!res.data) return;
+      const base64 = res.data.replace(/-/g, '+').replace(/_/g, '/');
+      const dataUrl = `data:${att.mimeType};base64,${base64}`;
+      if (att.mimeType.startsWith('image/') || att.mimeType === 'application/pdf') {
+        setPreviewAtt({ url: dataUrl, filename: att.filename, mimeType: att.mimeType });
+      } else {
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = att.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    } catch {
+      // Surface as a no-op to keep the UI from getting stuck
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div className="tmsg">
       <div className="tmsg-head" onClick={() => setOpen(o => !o)}>
@@ -721,13 +750,44 @@ function ThreadMessage({ msg, expanded: initialExpanded }: { msg: GmailMessage; 
         <div className="tmsg-meta">
           <div className="tmsg-from"><strong>{name}</strong> <span className="muted">&lt;{msg.senderEmail}&gt;</span></div>
           <div className="muted small">to {msg.to || 'me'}</div>
+          {msg.cc && <div className="muted small">cc {msg.cc}</div>}
+          {msg.bcc && <div className="muted small">bcc {msg.bcc}</div>}
         </div>
         <div className="muted small">{formatDate(msg.date)}</div>
       </div>
       {open ? (
-        <div className="tmsg-body" dangerouslySetInnerHTML={{ __html: html }} />
+        <>
+          {attachments.length > 0 && (
+            <div className="tmsg-atts">
+              {attachments.map((att, i) => (
+                <button key={`${att.attachmentId}-${i}`} className="tmsg-att" onClick={() => openAttachment(att)} disabled={busyId === att.attachmentId}>
+                  <span className="tmsg-att-icon">{busyId === att.attachmentId ? '⏳' : '📎'}</span>
+                  <span className="tmsg-att-name">{att.filename}</span>
+                  <span className="tmsg-att-size muted small">{fmtSize(att.size)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="tmsg-body" dangerouslySetInnerHTML={{ __html: html }} />
+        </>
       ) : (
         <div className="tmsg-snippet">{msg.snippet}</div>
+      )}
+      {previewAtt && (
+        <div className="att-preview" onClick={() => setPreviewAtt(null)}>
+          <div className="att-preview-bar">
+            <span className="att-preview-name">{previewAtt.filename}</span>
+            <a href={previewAtt.url} download={previewAtt.filename} onClick={(e) => e.stopPropagation()}>Download</a>
+            <button onClick={(e) => { e.stopPropagation(); setPreviewAtt(null); }}>✕</button>
+          </div>
+          <div className="att-preview-body" onClick={(e) => e.stopPropagation()}>
+            {previewAtt.mimeType.startsWith('image/') ? (
+              <img src={previewAtt.url} alt={previewAtt.filename} />
+            ) : previewAtt.mimeType === 'application/pdf' ? (
+              <iframe src={previewAtt.url} title={previewAtt.filename} />
+            ) : null}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -2022,6 +2082,35 @@ const styles = `
   font-size: 14px; line-height: 1.5; margin-top: 12px;
   word-break: break-word; overflow-wrap: break-word;
 }
+.tmsg-atts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.tmsg-att {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 8px;
+  background: #fffbeb; border: 1px solid #fde68a;
+  color: #92400e; font-size: 12px;
+  max-width: 100%; cursor: pointer;
+}
+.tmsg-att:disabled { opacity: 0.6; }
+.tmsg-att-icon { font-size: 14px; flex-shrink: 0; }
+.tmsg-att-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.tmsg-att-size { flex-shrink: 0; }
+.att-preview {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.85);
+  display: flex; flex-direction: column;
+}
+.att-preview-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: env(safe-area-inset-top) 12px 0 12px;
+  height: calc(env(safe-area-inset-top) + 48px);
+  background: #1f2937; color: white; flex-shrink: 0;
+}
+.att-preview-name { flex: 1; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-preview-bar a { color: #93c5fd; font-size: 14px; text-decoration: underline; }
+.att-preview-bar button { background: transparent; border: none; color: white; font-size: 18px; padding: 4px 10px; }
+.att-preview-body { flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px; }
+.att-preview-body img { max-width: 100%; max-height: 100%; border-radius: 6px; }
+.att-preview-body iframe { width: 100%; height: 100%; border: none; background: white; border-radius: 6px; }
 .tmsg-body img { max-width: 100%; height: auto; }
 .tmsg-body table { max-width: 100%; }
 

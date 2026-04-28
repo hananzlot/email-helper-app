@@ -46,6 +46,7 @@ export interface GmailMessage {
   isUnread: boolean;
   to?: string;
   cc?: string;
+  bcc?: string;
   attachments?: GmailAttachment[];
   accountEmail?: string; // Which account this message belongs to (for unified view)
 }

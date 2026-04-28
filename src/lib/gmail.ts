@@ -204,6 +204,7 @@ export async function getMessage(
     bodyHtml,
     to: decodeHeader(getHeader('To')),
     cc: decodeHeader(getHeader('Cc')),
+    bcc: decodeHeader(getHeader('Bcc')),
     date: getHeader('Date'),
     labelIds: msg.labelIds || [],
     isUnread: (msg.labelIds || []).includes('UNREAD'),
